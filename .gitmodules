@@ -1,5 +1,5 @@
-[submodule "py-transcriptor-ai"]
-	path = py-transcriptor-ai
+[submodule "3rd-party/py-transcriptor-ai"]
+	path = 3rd-party/py-transcriptor-ai
 	url = https://github.com/paulocoutinhox/py-transcriptor-ai.git
 [submodule "3rd-party/py_fso"]
 	path = 3rd-party/py_fso

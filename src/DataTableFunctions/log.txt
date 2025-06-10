@@ -1,46 +1,0 @@
-2024-08-04 21:27:55,686 : Test_SumHierarchy_LargeTestCase.py : <module> : 35 : INFO : Starting test_hierarchical_sum.
-2024-08-04 21:27:55,809 : Test_SumHierarchy_LargeTestCase.py : test_hierarchical_sum : 28 : INFO : Entering block: Fcn_SumHierarchy_BubbleUp_SplitTables
-Summarizing Hierarchy:   0%|          | 0/100 [00:00<?, ?it/s]2024-08-04 21:27:55,922 : lib_progressBar.py : wrapper : 63 : INFO : Entering block: Fcn_SumHierarchy_BubbleUp
-2024-08-04 21:27:55,927 : lib_SumHierarchy_BubbleUp.py : Fcn_SumHierarchy_BubbleUp : 183 : INFO : Entering block: remove_circular_dependencies
-2024-08-04 21:27:57,921 : lib_SumHierarchy_BubbleUp.py : Fcn_SumHierarchy_BubbleUp : 183 : DEBUG : Circular loops DataFrame:
-    ParentKey    ChildKey
-0   PORT-5905  CPM-221809
-1  CPM-221809   PORT-5905
-2   PORT-5054  CPM-202858
-3  CPM-202858   PORT-5054
-6  CPM-196001  CPM-196008
-7  CPM-196008  CPM-196001
-8  CPM-196001  CPM-196005
-9  CPM-196005  CPM-196001
-2024-08-04 21:27:57,930 : lib_SumHierarchy_BubbleUp.py : Fcn_SumHierarchy_BubbleUp : 183 : INFO : Exiting block: remove_circular_dependencies
-2024-08-04 21:27:57,930 : lib_SumHierarchy_BubbleUp.py : Fcn_SumHierarchy_BubbleUp : 186 : INFO : Entering block: add_sum_columns
-2024-08-04 21:27:57,935 : lib_SumHierarchy_BubbleUp.py : Fcn_SumHierarchy_BubbleUp : 186 : INFO : Exiting block: add_sum_columns
-
-Progress:   0%|          | 0/35924 [00:00<?, ?it/s][A2024-08-04 21:27:57,938 : lib_SumHierarchy_BubbleUp.py : Fcn_SumHierarchy_BubbleUp : 198 : INFO : Entering block: select_nodes_to_process
-2024-08-04 21:27:58,704 : lib_SumHierarchy_BubbleUp.py : Fcn_SumHierarchy_BubbleUp : 198 : INFO : Exiting block: select_nodes_to_process
-2024-08-04 21:27:58,707 : lib_SumHierarchy_BubbleUp.py : Fcn_SumHierarchy_BubbleUp : 203 : INFO : Entering block: sum_to_parent
-2024-08-04 21:27:58,734 : lib_SumHierarchy_BubbleUp.py : Fcn_SumHierarchy_BubbleUp : 203 : INFO : Exiting block: sum_to_parent
-2024-08-04 21:27:58,752 : lib_SumHierarchy_BubbleUp.py : Fcn_SumHierarchy_BubbleUp : 209 : INFO : Entering block: update_state_table_with_results
-2024-08-04 21:30:27,423 : lib_SumHierarchy_BubbleUp.py : Fcn_SumHierarchy_BubbleUp : 209 : INFO : Exiting block: update_state_table_with_results
-
-Progress:  28%|██▊       | 10189/35924 [02:29<06:17, 68.16it/s][A2024-08-04 21:30:27,433 : lib_SumHierarchy_BubbleUp.py : Fcn_SumHierarchy_BubbleUp : 198 : INFO : Entering block: select_nodes_to_process
-2024-08-04 21:30:27,680 : lib_SumHierarchy_BubbleUp.py : Fcn_SumHierarchy_BubbleUp : 198 : INFO : Exiting block: select_nodes_to_process
-2024-08-04 21:30:27,684 : lib_SumHierarchy_BubbleUp.py : Fcn_SumHierarchy_BubbleUp : 203 : INFO : Entering block: sum_to_parent
-2024-08-04 21:30:27,706 : lib_SumHierarchy_BubbleUp.py : Fcn_SumHierarchy_BubbleUp : 203 : INFO : Exiting block: sum_to_parent
-2024-08-04 21:30:27,752 : lib_SumHierarchy_BubbleUp.py : Fcn_SumHierarchy_BubbleUp : 209 : INFO : Entering block: update_state_table_with_results
-
-Progress:  28%|██▊       | 10189/35924 [02:48<06:17, 68.16it/s][A2024-08-04 21:31:18,357 : lib_SumHierarchy_BubbleUp.py : Fcn_SumHierarchy_BubbleUp : 209 : INFO : Exiting block: update_state_table_with_results
-
-Progress:  41%|████      | 14578/35924 [03:20<04:48, 74.06it/s][A2024-08-04 21:31:18,361 : lib_SumHierarchy_BubbleUp.py : Fcn_SumHierarchy_BubbleUp : 198 : INFO : Entering block: select_nodes_to_process
-2024-08-04 21:31:18,519 : lib_SumHierarchy_BubbleUp.py : Fcn_SumHierarchy_BubbleUp : 198 : INFO : Exiting block: select_nodes_to_process
-2024-08-04 21:31:18,522 : lib_SumHierarchy_BubbleUp.py : Fcn_SumHierarchy_BubbleUp : 203 : INFO : Entering block: sum_to_parent
-2024-08-04 21:31:18,529 : lib_SumHierarchy_BubbleUp.py : Fcn_SumHierarchy_BubbleUp : 203 : INFO : Exiting block: sum_to_parent
-2024-08-04 21:31:18,566 : lib_SumHierarchy_BubbleUp.py : Fcn_SumHierarchy_BubbleUp : 209 : INFO : Entering block: update_state_table_with_results
-2024-08-04 21:31:18,672 : lib_SumHierarchy_BubbleUp.py : Fcn_SumHierarchy_BubbleUp : 209 : INFO : Exiting block: update_state_table_with_results
-2024-08-04 21:31:18,673 : lib_SumHierarchy_BubbleUp.py : Fcn_SumHierarchy_BubbleUp : 198 : INFO : Entering block: select_nodes_to_process
-2024-08-04 21:31:18,822 : lib_SumHierarchy_BubbleUp.py : Fcn_SumHierarchy_BubbleUp : 198 : INFO : Exiting block: select_nodes_to_process
-
-Progress: 100%|██████████| 35924/35924 [03:20<00:00, 268.92it/s][AProgress: 100%|██████████| 35924/35924 [03:20<00:00, 178.83it/s]
-2024-08-04 21:31:18,824 : lib_progressBar.py : wrapper : 63 : INFO : Exiting block: Fcn_SumHierarchy_BubbleUp
-Summarizing Hierarchy: 100%|██████████| 100/100 [03:22<00:00,  2.03s/it]Summarizing Hierarchy: 100%|██████████| 100/100 [03:22<00:00,  2.03s/it]
-2024-08-04 21:31:18,826 : Test_SumHierarchy_LargeTestCase.py : test_hierarchical_sum : 28 : INFO : Exiting block: Fcn_SumHierarchy_BubbleUp_SplitTables
