@@ -134,4 +134,15 @@ Archive/
 .abstra/
 .cursorignore
 .cursorindexingignore
+=======
+# Do not include greptile, which is from a non-github repo
+*greptile*
+*.bak
+
+# Optional: ignore all dotfiles (be careful!)
+# .*
+
+# =======================
+# End of Python .gitignore
+# =======================
 
