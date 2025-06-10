@@ -1,0 +1,8 @@
+[MESSAGES CONTROL]
+disable=C0114,  ; missing module docstring
+        C0115,  ; missing class docstring
+        C0116,  ; missing function docstring
+        W1514,  ; requests without timeout
+        W1518,  ; open() without encoding
+        C0103,  ; variable name doesn't conform to snake_case
+        R0903   ; too few public methods

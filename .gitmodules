@@ -1,0 +1,9 @@
+[submodule "py-transcriptor-ai"]
+	path = py-transcriptor-ai
+	url = https://github.com/paulocoutinhox/py-transcriptor-ai.git
+[submodule "3rd-party/py_fso"]
+	path = 3rd-party/py_fso
+	url = https://github.com/JustMisha/py_fso.git
+[submodule "3rd-party/jiaaro-pydub-996cec4"]
+	path = 3rd-party/jiaaro-pydub-996cec4
+	url = https://github.com/jiaaro/pydub.git

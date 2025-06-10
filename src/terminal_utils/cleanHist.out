@@ -1,0 +1,121 @@
+SKIP [2477]: 'ff "*.part" . | rn --dry-run "$.webm"' — reason: regex '.*webm', timestamp: 1710013762
+SKIP [2480]: 'ff "*.part" . | rn --dry-run -m "$" -re ".webm"' — reason: regex '.*webm', timestamp: 1710013802
+SKIP [6511]: './test_genFilesDirs.py -td test1 -md 2 -nf 10 -nd 0 -e .png .mp3 .webm' — reason: regex '.*webm', timestamp: 1723220599
+SKIP [6705]: './gen_random_files_dirs.py -topDir test2 -maxDepth 1 -filePerDir 10 -subDirsPerDir 0 -extensions .png .mp4 .webm --special-chars' — reason: regex '.*webm', timestamp: 1723230884
+SKIP [6707]: './gen_random_files_dirs.py -topDir tests/test2 -maxDepth 1 -filesPerDir 10 -subDirsPerDir 0 -extensions .png .mp4 .webm --special-chars' — reason: regex '.*webm', timestamp: 1723230962
+SKIP [6709]: './gen_random_files_dirs.py --topDir tests/test2 --maxDepth 1 --filesPerDir 10 --subDirsPerDir 0 --extensions .png .mp4 .webm --special-chars' — reason: regex '.*webm', timestamp: 1723230993
+SKIP [7706]: 'file \[F4M\]\ Mum\!\ He\ Cloned\ Me\ Again\!\ \[Age\]\[Incest\]\[Reluctance\]\[SciFi\]\[Send\ in\ the\ Clones\].webm ' — reason: regex '.*webm', timestamp: 1726213312
+SKIP [7708]: 'mv \[F4M\]\ Mum\!\ He\ Cloned\ Me\ Again\!\ \[Age\]\[Incest\]\[Reluctance\]\[SciFi\]\[Send\ in\ the\ Clones\].webm test1' — reason: regex '.*webm', timestamp: 1726213329
+SKIP [8961]: './transcribe.py /Volumes/docker-Win11/Lectures/CHS3030/sn-hb-bj_sn_Grl_Hbphl_.webm ' — reason: regex '.*webm', timestamp: 1744003807
+SKIP [8969]: './transcribe.py /Volumes/docker-Win11/Lectures/CHS3030/sn-hb-bj_sn_Grl_Hbphl_.webm ' — reason: regex '.*webm', timestamp: 1744003866
+SKIP [11041]: 'popd +2' — reason: timestamp >= 1749500400, timestamp: 1749500408
+SKIP [11043]: 'popd +2' — reason: timestamp >= 1749500400, timestamp: 1749500410
+SKIP [11045]: 'cd /Volumes/docker-Win11/Lectures/MAT1010' — reason: timestamp >= 1749500400, timestamp: 1749500420
+SKIP [11047]: '~/bin/python/scripts/rn -f "^(._)(.*)" -r "0{$1}{$2}" ' — reason: timestamp >= 1749500400, timestamp: 1749500433
+SKIP [11049]: 'cd /Volumes/docker-Win11/Lectures/MAT1010/' — reason: timestamp >= 1749500400, timestamp: 1749500458
+SKIP [11051]: '~/bin/python/scripts/rn -f "^(._)(.*)" -r "0{$1}{$2}" ' — reason: timestamp >= 1749500400, timestamp: 1749500463
+SKIP [11053]: '~/bin/python/scripts/rn -f "^(._)(.*)" -r "0$1$2" ' — reason: timestamp >= 1749500400, timestamp: 1749500474
+SKIP [11055]: '~/bin/python/scripts/rn -f "^(._)(.*)" -r '0{$1}{$2}'' — reason: timestamp >= 1749500400, timestamp: 1749500489
+SKIP [11057]: '~/bin/python/scripts/rn -f "^(._)(.*)" -r '0{$1}{$2}' -x' — reason: timestamp >= 1749500400, timestamp: 1749500500
+SKIP [11061]: 'rn' — reason: timestamp >= 1749500400, timestamp: 1749500789
+SKIP [11063]: 'rn -f '(^..)\ (.*)' -r '$1_$2'' — reason: timestamp >= 1749500400, timestamp: 1749500841
+SKIP [11065]: 'rn -f '(^..)\ (.*)' -r '$1_$2$3'' — reason: timestamp >= 1749500400, timestamp: 1749500883
+SKIP [11067]: 'rn -f '(^..)\ (.*)' -r '$1_$3'' — reason: timestamp >= 1749500400, timestamp: 1749500921
+SKIP [11069]: 'rn -f '(^..)(\ )(.*)' -r '$1_$3'' — reason: timestamp >= 1749500400, timestamp: 1749500940
+SKIP [11071]: 'rn -f '(^..)\ (.*)' -r '$1_$3' -x' — reason: timestamp >= 1749500400, timestamp: 1749500952
+SKIP [11073]: 'rn -f '(^..)(\ )(.*)' -r '$1_$3' -x' — reason: timestamp >= 1749500400, timestamp: 1749500958
+SKIP [11075]: 'rn --undo' — reason: timestamp >= 1749500400, timestamp: 1749500973
+SKIP [11077]: 'rn --undo' — reason: timestamp >= 1749500400, timestamp: 1749500982
+SKIP [11079]: 'cd   /Volumes/docker-Win11/Lectures/ENG3020/' — reason: timestamp >= 1749500400, timestamp: 1749501015
+SKIP [11081]: 'mv Brsl-pdmm-sckng-sns-dck_By_Hbphl_Sftcr_.webm 01_Brsl-pdmm-sckng-sns-dck_By_Hbphl_Sftcr_.webm ' — reason: timestamp >= 1749500400, timestamp: 1749501033
+SKIP [11083]: 'mv cmpltn_.webm 01_cmpltn_.webm ' — reason: timestamp >= 1749500400, timestamp: 1749501045
+SKIP [11085]: 'mv ltn-pdmm-nd-by_By_Hrdcr_Hspnc.webm 01_ltn-pdmm-nd-by_By_Hrdcr_Hspnc.webm ' — reason: timestamp >= 1749500400, timestamp: 1749501061
+SKIP [11087]: 'mv pdmm-gvs-sn--blwjb_By.webm 01_pdmm-gvs-sn--blwjb_By.webm ' — reason: timestamp >= 1749500400, timestamp: 1749501074
+SKIP [11089]: 'mv tn-cmp_By_Hspnc.85GxfP.webm.prt.webm 01_tn-cmp_By_Hspnc.85GxfP.webm.prt.webm ' — reason: timestamp >= 1749500400, timestamp: 1749501085
+SKIP [11091]: 'mv Frnd-hndjb-frnd_By_Hbphl_Wht_.webm 02_Frnd-hndjb-frnd_By_Hbphl_Wht_.webm ' — reason: timestamp >= 1749500400, timestamp: 1749501095
+SKIP [11093]: 'mv Pdmm-sckng-hr-5-yr-ld-kd-whl-hr-hsbnd-fcks-hr_sn_By_Hrdcr.webm 02_Pdmm-sckng-hr-5-yr-ld-kd-whl-hr-hsbnd-fcks-hr_sn_By_Hrdcr.webm ' — reason: timestamp >= 1749500400, timestamp: 1749501117
+SKIP [11095]: 'mv Sstr-scks-yngr-lttl-brthr_By.webm 02_Sstr-scks-yngr-lttl-brthr_By.webm ' — reason: timestamp >= 1749500400, timestamp: 1749501126
+SKIP [11097]: 'mv Wbcm-grl-mstrbts-ll-brthr_.webm 02_Wbcm-grl-mstrbts-ll-brthr_.webm ' — reason: timestamp >= 1749500400, timestamp: 1749501138
+SKIP [11099]: 'mv fmly-bj_Grl_Hrdcr_Hbphl_Wht_.webm 02_fmly-bj_Grl_Hrdcr_Hbphl_Wht_.webm ' — reason: timestamp >= 1749500400, timestamp: 1749501147
+SKIP [11101]: 'mv ncst_Grl_Hspnc_Npphl_Sftcr_.webm 02_ncst_Grl_Hspnc_Npphl_Sftcr_.webm ' — reason: timestamp >= 1749500400, timestamp: 1749501165
+SKIP [11103]: 'mv sstr-scks-brthrs-dck_By_Hrdcr_Hbphl_.webm 02_sstr-scks-brthrs-dck_By_Hrdcr_Hbphl_.webm ' — reason: timestamp >= 1749500400, timestamp: 1749501180
+SKIP [11105]: 'mv tn-sckng-lttll-brthr_By_Mxd.webm 02_tn-sckng-lttll-brthr_By_Mxd.webm ' — reason: timestamp >= 1749500400, timestamp: 1749501191
+SKIP [11107]: 'mv Mm-mlks-hr-By_By_Hrdcr_Hbphl_Wht_.webm 03_Mm-mlks-hr-By_By_Hrdcr_Hbphl_Wht_.webm ' — reason: timestamp >= 1749500400, timestamp: 1749501201
+SKIP [11109]: 'cd ~/bin/python/src/' — reason: timestamp >= 1749500400, timestamp: 1749501213
+SKIP [11111]: 'cd file_utils/' — reason: timestamp >= 1749500400, timestamp: 1749501217
+SKIP [11113]: 'cd ..' — reason: timestamp >= 1749500400, timestamp: 1749501230
+SKIP [11115]: 'ls terminal_utils/' — reason: timestamp >= 1749500400, timestamp: 1749501232
+SKIP [11117]: 'cd terminal_utils/' — reason: timestamp >= 1749500400, timestamp: 1749501236
+SKIP [11119]: './cleanhist.py ' — reason: timestamp >= 1749500400, timestamp: 1749501240
+SKIP [11121]: './cleanhist.py --help' — reason: timestamp >= 1749500400, timestamp: 1749501252
+SKIP [11123]: './cleanhist.py -h' — reason: timestamp >= 1749500400, timestamp: 1749501257
+SKIP [11125]: './cleanhist.py -?' — reason: timestamp >= 1749500400, timestamp: 1749501261
+SKIP [11127]: 'vi cleanhist.py ' — reason: timestamp >= 1749500400, timestamp: 1749501263
+SKIP [11129]: 'cat cleanhist.py | pbcopy' — reason: timestamp >= 1749500400, timestamp: 1749501330
+SKIP [11131]: 'vi cleanhist.py ' — reason: timestamp >= 1749500400, timestamp: 1749501455
+SKIP [11133]: 'cp cleanhist.py cleanhist.py.bak' — reason: timestamp >= 1749500400, timestamp: 1749501467
+SKIP [11135]: 'vi cleanhist.py' — reason: timestamp >= 1749500400, timestamp: 1749501469
+SKIP [11137]: './cleanhist.py --help' — reason: timestamp >= 1749500400, timestamp: 1749501536
+SKIP [11139]: './cleanhist.py -h' — reason: timestamp >= 1749500400, timestamp: 1749501544
+SKIP [11141]: './cleanhist.py -?' — reason: timestamp >= 1749500400, timestamp: 1749501548
+SKIP [11143]: 'vi cleanhist.py' — reason: timestamp >= 1749500400, timestamp: 1749501575
+SKIP [11145]: 'vi cleanhist.py' — reason: timestamp >= 1749500400, timestamp: 1749501626
+SKIP [11147]: './cleanhist.py --help' — reason: timestamp >= 1749500400, timestamp: 1749501817
+SKIP [11149]: './cleanhist.py --help' — reason: timestamp >= 1749500400, timestamp: 1749501868
+SKIP [11151]: './cleanhist.py ~/.bash_history -s "2025-06-09 16:20" -r "*webm"' — reason: timestamp >= 1749500400, timestamp: 1749501962
+SKIP [11153]: 'vi cleanhist.py' — reason: timestamp >= 1749500400, timestamp: 1749501971
+SKIP [11155]: './cleanhist.py ~/.bash_history -s "2025-06-09 16:20" -r "*webm"' — reason: timestamp >= 1749500400, timestamp: 1749501988
+SKIP [11157]: './cleanhist.py ~/.bash_history -s "2025-06-09 16:20" -r ".*webm"' — reason: timestamp >= 1749500400, timestamp: 1749502030
+SKIP [11159]: './cleanhist.py --help' — reason: timestamp >= 1749500400, timestamp: 1749502059
+SKIP [11161]: './cleanhist.py ~/.bash_history -s 2025-06-09 16:20 -r '.*webm'' — reason: timestamp >= 1749500400, timestamp: 1749502083
+SKIP [11163]: './cleanhist.py ~/.bash_history -s '2025-06-09 16:20' -r '.*webm'' — reason: timestamp >= 1749500400, timestamp: 1749502095
+SKIP [11165]: 'h | wc -l' — reason: timestamp >= 1749500400, timestamp: 1749502104
+SKIP [11167]: './cleanhist.py ~/.bash_history -s '2025-06-09 16:20' -r '.*webm'' — reason: timestamp >= 1749500400, timestamp: 1749502121
+SKIP [11169]: './cleanhist.py ~/.bash_history -s '2025-06-09 16:20' -r '.*webm'' — reason: timestamp >= 1749500400, timestamp: 1749502131
+SKIP [11171]: 'h | wc -l' — reason: timestamp >= 1749500400, timestamp: 1749502136
+SKIP [11173]: 'cat cleanhist.py | pbcopy' — reason: timestamp >= 1749500400, timestamp: 1749502167
+SKIP [11175]: 'vi cleanhist.py' — reason: timestamp >= 1749500400, timestamp: 1749507898
+SKIP [11177]: './cleanhist.py --help' — reason: timestamp >= 1749500400, timestamp: 1749507916
+SKIP [11179]: './cleanhist.py -s '2025-06-09 16:20' -r ".*webm"' — reason: timestamp >= 1749500400, timestamp: 1749507979
+SKIP [11181]: './cleanhist.py -s "2025-06-09 16:20" -r ".*webm"' — reason: timestamp >= 1749500400, timestamp: 1749507992
+SKIP [11183]: '/usr/bin/python3 /Users/shawnhillis/.vscode/extensions/ms-python.python-2025.6.1-darwin-arm64/python_files/printEnvVariablesToFile.py /Users/shawnhillis/.vscode/extensions/ms-python.python-2025.6.1-darwin-arm64/python_files/deactivate/bash/envVars.txt' — reason: timestamp >= 1749500400, timestamp: 1749508042
+SKIP [11185]: 'cd src/terminal_utils/' — reason: timestamp >= 1749500400, timestamp: 1749508123
+SKIP [11187]: './cleanhist.py -s "2025-06-09 16:20" -r ".*webm"' — reason: timestamp >= 1749500400, timestamp: 1749508131
+SKIP [11189]: 'printenv > "/var/folders/ct/0srshfq13pl0dj7jlf9hd4g40000gp/T/tmp-539984N3xRqBX5eco.txt"' — reason: timestamp >= 1749500400, timestamp: 1749508186
+SKIP [11191]: './cleanhist.py -s "2025-06-09 16:20" -r ".*webm"' — reason: timestamp >= 1749500400, timestamp: 1749508301
+SKIP [11193]: 'h | wc -l' — reason: timestamp >= 1749500400, timestamp: 1749508314
+SKIP [11195]: './cleanhist.py -s "2025-06-09 16:20" -r ".*webm" | tee cleanHist.out' — reason: timestamp >= 1749500400, timestamp: 1749508348
+SKIP [11197]: 'vi cleanHist.out ' — reason: timestamp >= 1749500400, timestamp: 1749508357
+SKIP [11199]: 'cat cleanHist.out | wc -l' — reason: timestamp >= 1749500400, timestamp: 1749508380
+SKIP [11201]: './cleanhist.py -s "2025-06-09 16:20" -r ".*webm" | tee cleanHist.out' — reason: timestamp >= 1749500400, timestamp: 1749508591
+SKIP [11203]: './cleanhist.py -s "2025-06-09 16:20" -r ".*webm" ' — reason: timestamp >= 1749500400, timestamp: 1749509140
+SKIP [11205]: './cleanhist.py -s "2025-06-09 16:20" -r ".*webm" --remove-duplicates' — reason: timestamp >= 1749500400, timestamp: 1749509196
+SKIP [11207]: './cleanhist.py -s "2025-06-09 16:20" -r ".*webm" ' — reason: timestamp >= 1749500400, timestamp: 1749509314
+SKIP [11209]: 'h | more' — reason: timestamp >= 1749500400, timestamp: 1749509440
+SKIP [11211]: 'h | egpep "-06-09 16"' — reason: timestamp >= 1749500400, timestamp: 1749509469
+SKIP [11213]: 'h | egrep "-06-09 16"' — reason: timestamp >= 1749500400, timestamp: 1749509473
+SKIP [11215]: 'h | egrep "\-06\-09 16"' — reason: timestamp >= 1749500400, timestamp: 1749509482
+SKIP [11217]: 'h | egrep "\-06\-09 16" | wc -l' — reason: timestamp >= 1749500400, timestamp: 1749509497
+SKIP [11219]: 'h | egrep -v "\-06\-09 16" | wc -l' — reason: timestamp >= 1749500400, timestamp: 1749509503
+SKIP [11221]: 'h | egrep -v "\-06\-09 16|ls|pwd|clear|exit|cd"' — reason: timestamp >= 1749500400, timestamp: 1749509603
+SKIP [11223]: 'h | egrep -v "\-06\-09 16|ls|pwd|clear|exit|cd" | wc -l' — reason: timestamp >= 1749500400, timestamp: 1749509608
+SKIP [11225]: 'h | egrep  "\-06\-09 16|ls|pwd|clear|exit|cd" | wc -l' — reason: timestamp >= 1749500400, timestamp: 1749509624
+SKIP [11227]: 'h | egrep  "2025\-06\-09|ls|pwd|clear|exit|cd" | wc -l' — reason: timestamp >= 1749500400, timestamp: 1749509640
+SKIP [11229]: 'h | wc -l' — reason: timestamp >= 1749500400, timestamp: 1749509722
+SKIP [11231]: 'h | egrep -v "\-06\-09 16|ls|pwd|clear|exit|cd" | more' — reason: timestamp >= 1749500400, timestamp: 1749509757
+SKIP [11233]: 'h | egrep "webm" | wc -l' — reason: timestamp >= 1749500400, timestamp: 1749510179
+SKIP [11235]: 'h | wc -l' — reason: timestamp >= 1749500400, timestamp: 1749510282
+SKIP [11237]: 'h | egrep "webm" | wc -l' — reason: timestamp >= 1749500400, timestamp: 1749510288
+SKIP [11239]: 'h | egrep "2025\-06\-06" | wc -l' — reason: timestamp >= 1749500400, timestamp: 1749510316
+SKIP [11241]: 'h | egrep "2025\-06\-09" | wc -l' — reason: timestamp >= 1749500400, timestamp: 1749510326
+SKIP [11243]: './cleanhist.py -s "2025-06-09 16:20" -r ".*webm" ' — reason: timestamp >= 1749500400, timestamp: 1749511203
+SKIP [11245]: './cleanhist.py -s "2025-06-09 16:20" -r ".*webm" -v' — reason: timestamp >= 1749500400, timestamp: 1749511561
+SKIP [11247]: './cleanhist.py -s "2025-06-09 16:20" -r ".*webm" -v | tee cleanHist.out ' — reason: timestamp >= 1749500400, timestamp: 1749511621
+SKIP [11249]: 'vi cleanHist.out ' — reason: timestamp >= 1749500400, timestamp: 1749511630
+SKIP [11251]: 'cat cleanHist.out | egrep "reason" | wc -l' — reason: timestamp >= 1749500400, timestamp: 1749511675
+SKIP [11253]: 'vi cleanHist.out ' — reason: timestamp >= 1749500400, timestamp: 1749511681
+[92m=== DRY RUN ===[0m
+Removed: Filtered = 116, Duplicates = 0, Total = 116
+Starting total: cmds = 5246, Ending total cmds: 5130
+
+Press Enter to see cleaned history...

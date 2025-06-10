@@ -1,0 +1,214 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.4, pytest-8.3.2, pluggy-1.5.0
+rootdir: /Users/shawnhillis/bin/python/Tests
+configfile: pytest.ini
+plugins: anyio-4.3.0
+collected 14 items
+
+test_renameFiles.py::test_basic_rename FAILED                            [  7%]
+test_renameFiles.py::test_using_format FAILED                            [ 14%]
+test_renameFiles.py::test_remove_vowels FAILED                           [ 21%]
+test_renameFiles.py::test_change_case_lower PASSED                       [ 28%]
+test_renameFiles.py::test_replace_whitespace FAILED                      [ 35%]
+test_renameFiles.py::test_sequential_numbering FAILED                    [ 42%]
+test_renameFiles.py::test_handle_special_chars FAILED                    [ 50%]
+test_renameFiles.py::test_leading_trailing_whitespace FAILED             [ 57%]
+test_renameFiles.py::test_combine_options FAILED                         [ 64%]
+test_renameFiles.py::test_dry_run FAILED                                 [ 71%]
+test_renameFiles.py::test_undo_operation PASSED                          [ 78%]
+test_renameFiles.py::test_display_help FAILED                            [ 85%]
+test_renameFiles.py::test_display_usage FAILED                           [ 92%]
+test_renameFiles.py::test_invalid_command FAILED                         [100%]
+
+=================================== FAILURES ===================================
+______________________________ test_basic_rename _______________________________
+
+    def test_basic_rename():
+        create_test_files(['file_old.txt', 'old_file.txt'])
+        run_rename_command(["--find", "old", "--replace", "new"])
+    
+>       assert os.path.exists(os.path.join(TEST_DIR, "file_new.txt"))
+E       AssertionError: assert False
+E        +  where False = <function exists at 0x10f64ba60>('test_files_renameFiles/file_new.txt')
+E        +    where <function exists at 0x10f64ba60> = <module 'posixpath' (frozen)>.exists
+E        +      where <module 'posixpath' (frozen)> = os.path
+E        +    and   'test_files_renameFiles/file_new.txt' = <function join at 0x10f6791c0>('test_files_renameFiles', 'file_new.txt')
+E        +      where <function join at 0x10f6791c0> = <module 'posixpath' (frozen)>.join
+E        +        where <module 'posixpath' (frozen)> = os.path
+
+test_renameFiles.py:43: AssertionError
+______________________________ test_using_format _______________________________
+
+    def test_using_format():
+        create_test_files(['file.txt', 'report.docx'])
+        run_rename_command(["--format", "{date}-{name}.{ext}"])
+    
+        today = "2024-08-30"  # Replace with current date dynamically if needed
+>       assert os.path.exists(os.path.join(TEST_DIR, f"{today}-file.txt"))
+E       AssertionError: assert False
+E        +  where False = <function exists at 0x10f64ba60>('test_files_renameFiles/2024-08-30-file.txt')
+E        +    where <function exists at 0x10f64ba60> = <module 'posixpath' (frozen)>.exists
+E        +      where <module 'posixpath' (frozen)> = os.path
+E        +    and   'test_files_renameFiles/2024-08-30-file.txt' = <function join at 0x10f6791c0>('test_files_renameFiles', '2024-08-30-file.txt')
+E        +      where <function join at 0x10f6791c0> = <module 'posixpath' (frozen)>.join
+E        +        where <module 'posixpath' (frozen)> = os.path
+
+test_renameFiles.py:54: AssertionError
+______________________________ test_remove_vowels ______________________________
+
+    def test_remove_vowels():
+        create_test_files(['hello.txt', 'world.txt'])
+        run_rename_command(["--remove-vowels"])
+    
+>       assert os.path.exists(os.path.join(TEST_DIR, "hll.txt"))
+E       AssertionError: assert False
+E        +  where False = <function exists at 0x10f64ba60>('test_files_renameFiles/hll.txt')
+E        +    where <function exists at 0x10f64ba60> = <module 'posixpath' (frozen)>.exists
+E        +      where <module 'posixpath' (frozen)> = os.path
+E        +    and   'test_files_renameFiles/hll.txt' = <function join at 0x10f6791c0>('test_files_renameFiles', 'hll.txt')
+E        +      where <function join at 0x10f6791c0> = <module 'posixpath' (frozen)>.join
+E        +        where <module 'posixpath' (frozen)> = os.path
+
+test_renameFiles.py:64: AssertionError
+___________________________ test_replace_whitespace ____________________________
+
+    def test_replace_whitespace():
+        create_test_files(['my file.txt', 'another file.docx'])
+        run_rename_command(["--replace-white-space", "_"])
+    
+>       assert os.path.exists(os.path.join(TEST_DIR, "my_file.txt"))
+E       AssertionError: assert False
+E        +  where False = <function exists at 0x10f64ba60>('test_files_renameFiles/my_file.txt')
+E        +    where <function exists at 0x10f64ba60> = <module 'posixpath' (frozen)>.exists
+E        +      where <module 'posixpath' (frozen)> = os.path
+E        +    and   'test_files_renameFiles/my_file.txt' = <function join at 0x10f6791c0>('test_files_renameFiles', 'my_file.txt')
+E        +      where <function join at 0x10f6791c0> = <module 'posixpath' (frozen)>.join
+E        +        where <module 'posixpath' (frozen)> = os.path
+
+test_renameFiles.py:84: AssertionError
+__________________________ test_sequential_numbering ___________________________
+
+    def test_sequential_numbering():
+        create_test_files(['img_1.jpg', 'img_2.jpg'])
+        run_rename_command(["--format", "image-{%03d}.{ext}"])
+    
+>       assert os.path.exists(os.path.join(TEST_DIR, "image-001.jpg"))
+E       AssertionError: assert False
+E        +  where False = <function exists at 0x10f64ba60>('test_files_renameFiles/image-001.jpg')
+E        +    where <function exists at 0x10f64ba60> = <module 'posixpath' (frozen)>.exists
+E        +      where <module 'posixpath' (frozen)> = os.path
+E        +    and   'test_files_renameFiles/image-001.jpg' = <function join at 0x10f6791c0>('test_files_renameFiles', 'image-001.jpg')
+E        +      where <function join at 0x10f6791c0> = <module 'posixpath' (frozen)>.join
+E        +        where <module 'posixpath' (frozen)> = os.path
+
+test_renameFiles.py:94: AssertionError
+__________________________ test_handle_special_chars ___________________________
+
+    def test_handle_special_chars():
+        create_test_files(['file@name$.txt', '#weird&file!.doc'])
+        run_rename_command(["--no-clean"])
+    
+>       assert os.path.exists(os.path.join(TEST_DIR, "filename.txt"))
+E       AssertionError: assert False
+E        +  where False = <function exists at 0x10f64ba60>('test_files_renameFiles/filename.txt')
+E        +    where <function exists at 0x10f64ba60> = <module 'posixpath' (frozen)>.exists
+E        +      where <module 'posixpath' (frozen)> = os.path
+E        +    and   'test_files_renameFiles/filename.txt' = <function join at 0x10f6791c0>('test_files_renameFiles', 'filename.txt')
+E        +      where <function join at 0x10f6791c0> = <module 'posixpath' (frozen)>.join
+E        +        where <module 'posixpath' (frozen)> = os.path
+
+test_renameFiles.py:104: AssertionError
+_______________________ test_leading_trailing_whitespace _______________________
+
+    def test_leading_trailing_whitespace():
+        create_test_files(['  file.txt  ', '  report.doc  '])
+        run_rename_command(["--no-clean"])
+    
+        assert os.path.exists(os.path.join(TEST_DIR, "file.txt"))
+>       assert os.path.exists(os.path.join(TEST_DIR, "report.doc"))
+E       AssertionError: assert False
+E        +  where False = <function exists at 0x10f64ba60>('test_files_renameFiles/report.doc')
+E        +    where <function exists at 0x10f64ba60> = <module 'posixpath' (frozen)>.exists
+E        +      where <module 'posixpath' (frozen)> = os.path
+E        +    and   'test_files_renameFiles/report.doc' = <function join at 0x10f6791c0>('test_files_renameFiles', 'report.doc')
+E        +      where <function join at 0x10f6791c0> = <module 'posixpath' (frozen)>.join
+E        +        where <module 'posixpath' (frozen)> = os.path
+
+test_renameFiles.py:115: AssertionError
+_____________________________ test_combine_options _____________________________
+
+    def test_combine_options():
+        create_test_files(['IMG_1234.JPG', 'IMG_5678.JPG'])
+        run_rename_command(["--find", "IMG", "--replace", "Photo", "--change-case", "lower", "--remove-vowels"])
+    
+>       assert os.path.exists(os.path.join(TEST_DIR, "ph_1234.jpg"))
+E       AssertionError: assert False
+E        +  where False = <function exists at 0x10f64ba60>('test_files_renameFiles/ph_1234.jpg')
+E        +    where <function exists at 0x10f64ba60> = <module 'posixpath' (frozen)>.exists
+E        +      where <module 'posixpath' (frozen)> = os.path
+E        +    and   'test_files_renameFiles/ph_1234.jpg' = <function join at 0x10f6791c0>('test_files_renameFiles', 'ph_1234.jpg')
+E        +      where <function join at 0x10f6791c0> = <module 'posixpath' (frozen)>.join
+E        +        where <module 'posixpath' (frozen)> = os.path
+
+test_renameFiles.py:124: AssertionError
+_________________________________ test_dry_run _________________________________
+
+    def test_dry_run():
+        create_test_files(['file_old.txt', 'old_file.txt'])
+        result = run_rename_command(["--find", "old", "--replace", "new", "--dry-run"])
+    
+        # Check that files were not renamed
+        assert os.path.exists(os.path.join(TEST_DIR, "file_old.txt"))
+        assert os.path.exists(os.path.join(TEST_DIR, "old_file.txt"))
+    
+        # Check dry-run output
+>       assert "file_old.txt" in result.stdout
+E       assert 'file_old.txt' in ''
+E        +  where '' = CompletedProcess(args=['python3', 'renameFiles.py', '--find', 'old', '--replace', 'new', '--dry-run', '--exec'], returncode=2, stdout='', stderr="/usr/local/Cellar/python@3.12/3.12.4/Frameworks/Python.framework/Versions/3.12/Resources/Python.app/Contents/MacOS/Python: can't open file '/Users/shawnhillis/bin/python/Tests/test_files_renameFiles/renameFiles.py': [Errno 2] No such file or directory\n").stdout
+
+test_renameFiles.py:139: AssertionError
+______________________________ test_display_help _______________________________
+
+    def test_display_help():
+        result = run_rename_command(["--help-verbose"])
+    
+>       assert "Detailed Help with Examples" in result.stdout
+E       assert 'Detailed Help with Examples' in ''
+E        +  where '' = CompletedProcess(args=['python3', 'renameFiles.py', '--help-verbose', '--exec'], returncode=2, stdout='', stderr="/usr/local/Cellar/python@3.12/3.12.4/Frameworks/Python.framework/Versions/3.12/Resources/Python.app/Contents/MacOS/Python: can't open file '/Users/shawnhillis/bin/python/Tests/test_files_renameFiles/renameFiles.py': [Errno 2] No such file or directory\n").stdout
+
+test_renameFiles.py:164: AssertionError
+______________________________ test_display_usage ______________________________
+
+    def test_display_usage():
+        result = run_rename_command(["--usage"])
+    
+>       assert "Usage: renameFiles.py [options]" in result.stdout
+E       assert 'Usage: renameFiles.py [options]' in ''
+E        +  where '' = CompletedProcess(args=['python3', 'renameFiles.py', '--usage', '--exec'], returncode=2, stdout='', stderr="/usr/local/Cellar/python@3.12/3.12.4/Frameworks/Python.framework/Versions/3.12/Resources/Python.app/Contents/MacOS/Python: can't open file '/Users/shawnhillis/bin/python/Tests/test_files_renameFiles/renameFiles.py': [Errno 2] No such file or directory\n").stdout
+
+test_renameFiles.py:170: AssertionError
+_____________________________ test_invalid_command _____________________________
+
+    def test_invalid_command():
+        result = run_rename_command(["--invalid-command"])
+    
+        assert result.returncode != 0
+>       assert "unrecognized arguments" in result.stderr
+E       assert 'unrecognized arguments' in "/usr/local/Cellar/python@3.12/3.12.4/Frameworks/Python.framework/Versions/3.12/Resources/Python.app/Contents/MacOS/Python: can't open file '/Users/shawnhillis/bin/python/Tests/test_files_renameFiles/renameFiles.py': [Errno 2] No such file or directory\n"
+E        +  where "/usr/local/Cellar/python@3.12/3.12.4/Frameworks/Python.framework/Versions/3.12/Resources/Python.app/Contents/MacOS/Python: can't open file '/Users/shawnhillis/bin/python/Tests/test_files_renameFiles/renameFiles.py': [Errno 2] No such file or directory\n" = CompletedProcess(args=['python3', 'renameFiles.py', '--invalid-command', '--exec'], returncode=2, stdout='', stderr="/usr/local/Cellar/python@3.12/3.12.4/Frameworks/Python.framework/Versions/3.12/Resources/Python.app/Contents/MacOS/Python: can't open file '/Users/shawnhillis/bin/python/Tests/test_files_renameFiles/renameFiles.py': [Errno 2] No such file or directory\n").stderr
+
+test_renameFiles.py:177: AssertionError
+=========================== short test summary info ============================
+FAILED test_renameFiles.py::test_basic_rename - AssertionError: assert False
+FAILED test_renameFiles.py::test_using_format - AssertionError: assert False
+FAILED test_renameFiles.py::test_remove_vowels - AssertionError: assert False
+FAILED test_renameFiles.py::test_replace_whitespace - AssertionError: assert ...
+FAILED test_renameFiles.py::test_sequential_numbering - AssertionError: asser...
+FAILED test_renameFiles.py::test_handle_special_chars - AssertionError: asser...
+FAILED test_renameFiles.py::test_leading_trailing_whitespace - AssertionError...
+FAILED test_renameFiles.py::test_combine_options - AssertionError: assert False
+FAILED test_renameFiles.py::test_dry_run - assert 'file_old.txt' in ''
+FAILED test_renameFiles.py::test_display_help - assert 'Detailed Help with Ex...
+FAILED test_renameFiles.py::test_display_usage - assert 'Usage: renameFiles.p...
+FAILED test_renameFiles.py::test_invalid_command - assert 'unrecognized argum...
+========================= 12 failed, 2 passed in 0.93s =========================
