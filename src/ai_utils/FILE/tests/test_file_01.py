@@ -100,7 +100,7 @@ def test_pull_files_from_request(tmp_path, monkeypatch):
         yaml.dump(request_manifest, f)
 
     # Monkeypatch log_action to avoid file writes
-    monkeypatch.setattr(liaison, "log_action", lambda f, t: None)
+    monkeypatch.setattr(liaison, "log_action", lambda *a, **kw: None)
 
     # Call the function
     liaison.pull_files_from_request(str(request_file))
