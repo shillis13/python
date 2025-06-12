@@ -12,6 +12,7 @@ import sys
 
 #from dev_utils import lib_dryrun 
 from dev_utils import *
+from dev_utils.lib_argparse_registry import register_arguments, parse_known_args
 
 # Set up logging
 setup_logging(level=logging.DEBUG)
@@ -39,20 +40,23 @@ def copy_files(file_paths, destination):
         log_out(f"copied: {file_path} => {destination}")
 
 
-def parse_arguments():
-    parser = argparse.ArgumentParser(description="Perform actions on files such as move, delete, and copy.")
-
+def add_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument('--move', '-m', help="Move files to the specified directory.")
     parser.add_argument('--delete', '-d', action='store_true', help="Delete the specified files.")
     parser.add_argument('--copy', '-c', help="Copy files to the specified directory.")
-    parser.add_argument('files', nargs='*', help="Files to perform actions on.")
-    parser.add_argument('--dry-run', action='store_true', help="Simulate the rename operations without performing them.")
-
     parser.add_argument('--from-file', '-ff', help="Read file names from a file (one per line).")
-    parser.add_argument('files', nargs='*', help="Files to be renamed.")
+    parser.add_argument('files', nargs='*', help="Files to perform actions on.")
+    parser.add_argument('--dry-run', dest='dry_run', action='store_true', default=True,
+                        help="Simulate the rename operations without performing them (default).")
+    parser.add_argument('--exec', '-x', dest='dry_run', action='store_false',
+                        help='Execute the actions on the filesystem.')
 
-    # Add other arguments as necessary
-    args, _ = parser.parse_known_args()
+
+register_arguments(add_args)
+
+
+def parse_arguments():
+    args, _ = parse_known_args(description="Perform actions on files such as move, delete, and copy.")
     return args
 
 

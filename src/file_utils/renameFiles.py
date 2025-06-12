@@ -14,6 +14,7 @@ from dev_utils.lib_logging import *
 from dev_utils.lib_dryrun import *
 from dev_utils.lib_undo import *
 from dev_utils.lib_outputColors import *
+from dev_utils.lib_argparse_registry import register_arguments, parse_known_args
 
 
 def rename_files(command):
@@ -83,14 +84,9 @@ def build_f2_command(args):
         command.extend(["--find", "(.)(.*)", "--replace", "{<$1>.up}/$1$2", "-e"])
         log_debug("Added fileByFirstChar logic to move files into dirs by first letter")
 
-    if args.exec:
+    if not args.dry_run:
         command.append("--exec")
         log_debug("Added --exec argument to commit the changes")
-
-    # f2 defaults to running as dry-run unless --exec is passed
-    if args.dry_run:
-        command = [x for x in command if x != "--exec"]
-        log_debug("Removed --exec argument for dry-run")
 
     if args.help_f2:
         command.append("--help")
@@ -178,13 +174,8 @@ def print_help():
         print()
 
 
-def parse_args():
-    ''' Cmd Line Argument Parser'''
-    parser = argparse.ArgumentParser(description='Wrapper for f2 command-line file renaming tool.')
-    parser.add_help = True
-    parser.allow_abbrev = True
-    parser.formatter_class = argparse.MetavarTypeHelpFormatter
-
+def add_args(parser: argparse.ArgumentParser) -> None:
+    """Register command line arguments for this module."""
     parser.add_argument('--find', '-f', type=str, help='Search pattern in filenames.')
     parser.add_argument('--replace', '-r', type=str, help='Replacement pattern in filenames.')
     parser.add_argument('--format', '-F', type=str, help='Format string for renaming files.')
@@ -195,16 +186,23 @@ def parse_args():
     parser.add_argument('--remove-white-space', '-remws', action='store_true', help='Remove all whitespace from filenames.')
     parser.add_argument('--no-clean', '-nc', action='store_true', help='Skip trimming and special character removal.')
     parser.add_argument('--recursive', '-R', action='store_true', help='Search subfolders recursively.')
-    parser.add_argument('--dry-run', '-dr', action='store_true', help='Simulate the rename actions without making any changes (Default behavior).')
-    parser.add_argument('--exec', '-x', action='store_true', help='Execute the renaming operation and commit the changes to the filesystem.')
+    parser.add_argument('--dry-run', dest='dry_run', action='store_true', default=True,
+                        help='Simulate the rename actions without making any changes (default).')
+    parser.add_argument('--exec', '-x', dest='dry_run', action='store_false',
+                        help='Execute the renaming operation and commit the changes to the filesystem.')
     parser.add_argument('--help-f2', '-hf2', action='store_true', help='Show detailed help with examples.')
     parser.add_argument('--help-verbose', '-hv', action='store_true', help='Show detailed help with examples.')
     parser.add_argument('--help-exfil', '-he', action='store_true', help='Show detailed help with examples.')
     parser.add_argument('--usage', '-u', action='store_true', help='Show usage info.')
-    parser.add_argument("--fileByFirstChar", "-fbfc", action="store_true",
-                    help="Organize files into folders by first character (letter, number, special char).")
+    parser.add_argument('--fileByFirstChar', '-fbfc', action='store_true',
+                        help='Organize files into folders by first character (letter, number, special char).')
 
-    args, _ = parser.parse_known_args()
+
+register_arguments(add_args)
+
+
+def parse_args():
+    args, _ = parse_known_args(description='Wrapper for f2 command-line file renaming tool.')
     return args
 
 
