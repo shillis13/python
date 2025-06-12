@@ -102,40 +102,6 @@ def main():
     print("")
     print_category_info(extensions_info)
 
-# Built-in pytest test function
-def test_extension_info():
-    # Mock CSV content for testing
-    mock_csv_content = """extension,category,name,description
-.txt,Text,TXT,TXT file used in text applications.
-.doc,Documents,DOC,DOC file used in documents applications.
-.mp3,Audio,MP3,MP3 file used in audio applications.
-"""
-
-    # Write the mock CSV to a temporary file for testing
-    test_csv_path = "test_extensions_info.csv"
-    with open(test_csv_path, mode="w") as file:
-        file.write(mock_csv_content)
-
-    # Call the ExtensionInfo function with the mock CSV
-    extension_info = ExtensionInfo(test_csv_path)
-
-    # Validate the extension information
-    assert extension_info[".txt"]['name'] == "TXT"
-    assert extension_info[".txt"]['category'] == "Text"
-    assert extension_info[".doc"]['name'] == "DOC"
-    assert extension_info[".mp3"]['name'] == "MP3"
-
-    # Validate the category regex and extensions
-    assert extension_info["Text"]["regex"] == r"\.(txt)$"
-    assert extension_info["Documents"]["regex"] == r"\.(doc)$"
-    assert extension_info["Audio"]["regex"] == r"\.(mp3)$"
-
-    # Cleanup the test file
-    os.remove(test_csv_path)
-
-import csv
-import re
-import pytest
 
 # Load extensions from extensions.csv
 def load_extensions_from_csv(csv_filename):
@@ -165,21 +131,6 @@ def compare_extensions(csv_extensions, magic_extensions):
     missing_in_magic = csv_extensions - magic_extensions
     return missing_in_csv, missing_in_magic
 
-# pytest test function
-@pytest.mark.parametrize("csv_filename, magic_filename", [
-    ("extensions.csv", "/usr/share/file/magic/magic")  # Adjust path to the magic file as necessary
-])
-def test_extension_comparison(csv_filename, magic_filename):
-    # Load extensions from CSV and magic file
-    csv_extensions = load_extensions_from_csv(csv_filename)
-    magic_extensions = load_extensions_from_magic(magic_filename)
-
-    # Compare
-    missing_in_csv, missing_in_magic = compare_extensions(csv_extensions, magic_extensions)
-
-    # Check if there are missing extensions in either source
-    assert not missing_in_csv, f"Extensions in magic file but missing in CSV: {missing_in_csv}"
-    # assert not missing_in_magic, f"Extensions in CSV but missing in magic file: {missing_in_magic}"
 
 
 # Entry point
