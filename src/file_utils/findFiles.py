@@ -1,14 +1,30 @@
 #!/usr/bin/env python3
 
+# Purpose:
+# findFiles is meant to be the easy to use but powerful & extensible tool for
+# finding/selecting capabilities for both the command line and for other scripts
+# so that they don't need to implement their own.
+
+# Command line parameters don't need to be able to use all the capabilities but can 
+# at least via json config file(s).  
+
 # TODO
 # 0. Use lib_extensions.py to search for files by type
 # 1. find by substring match (-s)
-# 2. Use of not for substring match, whole name match
-# 2. enable chaining and reading from file
-# 3. find created/modified before/after date/time
-# 4. find larger/small than size
-# 5. Find empty directories
-# 5. Output dirs only
+# 2. find by regex -re
+# 3. Use of not for most/all parameters/filters
+# 4. enable pipeline chaining and reading from file
+# 5. find created/modified before/after date/time
+# 6. find larger/small than size
+# 7. Find empty directories
+# 8. Option: Output dirs only, files only, both
+# 9. Use json file(s) as full featured configuraton
+# 10. Use of an --inverse parameter that inverts selected & not selected
+# 11. Full expression boolean specfication would be really nice but may be too hard to 
+#     implement reasonably well from a UX standpoint.
+# 12. Default output is std::out
+# 13. Configuration input can be cmd line parameters or json files but not mix both kinds
+# 14. Needs tons of help documentation include lots of real world examples.
 
 # Parameters
 # [{--dir | -d} "dir1, dir2, "] : optional, search in specified directories, defaults to "."
