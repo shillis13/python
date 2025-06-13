@@ -68,24 +68,25 @@ def log_action(filename, reason="general", title=""):
 # --- Manifest and Sync Utilities ---
 
 def generate_manifest(directory):
-    """Compute SHA256 hashes for all files in ``directory``.
-
-    The function returns a dictionary mapping relative file paths to their
-    hex digest. This simplified structure is easier for tests and still works
-    with callers that expect either a simple string or a mapping containing a
-    ``sha256`` key.
     """
-
+    Computes SHA256 hashes of all files in the specified directory.
+    Returns a dict: {relative_filename: {"sha256": hash, "last_modified": timestamp}}
+    """
     manifest = {}
     for root, _, files in os.walk(directory):
         for fname in files:
             fpath = os.path.join(root, fname)
             relpath = os.path.relpath(fpath, directory)
+            # Skip manifest itself
             if relpath == "chatty_manifest.yml":
                 continue
             try:
                 with open(fpath, "rb") as f:
-                    manifest[relpath] = hashlib.sha256(f.read()).hexdigest()
+                    file_hash = hashlib.sha256(f.read()).hexdigest()
+                    manifest[relpath] = {
+                        "sha256": file_hash,
+                        "last_modified": datetime.fromtimestamp(os.path.getmtime(fpath)).strftime("%Y-%m-%d %H:%M:%S")
+                    }
             except Exception as e:
                 print(f"Error hashing {relpath}: {e}")
     return manifest

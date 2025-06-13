@@ -29,12 +29,13 @@ def test_extension_info():
     os.remove(test_csv_path)
 
 
-@pytest.mark.parametrize("csv_filename", [os.path.join(os.path.dirname(__file__), "..", "data", "extensions.csv")])
-def test_extension_comparison(csv_filename, tmp_path):
-    magic_file = tmp_path / "magic"
-    magic_file.write_text("!ext txt\n!ext csv\n!ext jpg\n")
+@pytest.mark.parametrize(
+    "csv_filename, magic_filename",
+    [("extensions.csv", "/usr/share/file/magic/magic")],
+)
+def test_extension_comparison(csv_filename, magic_filename):
     csv_extensions = load_extensions_from_csv(csv_filename)
-    magic_extensions = load_extensions_from_magic(str(magic_file))
+    magic_extensions = load_extensions_from_magic(magic_filename)
     missing_in_csv, missing_in_magic = compare_extensions(csv_extensions, magic_extensions)
     assert not missing_in_csv, f"Extensions in magic file but missing in CSV: {missing_in_csv}"
     # assert not missing_in_magic, f"Extensions in CSV but missing in magic file: {missing_in_magic}"

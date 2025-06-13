@@ -18,8 +18,8 @@ DATA_DIR = Path(__file__).parent
 OUTPUT_FILE = "TestResults_Large.csv"
 #ParentChildFile="Test_LargeParentChildTable_20240731.csv"
 #DataFile="Test_LargeDataTable_20240731.csv"
-PARENT_CHILD_FILE = "ParentChildRealWorldSample_20240810_v01.csv"
-DATA_FILE = "DataTableRealWorldSample_20240810_v01.csv"
+PARENT_CHILD_FILE="ParentChildRealWorldSample_20240810_v01.csv"
+DATA_FILE="DataTableRealWorldSample_20240810_v01.csv"
 
 def test_hierarchical_sum():
     log_info("Starting test_hierarchical_sum.")
