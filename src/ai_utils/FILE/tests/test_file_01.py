@@ -48,11 +48,8 @@ def test_generate_manifest(tmp_path):
     file2 = tmp_path / "file2.txt"
     file2.write_text("goodbye")
     manifest = liaison.generate_manifest(tmp_path)
-    expected_hashes = {
-        "file1.txt": hashlib.sha256(b"hello world").hexdigest(),
-        "file2.txt": hashlib.sha256(b"goodbye").hexdigest()
-    }
-    assert manifest == expected_hashes
+    assert manifest["file1.txt"]["sha256"] == hashlib.sha256(b"hello world").hexdigest()
+    assert manifest["file2.txt"]["sha256"] == hashlib.sha256(b"goodbye").hexdigest()
 
 def test_compare_manifest(tmp_path):
     # Set up local dir with one good, one outdated, one extra
@@ -100,7 +97,7 @@ def test_pull_files_from_request(tmp_path, monkeypatch):
         yaml.dump(request_manifest, f)
 
     # Monkeypatch log_action to avoid file writes
-    monkeypatch.setattr(liaison, "log_action", lambda f, t: None)
+    monkeypatch.setattr(liaison, "log_action", lambda *a, **k: None)
 
     # Call the function
     liaison.pull_files_from_request(str(request_file))
