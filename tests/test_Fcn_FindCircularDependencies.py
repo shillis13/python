@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 
+import os
+import sys
 import pandas as pd
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from lib_treeFcns import Fcn_FindCircularDependencies
-from lib_miscDataTableFcns import dataframes_equal  
+from lib_miscDataTableFcns import dataframes_equal
 
 def test_Fcn_FindCircularDependencies():
     # Test case 1: No circular dependencies

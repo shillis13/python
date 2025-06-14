@@ -15,8 +15,9 @@ import requests
 import yaml
 import hashlib
 import shutil
+from transports import EmailTransport, Transport
 
-CONFIG_PATH = "config.yaml"
+CONFIG_PATH = "config.yml"
 
 ARCHIVE_DIR = "archive"
 LOG_FILE = "logs/file_log.txt"
@@ -28,8 +29,27 @@ SYNC_DIR = "SyncDir"
 
 
 def load_config():
+    if not os.path.exists(CONFIG_PATH):
+        return {}
     with open(CONFIG_PATH, "r") as f:
-        return yaml.safe_load(f)
+        data = yaml.safe_load(f)
+    return data or {}
+
+
+def get_transport(name: str = "default") -> Transport:
+    config = load_config()
+    endpoints = config.get("endpoints", {})
+    info = endpoints.get(name)
+    if not info:
+        raise ValueError(f"Endpoint '{name}' not defined in config")
+    ttype = info.get("transport")
+    opts = info.get("options", {})
+    if ttype == "email":
+        password_env = opts.pop("password_env", None)
+        if password_env and "password" not in opts:
+            opts["password"] = os.getenv(password_env, "")
+        return EmailTransport(**opts)
+    raise ValueError(f"Unknown transport type: {ttype}")
 
 
 def ensure_dirs():
@@ -343,6 +363,16 @@ def pull_files_from_request(request_path):
         print(f"{len(mismatched)} files had mismatched hashes:")
         for f in mismatched:
             print(f"  [HASH MISMATCH] {f}")
+
+
+def send_via_endpoint(files, endpoint="default", subject="FILE transfer", body=""):
+    transport = get_transport(endpoint)
+    transport.send_files(files, subject=subject, body=body)
+
+
+def receive_from_endpoint(subject_filter, endpoint="default", download_dir="received"):
+    transport = get_transport(endpoint)
+    return transport.receive_files(subject_filter, download_dir)
             
             
 def main():
@@ -354,6 +384,10 @@ def main():
     parser.add_argument("--pull-files", metavar="REQFILE", help="Pull files listed in request manifest file")
     parser.add_argument("--update-manifest", action="store_true", help="Re-generate and update the chatty_manifest.yml in To_Chatty/")
     parser.add_argument("--sync-two-way", action="store_true", help="Perform a bidirectional sync between To_Chatty and From_Chatty")
+    parser.add_argument("--send-via", nargs='+', metavar='FILE', help="Send given files via configured transport")
+    parser.add_argument("--receive-subject", metavar='FILTER', help="Receive files from transport using subject filter")
+    parser.add_argument("--endpoint", default="default", help="Endpoint name from config")
+    parser.add_argument("--subject", default="FILE transfer", help="Email subject when sending files")
     args = parser.parse_args()
 
     if args.pull:
@@ -366,6 +400,10 @@ def main():
         generate_manifest_for_chatty()
     elif args.pull_files:
         pull_files_from_request(args.pull_files)
+    elif args.send_via:
+        send_via_endpoint(args.send_via, args.endpoint, args.subject)
+    elif args.receive_subject:
+        receive_from_endpoint(args.receive_subject, args.endpoint)
     elif args.sync_two_way:
         sync_two_way()
     else:
