@@ -9,14 +9,9 @@ sys.path.insert(0, os.path.join(ROOT, "src"))
 
 import pytest
 
-from src.email_utils.gmail_client.gmail_auth import GmailAuth
-from src.email_utils.gmail_client.gmail_send import send_email
-from src.email_utils.gmail_client.gmail_receive import (
-    search_emails,
-    get_email_body,
-    get_email_attachments,
-)
-
+from src.email.gmail_client.gmail_auth import GmailAuth
+from src.email.gmail_client.gmail_send import send_email
+from src.email.gmail_client.gmail_receive import search_emails, get_email_body, get_email_attachments
 
 class DummyCreds:
     valid = True
@@ -40,15 +35,15 @@ def dummy_build(service, version, credentials=None):
     return mock_service
 
 
-@patch("src.email_utils.gmail_client.gmail_send.build", new=dummy_build)
+@patch("src.email.gmail_client.gmail_send.build", new=dummy_build)
 def test_send_email():
     auth = GmailAuth(Path("creds"), Path("token"))
     auth.authenticate = MagicMock(return_value=DummyCreds())
     msg_id = send_email(auth, "a@b.com", "sub", "body", dry_run=False)
     assert msg_id == "123"
-
-
-@patch("src.email_utils.gmail_client.gmail_receive.build", new=dummy_build)
+    
+    
+@patch("src.email.gmail_client.gmail_receive.build", new=dummy_build)
 def test_search_and_body_and_attachments(tmp_path):
     auth = GmailAuth(Path("creds"), Path("token"))
     auth.authenticate = MagicMock(return_value=DummyCreds())
