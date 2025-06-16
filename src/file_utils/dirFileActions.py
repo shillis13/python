@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 
-# TODO
-# 1. Be able to specify dir levels to mv/copy/delete along with file 
-# 2. Specify a match pattern
-# 3. Operate on dirs
+# Potential future enhancements
+# 1. Ability to specify directory levels for operations along with files
+# Pattern filtering and directory handling are supported; additional features
+# may be added in the future.
 
 import argparse
 import os
 import shutil
 import sys
+import fnmatch
 
 #from dev_utils import lib_dryrun 
 from dev_utils import *
@@ -29,14 +30,21 @@ def move_files(file_paths, destination):
 @dry_run_decorator
 def delete_files(file_paths):
     for file_path in file_paths:
-        os.remove(file_path)
+        if os.path.isdir(file_path):
+            shutil.rmtree(file_path)
+        else:
+            os.remove(file_path)
         log_out(f"deleted: {file_path}")
 
 
 @dry_run_decorator
 def copy_files(file_paths, destination):
     for file_path in file_paths:
-        shutil.copy(file_path, destination)
+        if os.path.isdir(file_path):
+            dest_path = os.path.join(destination, os.path.basename(file_path))
+            shutil.copytree(file_path, dest_path)
+        else:
+            shutil.copy(file_path, destination)
         log_out(f"copied: {file_path} => {destination}")
 
 
@@ -45,6 +53,8 @@ def add_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument('--delete', '-d', action='store_true', help="Delete the specified files.")
     parser.add_argument('--copy', '-c', help="Copy files to the specified directory.")
     parser.add_argument('--from-file', '-ff', help="Read file names from a file (one per line).")
+    parser.add_argument('--pattern', help="Only process files matching this glob pattern.")
+    parser.add_argument('--include-dirs', action='store_true', help="Also operate on directories if given.")
     parser.add_argument('files', nargs='*', help="Files to perform actions on.")
     parser.add_argument('--dry-run', dest='dry_run', action='store_true', default=True,
                         help="Simulate the rename operations without performing them (default).")
@@ -66,6 +76,14 @@ def main():
 
     # Determine the file paths to process
     file_paths, detected_dry_run = get_file_paths_from_input(args)
+
+    # Apply pattern filtering
+    if args.pattern:
+        file_paths = [fp for fp in file_paths if fnmatch.fnmatch(os.path.basename(fp), args.pattern)]
+
+    # Filter out directories unless explicitly included
+    if not args.include_dirs:
+        file_paths = [fp for fp in file_paths if not os.path.isdir(fp)]
 
     # If dry-run was detected from piped input, override the script's dry-run state
     if detected_dry_run:
