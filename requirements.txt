@@ -137,3 +137,8 @@ wheel==0.45.1
 whisper==1.1.10
 whisper-ctranslate2==0.5.2
 widgetsnbextension==4.0.10
+pyzipper==0.3.6
+pathspec==0.12.1
+google-api-python-client==2.129.0
+google-auth-httplib2==0.2.0
+google-auth-oauthlib==1.2.0
