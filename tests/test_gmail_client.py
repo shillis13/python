@@ -13,7 +13,6 @@ from src.email.gmail_client.gmail_auth import GmailAuth
 from src.email.gmail_client.gmail_send import send_email
 from src.email.gmail_client.gmail_receive import search_emails, get_email_body, get_email_attachments
 
-
 class DummyCreds:
     valid = True
 
@@ -42,8 +41,8 @@ def test_send_email():
     auth.authenticate = MagicMock(return_value=DummyCreds())
     msg_id = send_email(auth, "a@b.com", "sub", "body", dry_run=False)
     assert msg_id == "123"
-
-
+    
+    
 @patch("src.email.gmail_client.gmail_receive.build", new=dummy_build)
 def test_search_and_body_and_attachments(tmp_path):
     auth = GmailAuth(Path("creds"), Path("token"))
