@@ -104,7 +104,7 @@ def chunk_chat_json(input_file, output_base=None, max_chars=30000, overlap_messa
         base_name = output_base
     
     for i, chunk in enumerate(chunks, 1):
-        output_file = f"{base_name}_chunk_{i}.json"
+        output_file = f"{base_name}_chunk_{i:02d}.json"
         
         with open(output_file, 'w', encoding='utf-8') as f:
             json.dump(chunk['data'], f, ensure_ascii=False, indent=2)
