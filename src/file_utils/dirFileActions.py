@@ -10,45 +10,64 @@ import os
 import shutil
 import sys
 import fnmatch
+from pathlib import Path
 
-#from dev_utils import lib_dryrun 
-from dev_utils import *
+from dev_utils.lib_logging import *
+#from dev_utils.lib_undo import *
+from dev_utils.lib_dryrun import *
+from dev_utils.lib_outputColors import *
 from dev_utils.lib_argparse_registry import register_arguments, parse_known_args
+from file_utils.lib_fileinput import get_file_paths_from_input
 
 # Set up logging
-setup_logging(level=logging.DEBUG)
+#setup_logging(level=logging.DEBUG)
 # setup_logging(level=logging.ERROR)
 
 
-@dry_run_decorator
-def move_files(file_paths, destination):
+@dry_run_decorator()
+def move_files(file_paths, destination, dry_run=False):
+    """Move files to destination directory."""
+    destination = Path(destination)
+    destination.mkdir(parents=True, exist_ok=True)
+    
     for file_path in file_paths:
-        shutil.move(file_path, destination)
-        log_out(f"moved: {file_path} => {destination}")
+        file_path = Path(file_path)
+        dest_path = destination / file_path.name
+        shutil.move(str(file_path), str(dest_path))
+        log_out(f"moved: {file_path} => {dest_path}")
 
 
-@dry_run_decorator
-def delete_files(file_paths):
+@dry_run_decorator()
+def delete_files(file_paths, dry_run=False):
+    """Delete files or directories."""
     for file_path in file_paths:
-        if os.path.isdir(file_path):
+        file_path = Path(file_path)
+        if file_path.is_dir():
             shutil.rmtree(file_path)
         else:
-            os.remove(file_path)
+            file_path.unlink()
         log_out(f"deleted: {file_path}")
 
 
-@dry_run_decorator
-def copy_files(file_paths, destination):
+@dry_run_decorator()
+def copy_files(file_paths, destination, dry_run=False):
+    """Copy files to destination directory."""
+    destination = Path(destination)
+    destination.mkdir(parents=True, exist_ok=True)
+    
     for file_path in file_paths:
-        if os.path.isdir(file_path):
-            dest_path = os.path.join(destination, os.path.basename(file_path))
+        file_path = Path(file_path)
+        if file_path.is_dir():
+            dest_path = destination / file_path.name
             shutil.copytree(file_path, dest_path)
         else:
-            shutil.copy(file_path, destination)
-        log_out(f"copied: {file_path} => {destination}")
+            dest_path = destination / file_path.name
+            shutil.copy2(file_path, dest_path)
+        log_out(f"copied: {file_path} => {dest_path}")
 
 
 def add_args(parser: argparse.ArgumentParser) -> None:
+    """Register command line arguments for this module."""
     parser.add_argument('--move', '-m', help="Move files to the specified directory.")
     parser.add_argument('--delete', '-d', action='store_true', help="Delete the specified files.")
     parser.add_argument('--copy', '-c', help="Copy files to the specified directory.")
@@ -57,7 +76,7 @@ def add_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument('--include-dirs', action='store_true', help="Also operate on directories if given.")
     parser.add_argument('files', nargs='*', help="Files to perform actions on.")
     parser.add_argument('--dry-run', dest='dry_run', action='store_true', default=True,
-                        help="Simulate the rename operations without performing them (default).")
+                        help="Simulate the operations without performing them (default).")
     parser.add_argument('--exec', '-x', dest='dry_run', action='store_false',
                         help='Execute the actions on the filesystem.')
 
@@ -66,16 +85,22 @@ register_arguments(add_args)
 
 
 def parse_arguments():
+    """Parse command line arguments."""
     args, _ = parse_known_args(description="Perform actions on files such as move, delete, and copy.")
     return args
 
 
-def main():
-    args = parse_arguments()
-    dry_run_flag = args.dry_run
+def process_files_pipeline(args):
+    """Main pipeline processing loop."""
+    file_paths, dry_run_detected = get_file_paths_from_input(args)
+    
+    if not file_paths:
+        print("ℹ️ No input files found to process.", file=sys.stderr)
+        return
 
-    # Determine the file paths to process
-    file_paths, detected_dry_run = get_file_paths_from_input(args)
+    # If dry-run was detected from piped input, override the script's dry-run state
+    if dry_run_detected:
+        args.dry_run = True
 
     # Apply pattern filtering
     if args.pattern:
@@ -83,20 +108,58 @@ def main():
 
     # Filter out directories unless explicitly included
     if not args.include_dirs:
-        file_paths = [fp for fp in file_paths if not os.path.isdir(fp)]
+        file_paths = [fp for fp in file_paths if not Path(fp).is_dir()]
 
-    # If dry-run was detected from piped input, override the script's dry-run state
-    if detected_dry_run:
-        args.dry_run = True
+    if not file_paths:
+        print("ℹ️ No files remain after filtering.", file=sys.stderr)
+        return
 
-    if args.move:
-        move_files(file_paths, args.move)
-    elif args.delete:
-        delete_files(file_paths)
-    elif args.copy:
-        copy_files(file_paths, args.copy)
-    else:
-        print("No action specified. Use --move, --delete, or --copy.")
+    successful_ops = 0
+    processed_files = []
+
+    try:
+        if args.move:
+            move_files(file_paths, args.move, dry_run=args.dry_run)
+            if not args.dry_run:
+                for fp in file_paths:
+                    dest_path = Path(args.move) / Path(fp).name
+                    processed_files.append(str(dest_path))
+            successful_ops = len(file_paths)
+            
+        elif args.delete:
+            delete_files(file_paths, dry_run=args.dry_run)
+            # For delete operations, we don't output paths since files are gone
+            successful_ops = len(file_paths)
+            
+        elif args.copy:
+            copy_files(file_paths, args.copy, dry_run=args.dry_run)
+            if not args.dry_run:
+                for fp in file_paths:
+                    dest_path = Path(args.copy) / Path(fp).name
+                    processed_files.append(str(dest_path))
+            successful_ops = len(file_paths)
+            
+        else:
+            print("❌ No action specified. Use --move, --delete, or --copy.", file=sys.stderr)
+            return
+
+        # For pipeline chaining, print the processed file paths to stdout
+        if not args.dry_run and processed_files:
+            for file_path in processed_files:
+                print(file_path)
+
+        operation = "move" if args.move else "delete" if args.delete else "copy"
+        print(f"✅ Successfully {operation}d {successful_ops} files.", file=sys.stderr)
+
+    except Exception as e:
+        print(f"❌ Error during operation: {e}", file=sys.stderr)
+
+
+def main():
+    """Main entry point."""
+    args = parse_arguments()
+    process_files_pipeline(args)
+
 
 if __name__ == "__main__":
     main()
