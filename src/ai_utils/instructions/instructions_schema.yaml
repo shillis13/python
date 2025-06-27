@@ -1,0 +1,53 @@
+# instructions_schema.yaml
+$schema: "http://json-schema.org/draft-07/schema#"
+title: "Schema for Gemini Gem Instructions"
+description: "Defines the valid structure for the master_instructions.yaml file."
+type: "object"
+
+properties:
+  persona:
+    description: "A high-level description of the AI's personality and role."
+    type: "object"
+    properties:
+      metadata:
+        type: "object"
+        properties:
+          version:
+            type: "integer"
+          last_updated:
+            type: "string"
+            format: "date-time"
+        required: ["version", "last_updated"]
+      data:
+        type: "string"
+    required: ["metadata", "data"]
+
+  rules:
+    description: "A list of specific, actionable rules the AI must follow."
+    type: "object"
+    properties:
+      metadata:
+        type: "object"
+        properties:
+          version:
+            type: "integer"
+          last_updated:
+            type: "string"
+            format: "date-time"
+        required: ["version", "last_updated"]
+      data:
+        type: "array"
+        items:
+          type: "string"
+    required: ["metadata", "data"]
+
+# This allows for our dynamic, timestamped archive keys
+patternProperties:
+  "^(persona|rules)_\\d{8}T\\d{6}Z$":
+    type: "object"
+
+required:
+  - "persona"
+  - "rules"
+
+additionalProperties: false

@@ -1,165 +1,133 @@
+#!/usr/bin/env python3
+
+"""
+JSON Chat Chunker
+
+Accepts a list of JSON chat files from stdin or command-line arguments,
+breaks them into smaller chunks based on character limits, and outputs the
+paths of the new chunk files to stdout for pipeline chaining.
+"""
+
 import json
-import os
 import argparse
 import sys
+from pathlib import Path
+from datetime import datetime
 
-"""
-Chunk a chat JSON file at message boundaries with configurable size and overlap.
+# Use the established library for handling file inputs.
+try:
+    from lib_fileinput import get_file_paths_from_input
+except ImportError:
+    from .lib_fileinput import get_file_paths_from_input
 
-Args:
-    input_file: Path to the input JSON file
-    output_base: Base name for output files (default: input filename without extension)
-    max_chars: Maximum characters per chunk (default 30K, adjust as needed)
-    overlap_messages: Number of messages to overlap between chunks for continuity
-"""
-def chunk_chat_json(input_file, output_base=None, max_chars=30000, overlap_messages=2):
-    
-    # Read the original JSON
-    with open(input_file, 'r', encoding='utf-8') as f:
-        data = json.load(f)
-    
-    # Assume the messages are in a list - adjust key name if different
-    # Common structures: data['messages'], data['conversation'], or just data if it's a list
-    if isinstance(data, list):
-        messages = data
-        wrapper_key = None
-    elif 'messages' in data:
-        messages = data['messages']
-        wrapper_key = 'messages'
-    elif 'conversation' in data:
-        messages = data['conversation'] 
-        wrapper_key = 'conversation'
-    else:
-        # Try to find the largest list in the data
-        largest_list = max((k for k, v in data.items() if isinstance(v, list)), 
-                          key=lambda k: len(data[k]), default=None)
-        if largest_list:
-            messages = data[largest_list]
-            wrapper_key = largest_list
-        else:
-            raise ValueError("Could not find messages list in JSON structure")
-    
-    print(f"Found {len(messages)} messages in '{wrapper_key or 'root'}' key")
-    
-    chunks = []
-    current_chunk_start = 0
-    
-    while current_chunk_start < len(messages):
-        # Start building chunk
-        current_chunk_end = current_chunk_start
-        current_size = 0
-        
-        # Keep adding messages until we exceed the size limit
-        while current_chunk_end < len(messages):
-            # Create temporary chunk to test size
-            chunk_messages = messages[current_chunk_start:current_chunk_end + 1]
-            
-            # Create the chunk structure
-            if wrapper_key:
-                temp_chunk = {**data}  # Copy other top-level keys
-                temp_chunk[wrapper_key] = chunk_messages
-            else:
-                temp_chunk = chunk_messages
-            
-            # Check size
-            temp_json = json.dumps(temp_chunk, ensure_ascii=False)
-            
-            if len(temp_json) > max_chars and current_chunk_end > current_chunk_start:
-                # This message would make it too big, so stop at previous message
-                break
-            
-            current_size = len(temp_json)
-            current_chunk_end += 1
-        
-        # Make sure we got at least one message
-        if current_chunk_end == current_chunk_start:
-            current_chunk_end = current_chunk_start + 1
-            print(f"Warning: Single message at index {current_chunk_start} exceeds size limit")
-        
-        # Create the actual chunk
-        chunk_messages = messages[current_chunk_start:current_chunk_end]
-        
-        if wrapper_key:
-            chunk_data = {**data}  # Copy other top-level keys
-            chunk_data[wrapper_key] = chunk_messages
-        else:
-            chunk_data = chunk_messages
-        
-        chunks.append({
-            'data': chunk_data,
-            'start_idx': current_chunk_start,
-            'end_idx': current_chunk_end - 1,
-            'message_count': len(chunk_messages),
-            'size': current_size
-        })
-        
-        # Move to next chunk with overlap
-        current_chunk_start = max(current_chunk_start + 1, 
-                                current_chunk_end - overlap_messages)
-    
-    # Write chunk files
-    if output_base is None:
-        base_name = os.path.splitext(input_file)[0]
-    else:
-        base_name = output_base
-    
-    for i, chunk in enumerate(chunks, 1):
-        output_file = f"{base_name}_chunk_{i:02d}.json"
-        
-        with open(output_file, 'w', encoding='utf-8') as f:
-            json.dump(chunk['data'], f, ensure_ascii=False, indent=2)
-        
-        print(f"Chunk {i}: {output_file}")
-        print(f"  Messages: {chunk['start_idx']}-{chunk['end_idx']} ({chunk['message_count']} total)")
-        print(f"  Size: {chunk['size']:,} characters")
-        print()
+def chunk_single_file(input_file: Path, output_dir: Path, max_chars: int, overlap: int) -> List[Path]:
+    """Chunks a single JSON file and returns a list of the created chunk file paths."""
+    try:
+        with open(input_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        messages = data.get('messages', [])
+        if not messages:
+            print(f"⚠️ No 'messages' found in {input_file.name}, skipping.", file=sys.stderr)
+            return []
+
+        created_files = []
+        chunk_num = 1
+        current_start = 0
+        while current_start < len(messages):
+            current_end = current_start
+            current_size = 0
+
+            # Add messages to chunk until size limit is reached
+            while current_end < len(messages):
+                temp_messages = messages[current_start : current_end + 1]
+                # Create a temporary structure for accurate size check
+                temp_chunk_data = data.copy()
+                temp_chunk_data['messages'] = temp_messages
+                temp_json_str = json.dumps(temp_chunk_data)
+
+                if len(temp_json_str) > max_chars and current_end > current_start:
+                    break # This message makes it too big, so stop before it.
+
+                current_size = len(temp_json_str)
+                current_end += 1
+
+            # Finalize the chunk
+            chunk_messages = messages[current_start:current_end]
+            if not chunk_messages:
+                break # Avoid creating empty chunks
+
+            chunk_data = data.copy()
+            chunk_data['messages'] = chunk_messages
+            if 'metadata' not in chunk_data: chunk_data['metadata'] = {}
+            chunk_data['metadata']['chunk_info'] = {
+                'source_file': str(input_file),
+                'chunk_num': chunk_num,
+                'message_indices': f'{current_start}-{current_end - 1}'
+            }
+
+            # Generate output filename
+            base_name = input_file.stem
+            script_name = Path(__file__).stem
+            output_name = f"{base_name}.{script_name}.chunk_{chunk_num:02d}.json"
+            output_file = output_dir / output_name
+
+            # Write chunk to file
+            output_dir.mkdir(parents=True, exist_ok=True)
+            with open(output_file, 'w', encoding='utf-8') as f:
+                json.dump(chunk_data, f, indent=2, ensure_ascii=False)
+
+            created_files.append(output_file)
+            print(f"ℹ️ Created chunk {output_file.name} with {len(chunk_messages)} messages.", file=sys.stderr)
+
+            # Set up for next chunk
+            current_start = max(current_start + 1, current_end - overlap)
+            chunk_num += 1
+
+        return created_files
+
+    except Exception as e:
+        print(f"❌ Error processing {input_file}: {e}", file=sys.stderr)
+        return []
+
+def process_files_pipeline(args: argparse.Namespace) -> None:
+    """Main pipeline processing loop for chunking."""
+    file_paths, _ = get_file_paths_from_input(args)
+
+    if not file_paths:
+        print("ℹ️ No input files found to process.", file=sys.stderr)
+        return
+
+    output_dir = Path(args.output_dir) if args.output_dir else None
+    total_chunks = 0
+
+    for file_path_str in file_paths:
+        input_file = Path(file_path_str)
+        # If no output dir, save chunks in a sub-directory named after the input file
+        chunk_output_dir = output_dir if output_dir else input_file.parent / input_file.stem
+
+        chunk_files = chunk_single_file(input_file, chunk_output_dir, args.size, args.overlap)
+
+        for chunk_file in chunk_files:
+            print(str(chunk_file)) # Print each new chunk path to stdout
+            total_chunks += 1
+
+    print(f"✅ Successfully created {total_chunks} chunk files.", file=sys.stderr)
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Chunks JSON chat files for pipeline processing.",
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+
+    parser.add_argument('files', nargs='*', help='Input JSON files or patterns. Omit if using stdin.')
+    parser.add_argument('-o', '--output-dir', help='Output directory for generated chunk folders (default: creates sub-folder next to input).')
+    parser.add_argument('-ff', '--from-file', help='Read file paths from a text file.')
+    parser.add_argument('-s', '--size', type=int, default=30000, help='Maximum characters per chunk (default: 30000).')
+    parser.add_argument('--overlap', type=int, default=2, help='Number of messages to overlap between chunks (default: 2).')
+
+    args = parser.parse_args()
+    process_files_pipeline(args)
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Chunk a chat JSON file at message boundaries with configurable size and overlap."
-    )
-    
-    parser.add_argument(
-        "input_file",
-        help="Path to the input JSON file"
-    )
-    
-    parser.add_argument(
-        "-o", "--output",
-        dest="output_base",
-        help="Base name for output files (default: input filename without extension)"
-    )
-    
-    parser.add_argument(
-        "-s", "--size",
-        dest="max_size",
-        type=int,
-        default=30000,
-        help="Maximum characters per chunk (default: 30000)"
-    )
-    
-    parser.add_argument(
-        "--overlap",
-        type=int,
-        default=2,
-        help="Number of messages to overlap between chunks for continuity (default: 2)"
-    )
-    
-    # Parse arguments
-    args = parser.parse_args()
-    
-    # Check if input file exists
-    if not os.path.exists(args.input_file):
-        print(f"Error: Input file '{args.input_file}' does not exist", file=sys.stderr)
-        sys.exit(1)
-    
-    try:
-        chunk_chat_json(
-            input_file=args.input_file,
-            output_base=args.output_base,
-            max_chars=args.max_size,
-            overlap_messages=args.overlap
-        )
-    except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
+    main()
