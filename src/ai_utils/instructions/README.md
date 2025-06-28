@@ -2,14 +2,14 @@
 
 A protocol for evolving and persisting core AI instructions across chat sessions.
 
-### **System Overview: The Living Instructions Protocol**
+### **System Overview: The Agent Continuity Protocol**
 
 Document Version: 1.0  
 Last Updated: Thursday, June 26, 2025 at 11:31 PM EDT
 
 #### **1\. Executive Summary**
 
-The "Living Instructions Protocol" is a system designed to overcome the limitations of static, session-based instructions for AI agents. Its purpose is to create a persistent and evolving set of operational rules, personas, and configurations that can be collaboratively maintained and improved over time by a human user and an AI agent.
+The "Agent Continuity Protocol" is a system designed to overcome the limitations of static, session-based instructions for AI agents. Its purpose is to create a persistent and evolving set of operational rules, personas, and configurations that can be collaboratively maintained and improved over time by a human user and an AI agent.
 
 The system treats the AI's instructions not as a fixed prompt, but as a version-controlled configuration file. It provides a robust toolchain for the AI to manage, update, and validate this configuration in a safe and structured manner, with the human user acting as the final authority for all changes.
 
