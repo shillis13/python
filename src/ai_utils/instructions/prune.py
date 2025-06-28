@@ -1,1 +1,0 @@
-../../yaml_utils/prune.py
