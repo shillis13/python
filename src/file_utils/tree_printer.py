@@ -20,6 +20,7 @@ Examples:
 """
 
 import argparse
+import logging
 import os
 import stat
 import sys
@@ -28,12 +29,9 @@ from pathlib import Path
 from typing import List, Set, Optional, Callable
 
 from dev_utils.lib_argparse_registry import register_arguments, parse_known_args
-from dev_utils.lib_logging import *
+from dev_utils.lib_logging import setup_logging, log_debug
 from dev_utils.lib_outputColors import colorize_string
 from file_utils.lib_fileinput import get_file_paths_from_input
-
-# Setup logging
-setup_logging(level=logging.ERROR)
 
 # Tree drawing characters
 TREE_CHARS = {
@@ -165,11 +163,11 @@ class TreePrinter:
             if path.is_symlink():
                 return colorize_string(name, fore_color="cyan")
             elif path.is_dir():
-                return colorize_string(name, fore_color="blue")
-            elif path.suffix in ['.py', '.sh', '.exe', '.bat']:
                 return colorize_string(name, fore_color="green")
-            elif path.suffix in ['.txt', '.md', '.rst', '.doc', '.pdf']:
+            elif path.suffix in ['.py', '.sh', '.exe', '.bat']:
                 return colorize_string(name, fore_color="yellow")
+            elif path.suffix in ['.txt', '.md', '.rst', '.doc', '.pdf']:
+                return colorize_string(name, fore_color="white")
             elif path.suffix in ['.jpg', '.png', '.gif', '.svg', '.bmp']:
                 return colorize_string(name, fore_color="red")
             else:
@@ -204,15 +202,16 @@ class TreePrinter:
             
             # Filter children based on settings
             if not self.show_files:
-                children = [child for child in children if child.is_dir() or child.is_symlink()]
+                children = [child for child in children if child.is_dir() and not child.is_symlink()]
             else:
                 # Filter files by patterns if specified
                 filtered_children = []
                 for child in children:
-                    if child.is_dir() or child.is_symlink():
+                    if child.is_dir() and not child.is_symlink():
                         filtered_children.append(child)
-                    elif self.should_include_file(child):
-                        filtered_children.append(child)
+                    elif child.is_file() or child.is_symlink():
+                        if self.should_include_file(child):
+                            filtered_children.append(child)
                 children = filtered_children
 
             for i, child in enumerate(children):
@@ -243,13 +242,17 @@ class TreePrinter:
                 print(f"{current_prefix}{display_name}{info}{symlink_target}")
 
                 # Update statistics
-                if child.is_dir():
+                if child.is_dir() and not child.is_symlink():
                     self.stats['dirs'] += 1
-                elif child.is_file():
-                    self.stats['files'] += 1
+                elif child.is_file() or child.is_symlink():
+                    if child.is_symlink():
+                        # Symlinks already counted above in symlink_target logic
+                        pass  
+                    else:
+                        self.stats['files'] += 1
 
-                # Recurse into directories
-                if child.is_dir() and (self.follow_symlinks or not child.is_symlink()):
+                # Recurse into directories (but not symlinked directories)
+                if child.is_dir() and not child.is_symlink() and (self.follow_symlinks or not child.is_symlink()):
                     self.print_tree(child, next_prefix, depth + 1)
                     
         except (OSError, PermissionError) as e:
@@ -308,17 +311,25 @@ def add_args(parser: argparse.ArgumentParser) -> None:
                        help="Show what directories would be processed without generating trees.")
     parser.add_argument('--help-examples', action='store_true',
                        help="Show usage examples and exit")
+    parser.add_argument('--help-verbose', action='store_true',
+                       help="Show detailed help with all parameters and use cases")
 
 
 register_arguments(add_args)
 
 
-def show_examples():
-    """Display usage examples."""
-    examples = """
-Usage Examples:
+def parse_arguments():
+    """Parse command line arguments."""
+    args, _ = parse_known_args(description="Pretty-print directory structure in ASCII format.")
+    return args
 
-Basic Usage:
+
+def show_examples():
+    """Display basic usage examples."""
+    examples = """
+Basic Usage Examples:
+
+Simple Directory Trees:
   tree_printer.py                           # Show current directory tree (dirs only)
   tree_printer.py /path/to/directory        # Specific directory
   tree_printer.py . --files                 # Include files
@@ -328,36 +339,195 @@ Pipeline Usage:
   echo "/path/dir1" | tree_printer.py --files               # Single directory from stdin
   tree_printer.py --from-file dirlist.txt --files           # Directories from file
 
-Filtering:
+Quick Filtering:
   tree_printer.py . --files --pattern "*.py"           # Python files only
-  tree_printer.py . --files --pattern "*.py" --pattern "*.md"  # Multiple patterns
   tree_printer.py . --ignore ".git,__pycache__,*.pyc"  # Ignore patterns
-  tree_printer.py . --hidden --files                   # Include hidden files
-
-Depth and Display Options:
   tree_printer.py . --max-depth 2 --files             # Limit depth
-  tree_printer.py . --files --size --modified         # Show file details
-  tree_printer.py . --files --permissions --size      # Show permissions and size
-  tree_printer.py . --ascii --files                   # ASCII characters only
-  tree_printer.py . --no-colors --files               # No colored output
 
-Advanced:
-  tree_printer.py . --follow-symlinks --files         # Follow symlinks
-  tree_printer.py . --unsorted --files                # Don't sort dirs first
-  tree_printer.py . --files --no-summary              # No statistics summary
-  tree_printer.py --dry-run /path/to/dirs             # Show what would be processed
-
-Pipeline Examples:
-  findFiles --ext py --recursive | xargs -I {} dirname {} | sort -u | tree_printer.py --files
-  ls -d */ | tree_printer.py --files --max-depth 1    # Tree view of subdirectories
+For comprehensive help with all parameters: tree_printer.py --help-verbose
 """
     print(examples)
 
 
-def parse_arguments():
-    """Parse command line arguments."""
-    args, _ = parse_known_args(description="Pretty-print directory structure in ASCII format.")
-    return args
+def show_verbose_help():
+    """Display comprehensive help with all parameters and detailed use cases."""
+    help_text = """
+tree_printer.py - Comprehensive Help and Examples
+
+OVERVIEW:
+    Pretty-prints directory structures in ASCII format with extensive filtering
+    and customization options. Supports pipeline input, multiple directories,
+    and detailed file information display.
+
+INPUT METHODS:
+    1. Command line: tree_printer.py /path/to/dir
+    2. Pipeline:     find . -type d | tree_printer.py
+    3. File list:    tree_printer.py --from-file directories.txt
+    4. Current dir:  tree_printer.py (defaults to current directory)
+
+BASIC PARAMETERS:
+
+--files, -f
+    Include files in output (default shows directories only)
+    Example: tree_printer.py --files
+
+--max-depth, -d N
+    Limit tree depth to N levels
+    Example: tree_printer.py --max-depth 3 --files
+
+--pattern, -p PATTERN
+    Include only files matching glob pattern (can be repeated)
+    Example: tree_printer.py --files --pattern "*.py" --pattern "*.md"
+
+--ignore, -i PATTERNS
+    Comma-separated patterns to ignore
+    Example: tree_printer.py --ignore ".git,__pycache__,*.pyc,node_modules"
+
+DISPLAY OPTIONS:
+
+--size, -s
+    Show file sizes in human-readable format (B, K, M, G, T)
+    Example: tree_printer.py --files --size
+
+--modified, -m
+    Show last modified dates (YYYY-MM-DD HH:MM format)
+    Example: tree_printer.py --files --modified
+
+--permissions
+    Show Unix-style file permissions (rwxrwxrwx format)
+    Example: tree_printer.py --files --permissions
+
+--ascii, -a
+    Use ASCII characters (+--,|) instead of Unicode (├──,│)
+    Example: tree_printer.py --ascii --files
+
+--no-colors
+    Disable colored output (useful for scripts/logs)
+    Example: tree_printer.py --files --no-colors
+
+ADVANCED OPTIONS:
+
+--hidden
+    Show hidden files and directories (starting with .)
+    Example: tree_printer.py --files --hidden
+
+--follow-symlinks
+    Follow symbolic links into directories
+    Example: tree_printer.py --files --follow-symlinks
+
+--unsorted
+    Don't sort directories before files (show in natural order)
+    Example: tree_printer.py --files --unsorted
+
+--no-summary
+    Don't show summary statistics at the end
+    Example: tree_printer.py --files --no-summary
+
+--dry-run
+    Show what directories would be processed without generating trees
+    Example: tree_printer.py --dry-run /path/to/dirs
+
+COMMON USE CASES:
+
+1. Project Overview (Developer):
+   tree_printer.py --files --ignore ".git,__pycache__,node_modules,*.pyc"
+   # Clean view of project structure without build artifacts
+
+2. Documentation Generation:
+   tree_printer.py --files --no-colors --ascii > project_structure.txt
+   # Generate text file with project structure for documentation
+
+3. Large Directory Analysis:
+   tree_printer.py --max-depth 2 --size --files
+   # Shallow view with file sizes to understand disk usage
+
+4. Python Project Structure:
+   tree_printer.py --files --pattern "*.py" --pattern "*.md" --pattern "*.txt"
+   # Show only Python files and documentation
+
+5. System Administration:
+   tree_printer.py /etc --max-depth 2 --permissions
+   # Check configuration directory structure with permissions
+
+6. Backup Planning:
+   tree_printer.py --files --size --modified --max-depth 3
+   # See file dates and sizes for backup decisions
+
+7. Security Audit:
+   tree_printer.py --files --permissions --hidden
+   # Include hidden files and show all permissions
+
+8. Quick Directory Count:
+   tree_printer.py --max-depth 1
+   # Just show immediate subdirectories
+
+PIPELINE EXAMPLES:
+
+1. Process Multiple Project Directories:
+   find ~/projects -name "*.git" -type d | sed 's/\\.git$//' | tree_printer.py --files
+
+2. Show Tree for Directories Containing Python Files:
+   find . -name "*.py" -type f | xargs dirname | sort -u | tree_printer.py --files
+
+3. Analyze Recently Modified Directories:
+   find . -type d -mtime -7 | tree_printer.py --files --modified
+
+4. Filter by Size and Show Structure:
+   find . -type d -exec du -sh {} \\; | sort -hr | head -10 | cut -f2 | tree_printer.py
+
+5. Git Repository Analysis:
+   git ls-files | xargs dirname | sort -u | tree_printer.py --files --pattern "*.py"
+
+ADVANCED COMBINATIONS:
+
+1. Full Project Documentation:
+   tree_printer.py --files --size --modified --ignore ".git,__pycache__" --ascii --no-colors
+
+2. Detailed Security Audit:
+   tree_printer.py --files --permissions --hidden --follow-symlinks --size
+
+3. Development Environment Overview:
+   tree_printer.py --files --pattern "*.py" --pattern "*.js" --pattern "*.md" --max-depth 4
+
+4. Minimal Clean View:
+   tree_printer.py --max-depth 2 --no-summary --ignore ".*,__pycache__,node_modules"
+
+FILE PATTERNS:
+    *.py        Python files
+    *.js        JavaScript files
+    *.md        Markdown files
+    test_*      Files starting with 'test_'
+    *config*    Files containing 'config'
+    *.{py,js}   Multiple extensions (if shell supports it)
+
+IGNORE PATTERNS:
+    .git            Git directories
+    __pycache__     Python cache
+    node_modules    Node.js modules
+    *.pyc          Compiled Python
+    .DS_Store      macOS metadata
+    Thumbs.db      Windows thumbnails
+    .vscode        VS Code settings
+    .idea          IntelliJ settings
+
+OUTPUT FORMAT:
+    Directory/
+    ├── subdirectory/
+    │   ├── file1.txt [644 1.2K 2024-01-15 14:30]
+    │   └── file2.py [755 3.4K 2024-01-16 09:15]
+    └── another_file.md [644 512B 2024-01-14 16:45]
+
+    2 directories, 3 files, 5.1K total
+
+PERFORMANCE TIPS:
+    - Use --max-depth for large directory trees
+    - Use --ignore to skip irrelevant directories
+    - Use --no-colors for faster output in scripts
+    - Use --pattern to focus on specific file types
+
+For basic examples, use: tree_printer.py --help-examples
+"""
+    print(help_text)
 
 
 def process_directories_pipeline(args):
@@ -471,10 +641,15 @@ def process_directories_pipeline(args):
 
 def main():
     """Main entry point."""
+    setup_logging(level=logging.ERROR)
     args = parse_arguments()
     
     if args.help_examples:
         show_examples()
+        return
+    
+    if args.help_verbose:
+        show_verbose_help()
         return
     
     # Use pipeline processing which handles all input methods

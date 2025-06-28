@@ -20,36 +20,56 @@ from datetime import datetime
 try:
     from lib_fileinput import get_file_paths_from_input
 except ImportError:
+    # This fallback allows the script to run even if lib_fileinput is not in the path,
+    # assuming it's in the same directory (relevant for package structures).
     from .lib_fileinput import get_file_paths_from_input
 
+"""
+Escapes HTML and formats newlines for clean display.
+"""
 def escape_html_content(text: str) -> str:
-    """Escapes HTML and formats newlines for clean display."""
     if not isinstance(text, str):
         text = str(text)
     escaped = html.escape(text)
     # A single regex to replace newlines with <br> for better performance
     return re.sub(r'\n', '<br>', escaped)
 
+"""
+Gets a CSS class based on the message role.
+"""
 def get_role_class(role: str) -> str:
-    """Gets a CSS class based on the message role."""
     role_lower = role.lower()
-    if role_lower == 'user': return 'user-message'
-    if role_lower == 'assistant': return 'assistant-message'
+    if any(term in role_lower for term in ['user', 'prompt']):
+        return 'user-message'
+    if any(term in role_lower for term in ['assistant', 'response']):
+        return 'assistant-message'
     return 'system-message'
 
+"""
+Converts a single JSON file to an HTML file.
+"""
 def process_single_file(input_file: Path, output_file: Path) -> bool:
-    """Converts a single JSON file to an HTML file."""
     try:
         with open(input_file, 'r', encoding='utf-8') as f:
             data = json.load(f)
 
         messages = data.get('messages', [])
-        title = data.get('metadata', {}).get('source_file', input_file.name)
+        title = data.get('title', input_file.name)
 
+        # Define a list of possible keys for the message content to make the script flexible.
+        content_keys = ['say', 'content', 'text', 'message']
+        
         message_html = []
         for msg in messages:
             role = msg.get('role', 'unknown')
-            content = msg.get('content', '[no content]')
+            
+            # Find the content by checking for possible keys in order.
+            content = '[no content]'
+            for key in content_keys:
+                if key in msg:
+                    content = msg[key]
+                    break
+            
             role_class = get_role_class(role)
             message_html.append(f"""
             <div class="message {role_class}">
@@ -71,7 +91,7 @@ def process_single_file(input_file: Path, output_file: Path) -> bool:
         .message {{ padding: 20px; border-bottom: 1px solid #eee; }}
         .message:last-child {{ border-bottom: none; }}
         .role {{ font-weight: bold; margin-bottom: 10px; color: #333; }}
-        .content {{ line-height: 1.6; color: #555; }}
+        .content {{ line-height: 1.6; color: #555; white-space: pre-wrap; }}
         .user-message .role {{ color: #007bff; }}
         .assistant-message .role {{ color: #28a745; }}
     </style>
@@ -95,8 +115,10 @@ def process_single_file(input_file: Path, output_file: Path) -> bool:
         print(f"❌ Error processing {input_file}: {e}", file=sys.stderr)
         return False
 
+"""
+Generates a descriptive output filename for the HTML.
+"""
 def generate_output_filename(input_file: Path, output_dir: Path = None) -> Path:
-    """Generates a descriptive output filename for the HTML."""
     if output_dir is None:
         output_dir = input_file.parent
 
@@ -107,8 +129,10 @@ def generate_output_filename(input_file: Path, output_dir: Path = None) -> Path:
     output_name = f"{base_name}.{script_name}.{timestamp}.html"
     return output_dir / output_name
 
+"""
+Main pipeline processing loop for HTML conversion.
+"""
 def process_files_pipeline(args: argparse.Namespace) -> None:
-    """Main pipeline processing loop for HTML conversion."""
     file_paths, _ = get_file_paths_from_input(args)
 
     if not file_paths:
