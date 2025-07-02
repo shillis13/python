@@ -20,7 +20,8 @@ from dev_utils.lib_argparse_registry import register_arguments, parse_known_args
 def rename_files(command):
     """Executes the f2 command with the given arguments."""
     try:
-        log_debug(f"Running command: {' '.join(command)}")
+        #log_debug(f"Running command: {' '.join(command)}")
+        log_info(f"Running command: {' '.join(command)}")
         subprocess.run(command, check=True)
     except subprocess.CalledProcessError as e:
         log_error(f"Command failed with error: {e}")
@@ -73,11 +74,12 @@ def build_f2_command(args):
 
     if args.replace_white_space:
         command.extend(["--find", r"\s", "--replace", args.replace_white_space])
-        log_debug(f"Added --find and --replace arguments to replace whitespace with: {args.replace_white_space}")
+        # command.extend(["--find", r'[ ]{1,}', "--replace",  r'_'])
+        log_info(f"Added --find and --replace arguments to replace whitespace with: {args.replace_white_space}")
 
     if args.remove_white_space:
         command.extend(["--find", r"\s", "--replace", ""])
-        log_debug("Added --find and --replace arguments to remove all whitespace")
+        log_info("Added --find and --replace arguments to remove all whitespace")
 
     # Check if --fileByFirstChar is set and construct f2 command accordingly
     if args.fileByFirstChar:
