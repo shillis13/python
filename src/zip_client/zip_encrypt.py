@@ -8,7 +8,7 @@ import pyzipper
 from dev_utils.lib_logging import log_info, log_error
 from .ignore_filter import build_ignore_filter
 
-DEFAULT_PASSWORD = "password"
+DEFAULT_PASSWORD = "1Pa$$word!"
 
 
 def _normalize_sources(source: Path | Iterable[Path]) -> list[Path]:
