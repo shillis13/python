@@ -1,0 +1,652 @@
+# Universal AI Capabilities Assessment Schema
+# Common structure for all AI platforms (Claude, ChatGPT, Gemini, Grok, etc.)
+
+metadata:
+  schema_version: "2.0.0"
+  assessment_version: "1.0.0"
+  platform: "string"  # claude, chatgpt, gemini, grok, etc.
+  platform_version: "string"  # specific model version
+  access_tier: "string"  # free, plus, premium, enterprise, etc.
+  assessment_date: "2025-01-15T00:00:00Z"
+  next_assessment_due: "2025-04-15T00:00:00Z"
+  assessor_info:
+    evaluator_name: "string"
+    evaluation_method: "direct_testing"  # direct_testing, documentation_review, third_party
+    testing_duration_hours: 0
+    testing_environment: "string"  # web, api, mobile, desktop
+  schema_compatibility:
+    - "universal_ai_comparison"
+    - "platform_specific_extension"
+
+changelog:
+  - version: "1.0.0"
+    date: "2025-01-15T00:00:00Z"
+    change_type: "initial_assessment"  # initial, capability_update, interface_change, policy_change
+    impact_level: "major"  # major, minor, patch
+    summary: "string"
+    changes:
+      new_capabilities: []
+      improved_capabilities: []
+      deprecated_capabilities: []
+      performance_changes: []
+      policy_changes: []
+    testing_notes: "string"
+
+# Core AI Capabilities (Universal across all platforms)
+core_capabilities:
+  reasoning_analysis:
+    logical_reasoning:
+      capability_level: "advanced"  # none, basic, intermediate, advanced, expert
+      confidence: "high"  # low, medium, high
+      evidence: ["multi_step_problems", "formal_logic"]
+      testing_examples:
+        - prompt: "string"
+          response_quality: "high"  # low, medium, high
+          accuracy: "high"
+      limitations: []
+      testing_date: "2025-01-15T00:00:00Z"
+      
+    critical_thinking:
+      capability_level: "advanced"
+      confidence: "high"
+      evidence: ["argument_analysis", "bias_detection"]
+      testing_examples: []
+      limitations: []
+      testing_date: "2025-01-15T00:00:00Z"
+      
+    causal_reasoning:
+      capability_level: "intermediate"
+      confidence: "medium"
+      evidence: ["cause_effect_chains"]
+      testing_examples: []
+      limitations: []
+      testing_date: "2025-01-15T00:00:00Z"
+      
+    mathematical_problem_solving:
+      basic_mathematics: "expert"
+      advanced_calculus: "advanced"
+      statistical_analysis: "advanced"
+      proof_generation: "intermediate"
+      symbolic_manipulation: "intermediate"
+
+  text_generation:
+    quality_coherence:
+      capability_level: "expert"
+      confidence: "high"
+      context_retention_tokens: 0  # actual context window size
+      style_adaptability: "expert"
+      factual_accuracy: "high"
+      creative_consistency: "advanced"
+      
+    specialized_writing:
+      academic_papers: "advanced"
+      creative_fiction: "advanced"
+      technical_documentation: "expert"
+      business_communications: "expert"
+      legal_documents: "intermediate"
+      code_documentation: "expert"
+      
+    multilingual_capabilities:
+      supported_languages: 0  # number of languages supported
+      translation_quality: "advanced"
+      cultural_context: "intermediate"
+      code_switching: "intermediate"
+
+  multimodal_capabilities:
+    image_understanding:
+      available: true
+      supported_formats: ["jpg", "png", "gif", "webp"]
+      max_images_per_prompt: 0
+      capabilities: ["description", "ocr", "analysis"]
+      accuracy: "high"
+      
+    image_generation:
+      available: false
+      resolution_options: []
+      style_control: "none"  # none, basic, intermediate, advanced
+      safety_filtering: "high"
+      
+    video_analysis:
+      available: false
+      supported_formats: []
+      max_duration: "string"
+      capabilities: []
+      
+    audio_processing:
+      available: false
+      supported_formats: []
+      capabilities: []
+      real_time_processing: false
+
+  code_capabilities:
+    programming_languages:
+      python:
+        proficiency: "expert"  # none, basic, intermediate, advanced, expert
+        features: ["debugging", "optimization", "testing"]
+        execution_capability: false
+      javascript:
+        proficiency: "expert"
+        features: ["debugging", "frameworks", "node"]
+        execution_capability: false
+      # Additional languages as needed
+      
+    development_features:
+      code_execution: false
+      debugging_assistance: "advanced"
+      code_review: "advanced"
+      refactoring_help: "advanced"
+      documentation_generation: "expert"
+
+# NEW: Development Support Capabilities
+development_support:
+  github_integration:
+    direct_integration: false
+    repo_read_access: false
+    repo_write_access: false
+    pull_request_analysis: false
+    code_review_automation: false
+    issue_management: false
+    
+  development_services:
+    codex_availability: false
+    copilot_integration: false
+    ide_extensions: []
+    ci_cd_integration: false
+    package_management: false
+    
+  code_collaboration:
+    shared_coding_sessions: false
+    code_sharing_mechanisms: []
+    version_control_awareness: "basic"  # none, basic, intermediate, advanced
+    merge_conflict_resolution: false
+
+# NEW: Access Point Differentiation
+access_point_differentiation:
+  api_access:
+    available: true
+    capabilities: []
+    limitations: []
+    unique_features: []
+    
+  web_interface:
+    available: true
+    capabilities: []
+    limitations: []
+    unique_features: []
+    
+  mobile_interface:
+    available: false
+    capabilities: []
+    limitations: []
+    unique_features: []
+    
+  project_workspaces:
+    available: false
+    capabilities: []
+    limitations: []
+    unique_features: []
+    
+  feature_parity_score: 85  # percentage (100 = perfect parity across access points)
+  differentiation_impact: "low"  # low, medium, high (lower is better)
+
+# NEW: Cross-Chat Communications and Continuity
+cross_chat_continuity:
+  conversation_linking:
+    available: false
+    automatic_linking: false
+    manual_linking: false
+    context_transfer_quality: "none"  # none, basic, intermediate, advanced
+    
+  session_persistence:
+    conversation_history: "persistent"  # none, session_only, persistent
+    user_preferences: "session_only"
+    learned_context: "none"
+    project_continuity: "none"
+    
+  data_handoff:
+    export_capabilities: ["text", "markdown"]
+    import_capabilities: []
+    structured_data_transfer: false
+    artifact_continuity: false
+
+# NEW: Memory Storage Types
+memory_storage:
+  conversation_memory:
+    within_session: "excellent"  # none, basic, good, excellent
+    across_sessions: "none"
+    retention_period: "session_only"
+    memory_capacity: "context_window_limited"
+    
+  file_storage:
+    upload_capability: true
+    supported_formats: ["text", "images", "documents"]
+    storage_persistence: "session_only"  # none, session_only, temporary, persistent
+    max_file_size: "string"
+    cross_chat_accessibility: false
+    
+  knowledge_base:
+    personal_knowledge_retention: false
+    fact_learning: false
+    preference_learning: false
+    skill_improvement: false
+    
+  shared_storage:
+    team_access: false
+    collaborative_storage: false
+    shared_artifacts: false
+    permission_controls: false
+
+# NEW: User Adaptability
+user_adaptability:
+  personalization:
+    writing_style_adaptation: "basic"  # none, basic, intermediate, advanced
+    expertise_level_adjustment: "intermediate"
+    communication_preference_learning: "basic"
+    topic_interest_tracking: "none"
+    
+  behavioral_adaptation:
+    response_length_preference: "contextual"
+    formality_level_adjustment: "good"
+    explanation_depth_adaptation: "good"
+    humor_style_matching: "basic"
+    
+  learning_capabilities:
+    from_corrections: false
+    from_feedback: false
+    from_usage_patterns: false
+    retention_across_sessions: false
+
+# NEW: Restrictions and Guardrails
+restrictions_guardrails:
+  content_restrictions:
+    harmful_content: "strict"  # none, lenient, moderate, strict
+    adult_content: "filtered"
+    violence_depictions: "restricted"
+    illegal_activities: "blocked"
+    
+  topic_limitations:
+    current_events_cutoff: "string"  # date or "real_time"
+    personal_information: "blocked"
+    medical_advice: "disclaimed"
+    legal_advice: "disclaimed"
+    financial_advice: "disclaimed"
+    
+  safety_mechanisms:
+    content_filtering: "multi_layer"
+    output_monitoring: "active"
+    user_reporting: "available"
+    appeal_process: "available"
+    
+  override_capabilities:
+    user_can_override: false
+    admin_override_available: false
+    context_dependent_flexibility: true
+    transparency_about_restrictions: "high"
+
+# NEW: External Tool Integrations
+external_integrations:
+  available_tools:
+    - name: "web_search"
+      availability: true
+      quality: "high"
+      limitations: []
+      
+  integration_categories:
+    productivity_tools: []
+    developer_tools: []
+    business_platforms: []
+    social_media: []
+    cloud_services: []
+    
+  integration_quality:
+    native_integrations: 0  # count
+    api_based_integrations: 0  # count
+    third_party_ecosystem_size: "small"  # small, medium, large
+    integration_reliability: "high"
+    
+  custom_integrations:
+    user_can_add_tools: false
+    webhook_support: false
+    api_integration_capability: false
+    enterprise_custom_tools: false
+
+# NEW: Context and Scale Assessment
+context_scale_assessment:
+  context_window:
+    token_limit: 0  # exact token count
+    effective_usage_tokens: 0  # practical limit before degradation
+    context_retention_quality: "excellent"  # poor, fair, good, excellent
+    long_conversation_handling: "good"
+    
+  conversation_limits:
+    max_messages_per_session: 0  # number or "unlimited"
+    max_session_duration: "string"  # e.g., "24_hours", "unlimited"
+    conversation_reset_triggers: []
+    memory_between_sessions: "none"  # none, limited, good, excellent
+    
+  file_processing_capacity:
+    max_files_per_session: 0
+    max_file_size_mb: 0
+    total_upload_limit_mb: 0
+    supported_file_types: []
+    batch_processing_capability: false
+    concurrent_file_analysis: false
+    
+  memory_architecture:
+    working_memory_persistence: "session_only"  # none, session_only, persistent
+    information_retention_patterns: []
+    memory_compression_behavior: "string"
+    forgotten_information_types: []
+    
+  scalability_performance:
+    performance_degradation_points: []
+    usage_throttling_triggers: []
+    peak_capacity_handling: "good"  # poor, fair, good, excellent
+    concurrent_user_impact: "minimal"  # none, minimal, moderate, significant
+
+# NEW: Customization and Adaptation Capabilities  
+customization_adaptation:
+  user_personalization:
+    writing_style_learning: "basic"  # none, basic, intermediate, advanced
+    expertise_level_detection: "good"  # none, basic, good, excellent
+    communication_preference_adaptation: "intermediate"
+    personality_matching: "basic"
+    
+  behavioral_learning:
+    learning_from_corrections: false
+    feedback_integration: false
+    usage_pattern_recognition: false
+    preference_evolution: false
+    learning_retention_period: "session_only"  # none, session_only, days, weeks, permanent
+    
+  custom_instructions:
+    system_prompt_customization: false
+    persistent_behavioral_guidelines: false
+    context_specific_instructions: false
+    instruction_hierarchy_handling: "basic"  # none, basic, intermediate, advanced
+    
+  preference_retention:
+    user_preference_storage: "none"  # none, session_only, persistent
+    preference_categories: []
+    preference_conflict_resolution: "basic"
+    cross_session_preference_transfer: false
+    
+  adaptation_scope:
+    customizable_aspects: []
+    adaptation_granularity: "coarse"  # coarse, moderate, fine
+    real_time_adaptation: false
+    user_feedback_responsiveness: "moderate"  # low, moderate, high
+    
+  reset_and_control:
+    user_adaptation_reset: false
+    learned_behavior_modification: false
+    adaptation_transparency: "low"  # low, medium, high
+    user_control_level: "minimal"  # none, minimal, moderate, full
+
+# NEW: Future Roadmap and Announcements
+future_roadmap:
+  officially_announced_features:
+    - feature_name: "string"
+      announcement_date: "2025-01-15T00:00:00Z"
+      expected_release: "string"  # e.g., "Q2_2025", "2025", "TBD"
+      description: "string"
+      source_url: "string"
+      
+  company_strategic_direction:
+    stated_priorities: []
+    research_focus_areas: []
+    partnership_strategy: []
+    market_positioning_goals: []
+    
+  beta_features:
+    currently_testing: []
+    preview_access_requirements: []
+    beta_graduation_timeline: []
+    
+  research_publications:
+    recent_papers: []
+    research_directions: []
+    academic_collaborations: []
+    
+  development_partnerships:
+    integration_partnerships: []
+    technology_collaborations: []
+    platform_integrations: []
+    enterprise_partnerships: []
+
+# NEW: Advanced Use Cases and Applications
+advanced_applications:
+  top_innovative_uses:
+    - use_case: "string"
+      description: "string"
+      effectiveness_rating: "high"  # low, medium, high
+      complexity_level: "advanced"  # basic, intermediate, advanced, expert
+      source_url: "string"
+      user_community_size: "small"  # small, medium, large
+      
+  platform_weakness_solutions:
+    - weakness_addressed: "string"
+      solution_approach: "string"
+      implementation_method: "string"
+      effectiveness: "high"
+      source_url: "string"
+      
+  code_execution_analysis:
+    user_code_execution_capability: false
+    supported_languages: []
+    execution_environment: "string"  # e.g., "sandboxed", "cloud", "local"
+    security_measures: []
+    execution_limitations: []
+    
+  community_extensions:
+    third_party_tools: []
+    plugin_ecosystem_size: "small"  # small, medium, large
+    user_created_integrations: []
+    community_innovation_examples: []
+    
+  professional_workflows:
+    enterprise_use_cases: []
+    developer_workflows: []
+    research_applications: []
+    business_process_integrations: []
+    
+  documented_outcomes:
+    published_case_studies: []
+    performance_benchmarks: []
+    roi_studies: []
+    academic_research_citations: []
+
+# Standard Platform Features
+platform_features:
+  user_interface:
+    web_interface:
+      usability_score: "excellent"  # poor, fair, good, excellent
+      mobile_responsiveness: "good"
+      accessibility_compliance: "good"
+      customization_options: "limited"
+      
+    mobile_applications:
+      android_app: false
+      ios_app: false
+      feature_parity: "none"  # none, partial, full
+      offline_capabilities: false
+      
+    conversation_management:
+      history_access: "full"  # none, limited, full
+      search_functionality: "basic"  # none, basic, advanced
+      organization_tools: []
+      export_options: ["text"]
+      sharing_capabilities: false
+
+  api_ecosystem:
+    api_availability: true
+    documentation_quality: "excellent"  # poor, fair, good, excellent
+    rate_limits: "reasonable"  # strict, reasonable, generous
+    pricing_model: "usage_based"  # free, subscription, usage_based, tiered
+    
+    integration_support:
+      rest_api: true
+      streaming_responses: true
+      function_calling: false
+      webhook_support: false
+      sdk_availability: []
+
+# Performance and Reliability
+performance_benchmarks:
+  response_metrics:
+    average_response_time_seconds: 0.0
+    complex_query_time_seconds: 0.0
+    reliability_score: 0.0  # 0-100
+    error_frequency: "low"  # low, medium, high
+    
+  accuracy_metrics:
+    factual_accuracy_percentage: 0
+    coding_accuracy_percentage: 0
+    mathematical_accuracy_percentage: 0
+    consistency_score: 0
+    
+  scalability:
+    concurrent_conversations: "multiple"  # single, limited, multiple, unlimited
+    peak_usage_handling: "good"  # poor, fair, good, excellent
+    system_uptime_percentage: 0.0
+
+# Safety and Ethics Framework
+safety_framework:
+  ethical_principles:
+    transparency: "high"  # low, medium, high
+    fairness: "high"
+    accountability: "high"
+    privacy_protection: "high"
+    
+  safety_measures:
+    pre_deployment_testing: "extensive"  # minimal, moderate, extensive
+    ongoing_monitoring: "active"  # passive, active, comprehensive
+    incident_response: "available"  # none, basic, available, comprehensive
+    user_safety_education: "integrated"  # none, basic, integrated
+    
+  bias_mitigation:
+    bias_detection: "ongoing"  # none, initial, ongoing
+    bias_correction: "attempted"  # none, attempted, systematic
+    diverse_training_data: "prioritized"  # unknown, attempted, prioritized
+    fairness_auditing: "periodic"  # none, periodic, continuous
+
+# Known Limitations
+limitations:
+  knowledge_boundaries:
+    training_cutoff_date: "string"
+    real_time_limitations: "string"
+    domain_knowledge_gaps: []
+    
+  technical_constraints:
+    context_window_limits: 0  # token count
+    computation_limits: "moderate"  # low, moderate, high
+    processing_speed_limits: "none"  # none, moderate, significant
+    
+  functional_limitations:
+    cannot_learn_from_conversations: true
+    cannot_access_external_systems: true
+    cannot_retain_personal_information: true
+    cannot_execute_code: true
+
+# Competitive Analysis
+competitive_positioning:
+  unique_strengths: []
+  competitive_advantages: []
+  areas_for_improvement: []
+  market_differentiation: []
+  
+  comparison_metrics:
+    overall_capability_score: 0  # 0-100
+    user_satisfaction_rating: 0.0  # 0-5.0
+    market_share_estimate: "string"
+    innovation_leadership: "follower"  # leader, strong, competitive, follower
+
+# Assessment Validation
+assessment_methodology:
+  testing_approach:
+    direct_interaction_hours: 0
+    feature_exploration_completeness: "partial"  # minimal, partial, comprehensive
+    comparative_testing: false
+    third_party_validation: false
+    
+  evidence_sources:
+    official_documentation: []
+    user_community_feedback: false
+    expert_reviews: false
+    benchmark_studies: false
+    
+  confidence_assessment:
+    overall_confidence: "high"  # low, medium, high
+    data_recency: "current"  # outdated, recent, current
+    testing_completeness: "comprehensive"  # minimal, adequate, comprehensive
+    verification_status: "multi_source"  # single_source, dual_source, multi_source
+
+# NEW: Data Input Routes  
+data_input_routes:
+  file_uploads:
+    supported_formats: ["text", "images", "documents"]
+    max_file_size: "string"
+    processing_capabilities: ["text_extraction", "analysis"]
+    batch_processing: false
+    
+  real_time_sources:
+    web_search: true
+    live_data_feeds: false
+    social_media_integration: false
+    news_feeds: false
+    
+  platform_integrations:
+    github_access: false
+    google_workspace: false
+    microsoft_365: false
+    cloud_storage: false
+    
+  live_system_access:
+    computer_control: false
+    terminal_access: false
+    system_monitoring: false
+    network_access: false
+
+# Cross-Platform Comparison Schema (for separate comparison document)
+comparison_framework:
+  metadata:
+    comparison_date: "2025-01-15T00:00:00Z"
+    platforms_compared: []
+    comparison_version: "1.0.0"
+    
+  capability_matrix:
+    # Each capability gets rated across all platforms
+    reasoning_capabilities: {}  # platform_name: rating
+    multimodal_capabilities: {}
+    development_support: {}
+    customization_features: {}
+    context_handling: {}
+    
+  strengths_weaknesses:
+    # Per platform analysis
+    platform_name:
+      unique_strengths: []
+      competitive_advantages: []
+      notable_weaknesses: []
+      areas_for_improvement: []
+      
+  use_case_recommendations:
+    enterprise_development: "recommended_platform"
+    creative_work: "recommended_platform"
+    research_analysis: "recommended_platform"
+    education: "recommended_platform"
+    personal_productivity: "recommended_platform"
+    
+  market_positioning:
+    innovation_leaders: []
+    value_propositions: {}  # platform: value_prop
+    target_demographics: {}
+    pricing_competitiveness: {}
+    
+# Platform-Specific Extensions (Optional)
+platform_extensions:
+  # This section allows for platform-specific capabilities that don't fit the universal model
+  # Each platform can add unique sections here while maintaining core compatibility
+  custom_capabilities: {}
+  proprietary_features: {}
+  platform_specific_metrics: {}

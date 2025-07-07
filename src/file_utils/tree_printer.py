@@ -7,16 +7,14 @@ Pretty-prints directory structures in ASCII format, similar to the Unix 'tree' c
 but with enhanced filtering and customization options.
 
 Usage:
-    tree_printer.py [directory] [options]
+    tree_printer.py [path] [options]
+    find . -type f -name "*.py" | tree_printer.py --files
 
 Examples:
     tree_printer.py                              # Current directory, dirs only
-    tree_printer.py /path/to/dir --files         # Include files
-    tree_printer.py . --max-depth 3 --files     # Limit depth and show files
-    tree_printer.py . --pattern "*.py" --files  # Show only Python files
-    tree_printer.py . --ignore ".git,__pycache__,*.pyc" --files
-    tree_printer.py . --size --modified --files # Show file details
-    tree_printer.py . --ascii --files           # Use simple ASCII characters
+    tree_printer.py /path/to/dir --files         # Include files in a specific directory
+    tree_printer.py . --absolute                # Use absolute path for the root
+    cat file_list.txt | tree_printer.py --files # Visualize parent dirs of files in list
 """
 
 import argparse
@@ -52,14 +50,14 @@ TREE_CHARS = {
 
 class TreePrinter:
     """Handles directory tree visualization with various formatting options."""
-    
+
     def __init__(self, show_files: bool = False, max_depth: int = None,
                  ignore_patterns: List[str] = None, file_patterns: List[str] = None,
                  show_size: bool = False, show_modified: bool = False,
                  show_permissions: bool = False, use_colors: bool = True,
                  use_ascii: bool = False, sort_dirs_first: bool = True,
                  show_hidden: bool = False, follow_symlinks: bool = False):
-        
+
         self.show_files = show_files
         self.max_depth = max_depth
         self.ignore_patterns = ignore_patterns or []
@@ -72,7 +70,7 @@ class TreePrinter:
         self.sort_dirs_first = sort_dirs_first
         self.show_hidden = show_hidden
         self.follow_symlinks = follow_symlinks
-        
+
         # Statistics
         self.stats = {
             'dirs': 0,
@@ -84,27 +82,27 @@ class TreePrinter:
     def should_ignore(self, path: Path) -> bool:
         """Check if a path should be ignored based on patterns."""
         name = path.name
-        
+
         # Skip hidden files/dirs unless explicitly requested
         if not self.show_hidden and name.startswith('.'):
             return True
-            
+
         # Check ignore patterns
         for pattern in self.ignore_patterns:
             if path.match(pattern):
                 return True
-                
+
         return False
 
     def should_include_file(self, path: Path) -> bool:
         """Check if a file should be included based on file patterns."""
         if not self.file_patterns:
             return True
-            
+
         for pattern in self.file_patterns:
             if path.match(pattern):
                 return True
-                
+
         return False
 
     def format_size(self, size: int) -> str:
@@ -135,10 +133,10 @@ class TreePrinter:
     def get_item_info(self, path: Path) -> str:
         """Get formatted information string for a file/directory."""
         info_parts = []
-        
+
         if self.show_permissions:
             info_parts.append(self.format_permissions(path))
-            
+
         if self.show_size and path.is_file():
             try:
                 size = path.stat().st_size
@@ -146,10 +144,10 @@ class TreePrinter:
                 info_parts.append(f"{self.format_size(size):>7}")
             except (OSError, PermissionError):
                 info_parts.append("   ???B")
-                
+
         if self.show_modified:
             info_parts.append(self.format_modified(path))
-            
+
         if info_parts:
             return f" [{' '.join(info_parts)}]"
         return ""
@@ -158,7 +156,7 @@ class TreePrinter:
         """Apply colors to file/directory names based on type."""
         if not self.use_colors:
             return name
-            
+
         try:
             if path.is_symlink():
                 return colorize_string(name, fore_color="cyan")
@@ -178,15 +176,15 @@ class TreePrinter:
     def get_sorted_children(self, directory: Path) -> List[Path]:
         """Get sorted list of directory children."""
         try:
-            children = [child for child in directory.iterdir() 
+            children = [child for child in directory.iterdir()
                        if not self.should_ignore(child)]
-            
+
             if self.sort_dirs_first:
                 # Sort directories first, then files, both alphabetically
                 children.sort(key=lambda x: (not x.is_dir(), x.name.lower()))
             else:
                 children.sort(key=lambda x: x.name.lower())
-                
+
             return children
         except (OSError, PermissionError) as e:
             log_debug(f"Cannot read directory {directory}: {e}")
@@ -196,10 +194,10 @@ class TreePrinter:
         """Recursively print the directory tree."""
         if self.max_depth is not None and depth > self.max_depth:
             return
-            
+
         try:
             children = self.get_sorted_children(directory)
-            
+
             # Filter children based on settings
             if not self.show_files:
                 children = [child for child in children if child.is_dir() and not child.is_symlink()]
@@ -216,7 +214,7 @@ class TreePrinter:
 
             for i, child in enumerate(children):
                 is_last = i == len(children) - 1
-                
+
                 # Choose the appropriate tree character
                 if is_last:
                     current_prefix = prefix + self.chars['last']
@@ -228,7 +226,7 @@ class TreePrinter:
                 # Format the item name and info
                 display_name = self.colorize_item(child.name, child)
                 info = self.get_item_info(child)
-                
+
                 # Handle symlinks
                 symlink_target = ""
                 if child.is_symlink():
@@ -247,14 +245,14 @@ class TreePrinter:
                 elif child.is_file() or child.is_symlink():
                     if child.is_symlink():
                         # Symlinks already counted above in symlink_target logic
-                        pass  
+                        pass
                     else:
                         self.stats['files'] += 1
 
                 # Recurse into directories (but not symlinked directories)
                 if child.is_dir() and not child.is_symlink() and (self.follow_symlinks or not child.is_symlink()):
                     self.print_tree(child, next_prefix, depth + 1)
-                    
+
         except (OSError, PermissionError) as e:
             print(f"{prefix}[Error reading directory: {e}]")
 
@@ -268,7 +266,7 @@ class TreePrinter:
             parts.append(f"{self.stats['files']} file{'s' if self.stats['files'] != 1 else ''}")
         if self.stats['symlinks'] > 0:
             parts.append(f"{self.stats['symlinks']} symlink{'s' if self.stats['symlinks'] != 1 else ''}")
-            
+
         if parts:
             summary = ", ".join(parts)
             if self.show_size and self.stats['total_size'] > 0:
@@ -276,12 +274,47 @@ class TreePrinter:
             print(summary)
 
 
+def get_display_path(directory: Path, absolute: bool) -> str:
+    """
+    Determines the display path for a directory, supporting relative and absolute formats.
+    This is a new helper function to implement the --absolute flag logic.
+    """
+    if absolute:
+        # Return the fully resolved absolute path
+        result = str(directory.resolve())
+    else:
+        # Default to a relative path, using '~' for the home directory if possible
+        try:
+            home_dir = Path.home().resolve()
+            resolved_dir = directory.resolve()
+
+            # Check if the directory is the home directory or a subdirectory of it
+            if home_dir == resolved_dir or str(resolved_dir).startswith(str(home_dir) + os.sep):
+                rel_path = resolved_dir.relative_to(home_dir)
+                # For Windows, handle the path separator correctly when joining with ~
+                result = str(Path('~') / rel_path).replace("\\", "/")
+            else:
+                # Fallback to standard relative path if not inside home
+                result = os.path.relpath(directory)
+        except (ValueError, RuntimeError):
+            # Fallback for complex cases (e.g., different drives on Windows)
+            result = str(directory)
+    return result
+
+
 def add_args(parser: argparse.ArgumentParser) -> None:
     """Register command line arguments for this module."""
-    parser.add_argument('directories', nargs='*', 
-                       help="Directories to visualize (default: current directory if no pipeline input)")
-    parser.add_argument('--from-file', '-ff', help="Read directory paths from a text file.")
-    parser.add_argument('--files', '-f', action='store_true', 
+    # Modified to accept 'paths' which can be files or directories
+    parser.add_argument('paths', nargs='*',
+                       help="Directories or file paths to visualize (default: current directory)")
+
+    # New argument to control path display
+    parser.add_argument('--absolute', action='store_true',
+                       help="Print the full absolute path of the base directory.")
+
+    # All original arguments are preserved below
+    parser.add_argument('--from-file', '-ff', help="Read paths from a text file.")
+    parser.add_argument('--files', '-f', action='store_true',
                        help="Include files in the output (default: directories only)")
     parser.add_argument('--max-depth', '-d', type=int, metavar='N',
                        help="Maximum depth to descend (default: unlimited)")
@@ -496,8 +529,8 @@ FILE PATTERNS:
     *.py        Python files
     *.js        JavaScript files
     *.md        Markdown files
-    test_*      Files starting with 'test_'
-    *config*    Files containing 'config'
+    test_* Files starting with 'test_'
+    *config* Files containing 'config'
     *.{py,js}   Multiple extensions (if shell supports it)
 
 IGNORE PATTERNS:
@@ -533,62 +566,47 @@ For basic examples, use: tree_printer.py --help-examples
 def process_directories_pipeline(args):
     """Main pipeline processing loop for tree visualization."""
     # Get directory paths from various sources
-    dir_paths, dry_run_detected = get_file_paths_from_input(args)
-    
-    # If no input and no directories specified, default to current directory
-    if not dir_paths:
-        if not args.directories:
-            dir_paths = ['.']
-        else:
-            dir_paths = args.directories
-    
-    # If dry-run was detected from piped input, override the script's dry-run state
+    input_paths, dry_run_detected = get_file_paths_from_input(args)
+
+    # If no piped/file input, use command line args. If none, default to current dir.
+    if not input_paths:
+        input_paths = args.paths or ['.']
+
     if dry_run_detected:
         args.dry_run = True
-    
-    if not dir_paths:
-        print("ℹ️ No directories found to process.", file=sys.stderr)
-        return
-    
-    # Filter to only include directories (and convert files to their parent dirs if needed)
-    valid_dirs = []
-    for path_str in dir_paths:
-        path = Path(path_str).resolve()
-        if path.is_dir():
-            valid_dirs.append(path)
-        elif path.is_file():
+
+    # This is the core logic for handling file lists: derive unique parent directories
+    unique_dirs = set()
+    for path_str in input_paths:
+        path = Path(path_str)
+        if not path.exists():
+            print(f"⚠️  Skipping non-existent path: {path}", file=sys.stderr)
+            continue
+
+        # Resolve to an absolute path to handle duplicates reliably
+        resolved_path = path.resolve()
+        if resolved_path.is_dir():
+            unique_dirs.add(resolved_path)
+        elif resolved_path.is_file():
             # If it's a file, use its parent directory
-            parent_dir = path.parent
-            if parent_dir not in valid_dirs:
-                valid_dirs.append(parent_dir)
-                print(f"ℹ️ Using parent directory of file: {parent_dir}", file=sys.stderr)
-        else:
-            print(f"⚠️ Skipping non-existent path: {path}", file=sys.stderr)
-    
-    if not valid_dirs:
-        print("ℹ️ No valid directories found to process.", file=sys.stderr)
+            unique_dirs.add(resolved_path.parent)
+
+    sorted_dirs = sorted(list(unique_dirs))
+
+    if not sorted_dirs:
+        print("ℹ️  No valid directories found to process.", file=sys.stderr)
         return
-    
-    # Remove duplicates while preserving order
-    unique_dirs = []
-    seen = set()
-    for d in valid_dirs:
-        if d not in seen:
-            unique_dirs.append(d)
-            seen.add(d)
-    
+
     if args.dry_run:
         print("DRY RUN: The following directories would be processed:", file=sys.stderr)
-        for directory in unique_dirs:
+        for directory in sorted_dirs:
             print(f"  - {directory}", file=sys.stderr)
         return
-    
-    # Parse ignore patterns
-    ignore_patterns = []
-    if args.ignore:
-        ignore_patterns = [pattern.strip() for pattern in args.ignore.split(',')]
-    
-    # Set up the tree printer
+
+    # Parse ignore patterns from the comma-separated argument
+    ignore_patterns = [p.strip() for p in args.ignore.split(',')] if args.ignore else []
+
+    # Set up the tree printer, passing all arguments
     printer = TreePrinter(
         show_files=args.files,
         max_depth=args.max_depth,
@@ -603,58 +621,58 @@ def process_directories_pipeline(args):
         show_hidden=args.hidden,
         follow_symlinks=args.follow_symlinks
     )
-    
-    # Process each directory
+
+    # Process each unique directory
     processed_count = 0
-    for i, directory in enumerate(unique_dirs):
-        try:
+    try:
+        for i, directory in enumerate(sorted_dirs):
             # Add separator between multiple directories
             if i > 0:
-                print()
-                print("=" * 50)
-                print()
-            
-            # Print the tree
-            display_name = printer.colorize_item(str(directory), directory)
+                print("\n" + "=" * 50 + "\n")
+
+            # Use the helper to get the root path display string (absolute or relative)
+            display_name = get_display_path(directory, args.absolute)
+
+            colorized_name = printer.colorize_item(display_name, directory)
             info = printer.get_item_info(directory)
-            print(f"{display_name}{info}")
-            
+            print(f"{colorized_name}{info}")
+
             printer.print_tree(directory)
             processed_count += 1
-            
-        except KeyboardInterrupt:
-            print(f"\n❌ Interrupted by user after processing {processed_count} directories.", file=sys.stderr)
-            break
-        except Exception as e:
-            print(f"❌ Error processing {directory}: {e}", file=sys.stderr)
-            continue
-    
-    # Print summary for all directories
+
+    except KeyboardInterrupt:
+        print(f"\n❌ Interrupted by user after processing {processed_count} directories.", file=sys.stderr)
+    except Exception as e:
+        print(f"❌ An unexpected error occurred: {e}", file=sys.stderr)
+
+    # Print summary for all directories processed
     if not args.no_summary and processed_count > 0:
-        if len(unique_dirs) > 1:
+        if len(sorted_dirs) > 1:
             print()
             print(f"Processed {processed_count} director{'ies' if processed_count != 1 else 'y'}")
         printer.print_summary()
-    
-    print(f"✅ Successfully processed {processed_count} director{'ies' if processed_count != 1 else 'y'}.", file=sys.stderr)
+
+    if processed_count > 0:
+        print(f"✅ Successfully processed {processed_count} director{'ies' if processed_count != 1 else 'y'}.", file=sys.stderr)
 
 
 def main():
     """Main entry point."""
     setup_logging(level=logging.ERROR)
     args = parse_arguments()
-    
+
     if args.help_examples:
         show_examples()
         return
-    
+
     if args.help_verbose:
         show_verbose_help()
         return
-    
+
     # Use pipeline processing which handles all input methods
     process_directories_pipeline(args)
 
 
 if __name__ == "__main__":
     main()
+

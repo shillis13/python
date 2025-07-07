@@ -1,0 +1,148 @@
+# =======================
+# Python .gitignore
+# =======================
+
+# Bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+dist/
+downloads/
+*.egg
+*.egg-info/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+.installed.cfg
+MANIFEST
+*.whl
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv/
+.env
+.env.*
+env.bak/
+venv.bak/
+.pipenv/
+.pdm.toml
+.pdm-python
+.pdm-build/
+__pypackages__/
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+cover/
+
+# Logs and runtime
+*.log
+celerybeat-schedule
+celerybeat.pid
+*.pid
+*.sock
+
+# SQLite and DB
+*.sqlite3
+db.sqlite3
+db.sqlite3-journal
+
+# Secrets / configs
+*.pem
+*.key
+*.crt
+.pypirc
+*.aws/
+
+# Flask / Django / Scrapy
+local_settings.py
+instance/
+.webassets-cache
+.scrapy
+
+# Sphinx documentation
+docs/_build/
+
+# PyBuilder
+.pybuilder/
+target/
+
+# Notebooks / IDEs / Linters
+.ipynb_checkpoints
+.idea/
+.vscode/
+*.code-workspace
+.spyderproject
+.spyproject
+.ropeproject
+
+# Type checkers / Linters
+.mypy_cache/
+.pyre/
+.pytype/
+.ruff_cache/
+pylint-report.txt
+pylint-output.txt
+
+# OS / Editor trash
+.DS_Store
+*.swp
+*.swo
+Thumbs.db
+desktop.ini
+
+# Docker / DevOps
+docker-compose.override.yml
+
+# Archive
+Archive/
+*.tar
+*.tgz
+*.zip
+*.7z
+*.rar
+
+# AI tools / Abstra / Cursor
+.abstra/
+.cursorignore
+.cursorindexingignore
+=======
+# Do not include greptile, which is from a non-github repo
+*greptile*
+*.bak
+
+# Optional: ignore all dotfiles (be careful!)
+# .*
+
+# =======================
+# End of Python .gitignore
+# =======================
+

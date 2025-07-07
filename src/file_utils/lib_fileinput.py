@@ -20,23 +20,20 @@ Args:
 Returns:
     tuple: A tuple containing a list of file paths to process and a boolean indicating dry-run mode
 """
+# In lib_fileinput.py
+
 def get_file_paths_from_input(args) -> Tuple[List[str], bool]:
     file_paths = []
     dry_run_detected = getattr(args, 'dry_run', False)
-    
-    # Log initial dry-run state if logging available
-    try:
-        logging.debug(f"dry_run_detected before pipe input = {dry_run_detected}")
-    except:
-        pass  # Logging not configured, continue silently
 
+    # ... (no change to logging or stdin blocks) ...
     if not sys.stdin.isatty():
         # Handling piped input from stdin
         for line in sys.stdin:
             line = line.strip()
             if not line:
                 continue
-                
+
             if 'Dry-run:' in line and '->' in line:
                 try:
                     logging.debug(f"'Dry-run:' and '->' detected in piped input: {line}")
@@ -49,13 +46,14 @@ def get_file_paths_from_input(args) -> Tuple[List[str], bool]:
             else:
                 # Handle regular piped input (non-dry-run output)
                 file_paths.append(line)
-                
-    elif hasattr(args, 'files') and args.files:
-        # Handle command line files
-        for path in args.files:
+
+    elif hasattr(args, 'directories') and args.directories:
+        # MODIFIED: Was checking for 'args.files', which is a boolean flag.
+        # Now correctly checks for 'args.directories', which holds positional paths.
+        for path in args.directories:
             expanded_paths = expand_path(path)
             file_paths.extend(expanded_paths)
-            
+
     elif hasattr(args, 'from_file') and args.from_file:
         # Read file paths from a specified file
         try:

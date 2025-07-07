@@ -18,7 +18,7 @@ from typing import List, Dict, Any, Union
 # Use the established library for handling file inputs from various sources.
 # This ensures consistent behavior with other tools in the pipeline.
 try:
-    from lib_fileinput import get_file_paths_from_input
+    from file_utils.lib_fileinput import get_file_paths_from_input
 except ImportError:
     from .lib_fileinput import get_file_paths_from_input
 

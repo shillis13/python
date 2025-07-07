@@ -40,6 +40,7 @@ from file_utils.lib_extensions import ExtensionInfo
 #signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 
 from dev_utils import *
+from dev_utils.lib_logging import *
 setup_logging(level=logging.ERROR)
 # setup_logging(level=logging.DEBUG)
 

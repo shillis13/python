@@ -1,0 +1,94 @@
+# ===================================================================
+# Hierarchical File Extension and Type Definitions
+#
+# Structure:
+#   - Top-level keys are broad categories.
+#   - `sub_types` defines a nested hierarchy.
+#   - `extensions` lists file extensions for a given type.
+# ===================================================================
+file_types:
+  ApplicationData:
+    sub_types:
+      Databases:
+        extensions: [.db, .sql, .mdb, .accdb, .sqlite]
+      Calendars:
+        extensions: [.ics, .ical, .icalendar, .ifb, .vcs, .cal, .pst, .dat]
+  Archives:
+    extensions: [.zip, .rar, .tar, .gz, .7z, .bz2, .xz]
+  Documents:
+    sub_types:
+      MS_Office:
+        extensions:
+          - .doc
+          - .docx
+          - .xls
+          - .xlsx
+          - .ppt
+          - .pptx
+          - .mdb
+          - .accdb
+          - .vsd
+          - .vsdx
+          - .pub
+          - .pot
+          - .potx
+          - .pps
+          - .ppsx
+          - .xlsm
+          - .xlt
+          - .xltx
+      OpenDocument:
+        extensions:
+          - .odt
+      PDF:
+        extensions:
+          - .pdf
+      Text:
+        extensions: [.txt, .md, .csv, .log]
+      StructuredText:
+        extensions: [.xml, .json, .toml, .yaml, .yml]
+  Media:
+    sub_types:
+      Images:
+        extensions: [.jpg, .jpeg, .png, .gif, .bmp, .tiff, .svg, .heic]
+      Audio:
+        extensions: [.mp3, .wav, .flac, .aac, .ogg, .m4a]
+      Video:
+        extensions: [.mp4, .avi, .mkv, .mov, .wmv, .flv, .mpeg]
+  Development:
+    sub_types:
+      Compiled:
+        extensions: [.so, .dll, .class, .o, .obj, .a, .lib, .dex]
+      Configuration:
+        extensions: [.ini, .cfg, .conf, .plist, .env, .htaccess, .inf]
+      Disk_Images:
+        extensions: [.iso, .dmg, .vhd, .vmdk, .img, .bin, .nrg, .toast, .qcow2, .raw]
+      SourceCode:
+        sub_types:
+          Web:
+            extensions: [.html, .htm, .css, .js, .php, .asp, .jsp, .mhtml, .xhtml, .onion]
+          Scripting:
+            extensions: [.py, .rb, .sh, .bat, .bas]
+            sub_types:
+              PowerShell:
+                extensions: [.ps1, .psm1, .psd1]
+          CompiledLanguages:
+            extensions: [.java, .h, .cpp, .c, .go, .rs]
+          VBA:
+            extensions: [.cls, .frm]
+  System:
+    sub_types:
+      Executables:
+        extensions: [.exe, .bin, .sh, .bat, .msi, .apk]
+      Fonts:
+        extensions: [.ttf, .otf, .woff, .woff2]
+      SystemFiles:
+        extensions: [.sys, .dll, .ini, .cfg, .inf]
+      Installers:
+        extensions: [.dep, .deb, .rpm, .pkg, .msi, .jar, .apk, .whl, .gem, .tgz, .conda, .snap]
+  Network:
+    sub_types:
+      Downloaders:
+        extensions: [.torrent, .nzb, .crdownload, .part, .dctmp, .download, .meta4, .metalink, .dlc]
+  Other:
+    extensions: [.pem, .crt]
