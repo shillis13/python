@@ -1,35 +1,22 @@
 #!/usr/bin/env python3
 """
-Python Chat History Manager
-Equivalent to yaml_chat_utilities.js for maintaining conversation history in YAML format
+Python Chat History Utilities
+Equivalent to yaml_chat_utilities.js, leveraging existing Python YAML utilities
 """
 
-import re
 import copy
+import random
+import string
 from datetime import datetime, timezone
 from typing import Dict, List, Any, Optional, Union
 from pathlib import Path
 
-# Import existing utilities (assumes helpers.py is available)
-try:
-    from helpers import get_utc_timestamp, load_yaml, save_yaml
-except ImportError:
-    # Fallback implementations if helpers.py not available
-    def get_utc_timestamp():
-        return datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
-    
-    def load_yaml(filepath):
-        import yaml
-        with open(filepath, 'r') as f:
-            return yaml.safe_load(f)
-    
-    def save_yaml(data, filepath):
-        import yaml
-        with open(filepath, 'w') as f:
-            yaml.dump(data, f, default_flow_style=False, indent=2, sort_keys=False)
+# Import existing utilities from your yaml utilities
+from helpers import get_utc_timestamp, load_yaml, save_yaml
+
 
 class ChatHistoryManager:
-    """Python equivalent of BackgroundChatHistory JavaScript class"""
+    """Python equivalent of BackgroundChatHistory JavaScript class using existing utilities"""
     
     def __init__(self):
         self.history: Dict[str, Any] = {}
@@ -41,8 +28,8 @@ class ChatHistoryManager:
         self.history = {
             'metadata': {
                 'conversation_id': self.generate_conversation_id(),
-                'created': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
-                'last_updated': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
+                'created': self.get_iso_timestamp(),
+                'last_updated': self.get_iso_timestamp(),
                 'version': 1,
                 'total_messages': 0,
                 'total_exchanges': 0,
@@ -51,7 +38,7 @@ class ChatHistoryManager:
             },
             'chat_sessions': [{
                 'session_id': self.generate_session_id(),
-                'started': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
+                'started': self.get_iso_timestamp(),
                 'ended': None,
                 'platform': 'claude',
                 'continued_from': None,
@@ -61,22 +48,24 @@ class ChatHistoryManager:
         }
     
     def generate_conversation_id(self) -> str:
-        """Generate unique conversation ID"""
+        """Generate unique conversation ID using existing timestamp utility"""
         timestamp = get_utc_timestamp()
         return f"conv_{timestamp}"
     
     def generate_message_id(self) -> str:
-        """Generate unique message ID"""
+        """Generate unique message ID using existing timestamp utility"""
         timestamp = get_utc_timestamp()
-        import random
-        import string
         suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=5))
         return f"msg_{timestamp}_{suffix}"
     
     def generate_session_id(self) -> str:
-        """Generate unique session ID"""
+        """Generate unique session ID using existing timestamp utility"""
         timestamp = get_utc_timestamp()
         return f"session_{timestamp}"
+    
+    def get_iso_timestamp(self) -> str:
+        """Get ISO timestamp in Z format (consistent with existing utilities)"""
+        return datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
     
     def get_current_session(self) -> Dict[str, Any]:
         """Get the current active session"""
@@ -110,7 +99,7 @@ class ChatHistoryManager:
             'message_number': self.history['metadata']['total_messages'] + 1,
             'conversation_id': self.history['metadata']['conversation_id'],
             'session_id': self.get_current_session()['session_id'],
-            'timestamp': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
+            'timestamp': self.get_iso_timestamp(),
             'role': role,
             'content': content,
             'attachments': attachments,
@@ -127,7 +116,7 @@ class ChatHistoryManager:
         
         # Update conversation metadata
         self.history['metadata']['total_messages'] += 1
-        self.history['metadata']['last_updated'] = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+        self.history['metadata']['last_updated'] = self.get_iso_timestamp()
         self.history['metadata']['version'] += 1
         
         # Update exchange count if this completes an exchange
@@ -162,7 +151,7 @@ class ChatHistoryManager:
                 'artifact_id': artifact_id,
                 'artifact_type': 'code',  # Could be determined from artifact
                 'title': artifact_id.replace('_', ' '),
-                'created_at': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+                'created_at': self.get_iso_timestamp()
             })
         
         return self.record_message('assistant', content, tags, attachments)
@@ -187,7 +176,7 @@ class ChatHistoryManager:
             'type': 'file',
             'filename': filename,
             'description': description,
-            'uploaded_at': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+            'uploaded_at': self.get_iso_timestamp()
         }
         
         if filepath:
@@ -217,12 +206,12 @@ class ChatHistoryManager:
         # Close current session
         current_session = self.get_current_session()
         if current_session['ended'] is None:
-            current_session['ended'] = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+            current_session['ended'] = self.get_iso_timestamp()
         
         # Create new session
         new_session = {
             'session_id': self.generate_session_id(),
-            'started': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
+            'started': self.get_iso_timestamp(),
             'ended': None,
             'platform': 'claude',
             'continued_from': continued_from or current_session['session_id'],
@@ -247,7 +236,7 @@ class ChatHistoryManager:
         """
         # Mark current session as ended
         current_session = self.get_current_session()
-        current_session['ended'] = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+        current_session['ended'] = self.get_iso_timestamp()
         
         # Store original conversation ID
         original_conversation_id = self.history['metadata']['conversation_id']
@@ -257,7 +246,7 @@ class ChatHistoryManager:
         
         # Update metadata for continuation
         self.history['metadata'].update({
-            'imported_at': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
+            'imported_at': self.get_iso_timestamp(),
             'previous_conversation_id': imported_data['metadata']['conversation_id'],
             'conversation_id': original_conversation_id,
             'version': imported_data['metadata']['version'] + 1,
@@ -271,7 +260,7 @@ class ChatHistoryManager:
     
     def export_to_yaml(self) -> str:
         """
-        Export history to YAML string
+        Export history to YAML string using existing utilities
         
         Returns:
             str: YAML representation of chat history
@@ -288,11 +277,11 @@ class ChatHistoryManager:
         """
         # Close current session
         current_session = self.get_current_session()
-        current_session['ended'] = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+        current_session['ended'] = self.get_iso_timestamp()
         
         handoff_data = copy.deepcopy(self.history)
         handoff_data['metadata'].update({
-            'exported_for_handoff': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
+            'exported_for_handoff': self.get_iso_timestamp(),
             'usage_limit_approaching': True,
             'handoff_instructions': [
                 "Import this file in new Claude session",
@@ -301,16 +290,12 @@ class ChatHistoryManager:
             ]
         })
         
-        return self.export_to_yaml_from_data(handoff_data)
-    
-    def export_to_yaml_from_data(self, data: Dict[str, Any]) -> str:
-        """Export specific data to YAML string"""
         import yaml
-        return yaml.dump(data, default_flow_style=False, indent=2, sort_keys=False)
+        return yaml.dump(handoff_data, default_flow_style=False, indent=2, sort_keys=False)
     
     def save_to_file(self, filepath: Union[str, Path]) -> None:
         """
-        Save history to file
+        Save history to file using existing save_yaml utility
         
         Args:
             filepath: Path where to save the YAML file
@@ -319,7 +304,7 @@ class ChatHistoryManager:
     
     def load_from_file(self, filepath: Union[str, Path]) -> Dict[str, Any]:
         """
-        Load history from file
+        Load history from file using existing load_yaml utility
         
         Args:
             filepath: Path to YAML file to load
@@ -425,6 +410,147 @@ class ChatHistoryManager:
                     matching_messages.append(message)
         
         return matching_messages
+    
+    def archive_conversation_section(self, section_key: str) -> Dict[str, Any]:
+        """
+        Archive a section using the existing archive_and_update_metadata utility pattern
+        
+        Args:
+            section_key: Top-level key to archive
+            
+        Returns:
+            Dict: Updated history with archived section
+        """
+        # Import the archive function from helpers
+        from helpers import archive_and_update_metadata
+        
+        # Archive the section (this modifies history in place)
+        self.history = archive_and_update_metadata(self.history, section_key)
+        
+        return self.history
+
+
+# Command-line interface following the pattern from existing utilities
+def main():
+    """Command-line interface for chat history management"""
+    import argparse
+    import sys
+    
+    parser = argparse.ArgumentParser(
+        description='Manage chat history in YAML format',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+    # Initialize new chat history
+    python chat_utilities.py --init chat_history.yaml
+    
+    # Add a message
+    python chat_utilities.py --add-message chat_history.yaml --role user --content "Hello Claude"
+    
+    # Export for handoff
+    python chat_utilities.py --export-handoff chat_history.yaml
+    
+    # Get statistics
+    python chat_utilities.py --stats chat_history.yaml
+        """
+    )
+    
+    parser.add_argument('yaml_file', nargs='?', type=Path, 
+                       help='YAML chat history file to work with')
+    parser.add_argument('--init', action='store_true',
+                       help='Initialize new chat history file')
+    parser.add_argument('--add-message', action='store_true',
+                       help='Add a message to the chat history')
+    parser.add_argument('--role', choices=['user', 'assistant', 'system'],
+                       help='Role for the message (with --add-message)')
+    parser.add_argument('--content', help='Message content (with --add-message)')
+    parser.add_argument('--tags', nargs='*', default=[],
+                       help='Tags for the message (with --add-message)')
+    parser.add_argument('--export-handoff', action='store_true',
+                       help='Export for handoff to new session')
+    parser.add_argument('--stats', action='store_true',
+                       help='Show conversation statistics')
+    parser.add_argument('--search', help='Search message content')
+    parser.add_argument('--archive', help='Archive a conversation section')
+    
+    args = parser.parse_args()
+    
+    if not args.yaml_file:
+        parser.error('yaml_file is required')
+    
+    try:
+        # Initialize or load chat manager
+        if args.init:
+            if args.yaml_file.exists():
+                print(f"Error: File {args.yaml_file} already exists", file=sys.stderr)
+                sys.exit(1)
+            
+            chat = ChatHistoryManager()
+            chat.save_to_file(args.yaml_file)
+            print(f"✅ Initialized new chat history: {args.yaml_file}")
+            
+        elif args.add_message:
+            if not args.role or not args.content:
+                parser.error('--role and --content are required with --add-message')
+            
+            chat = ChatHistoryManager()
+            chat.load_from_file(args.yaml_file)
+            chat.record_message(args.role, args.content, args.tags)
+            chat.save_to_file(args.yaml_file)
+            print(f"✅ Added {args.role} message to {args.yaml_file}")
+            
+        elif args.export_handoff:
+            chat = ChatHistoryManager()
+            chat.load_from_file(args.yaml_file)
+            handoff_yaml = chat.export_for_handoff()
+            
+            handoff_file = args.yaml_file.with_suffix('.handoff.yaml')
+            with open(handoff_file, 'w') as f:
+                f.write(handoff_yaml)
+            print(f"✅ Exported handoff to: {handoff_file}")
+            
+        elif args.stats:
+            chat = ChatHistoryManager()
+            chat.load_from_file(args.yaml_file)
+            stats = chat.get_stats()
+            
+            print(f"📊 Chat History Statistics for {args.yaml_file}")
+            print(f"   Conversation ID: {stats['conversation_id']}")
+            print(f"   Total Messages: {stats['total_messages']}")
+            print(f"   Total Exchanges: {stats['total_exchanges']}")
+            print(f"   Estimated Tokens: {stats['estimated_tokens']}")
+            print(f"   Sessions: {stats['total_sessions']}")
+            print(f"   Created: {stats['created']}")
+            print(f"   Last Updated: {stats['last_updated']}")
+            if stats['approaching_limit']:
+                print(f"   ⚠️  Approaching token limit!")
+                
+        elif args.search:
+            chat = ChatHistoryManager()
+            chat.load_from_file(args.yaml_file)
+            results = chat.search_content(args.search)
+            
+            print(f"🔍 Search results for '{args.search}':")
+            for msg in results:
+                print(f"   [{msg['role']}] {msg['content'][:100]}...")
+                
+        elif args.archive:
+            chat = ChatHistoryManager()
+            chat.load_from_file(args.yaml_file)
+            chat.archive_conversation_section(args.archive)
+            chat.save_to_file(args.yaml_file)
+            print(f"✅ Archived section '{args.archive}' in {args.yaml_file}")
+            
+        else:
+            # Default: show stats
+            chat = ChatHistoryManager()
+            chat.load_from_file(args.yaml_file)
+            stats = chat.get_stats()
+            print(f"📄 {args.yaml_file}: {stats['total_messages']} messages, {stats['estimated_tokens']} tokens")
+            
+    except Exception as e:
+        print(f"❌ Error: {e}", file=sys.stderr)
+        sys.exit(1)
 
 
 # Convenience functions for easy usage
@@ -434,7 +560,7 @@ def initialize_chat_history() -> ChatHistoryManager:
 
 def load_chat_history(filepath: Union[str, Path]) -> ChatHistoryManager:
     """
-    Load chat history from file
+    Load chat history from file using existing load_yaml utility
     
     Args:
         filepath: Path to YAML file
@@ -447,39 +573,5 @@ def load_chat_history(filepath: Union[str, Path]) -> ChatHistoryManager:
     return manager
 
 
-# Example usage and testing
 if __name__ == "__main__":
-    # Example usage
-    chat = initialize_chat_history()
-    
-    # Record some messages
-    chat.record_message('user', 'Hello, can you help me with YAML utilities?', 
-                       ['greeting', 'yaml-help'])
-    
-    chat.record_claude_response(
-        'I\'d be happy to help with YAML utilities! Let me create some Python tools.',
-        ['python_chat_utilities'],
-        ['helpful-response', 'tool-creation']
-    )
-    
-    # Add a file attachment
-    file_attachment = chat.add_file_attachment(
-        'example.yaml',
-        '/path/to/example.yaml',
-        'Example YAML configuration file',
-        1024,
-        'application/x-yaml'
-    )
-    
-    chat.record_message('user', 'Here\'s my YAML file for analysis', 
-                       ['file-upload'], [file_attachment])
-    
-    # Get stats
-    stats = chat.get_stats()
-    print(f"Conversation Stats: {stats}")
-    
-    # Export to YAML
-    yaml_content = chat.export_to_yaml()
-    print(f"\nExported YAML:\n{yaml_content[:500]}...")
-    
-    print("\n✅ Python Chat History Utilities ready!")
+    main()

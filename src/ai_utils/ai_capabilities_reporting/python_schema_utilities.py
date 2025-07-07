@@ -1,36 +1,22 @@
 #!/usr/bin/env python3
 """
 Python AI Capabilities Schema Integration Utilities
-Equivalent to schema_integration_utilities.js for managing AI platform assessments
+Equivalent to schema_integration_utilities.js, leveraging existing Python YAML utilities
 """
 
 import copy
-import json
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Any, Optional, Union
 from pathlib import Path
+import argparse
+import sys
 
-# Import existing utilities
-try:
-    from helpers import get_utc_timestamp, load_yaml, save_yaml
-except ImportError:
-    # Fallback implementations
-    def get_utc_timestamp():
-        return datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
-    
-    def load_yaml(filepath):
-        import yaml
-        with open(filepath, 'r') as f:
-            return yaml.safe_load(f)
-    
-    def save_yaml(data, filepath):
-        import yaml
-        with open(filepath, 'w') as f:
-            yaml.dump(data, f, default_flow_style=False, indent=2, sort_keys=False)
+# Import existing utilities from your yaml utilities
+from helpers import get_utc_timestamp, load_yaml, save_yaml, archive_and_update_metadata
 
 
 class AICapabilitiesManager:
-    """Python equivalent of JavaScript AICapabilitiesManager class"""
+    """Python equivalent of JavaScript AICapabilitiesManager class using existing utilities"""
     
     def __init__(self):
         self.capabilities: Dict[str, Dict[str, Any]] = {}
@@ -60,11 +46,10 @@ class AICapabilitiesManager:
         # Update metadata with platform-specific information
         assessment['metadata']['platform'] = platform_lower
         assessment['metadata']['platform_version'] = version or self.get_default_version(platform_lower)
-        assessment['metadata']['assessment_date'] = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+        assessment['metadata']['assessment_date'] = self.get_iso_timestamp()
         assessment['metadata']['assessor_info']['evaluator_name'] = assessor_name
         
         # Calculate next assessment date (3 months from now)
-        from datetime import timedelta
         next_assessment = datetime.now(timezone.utc) + timedelta(days=90)
         assessment['metadata']['next_assessment_due'] = next_assessment.isoformat().replace('+00:00', 'Z')
         
@@ -74,12 +59,16 @@ class AICapabilitiesManager:
     def get_default_version(self, platform: str) -> str:
         """Get default version for platform"""
         defaults = {
-            'claude': 'claude-4-Opus',
-            'chatgpt': 'gpt-4.5',
-            'gemini': 'gemini-2.5-pro',
-            'grok': 'grok-3'
+            'claude': 'claude-3.5-sonnet',
+            'chatgpt': 'gpt-4o',
+            'gemini': 'gemini-1.5-pro',
+            'grok': 'grok-2'
         }
         return defaults.get(platform, 'unknown')
+    
+    def get_iso_timestamp(self) -> str:
+        """Get ISO timestamp in Z format (consistent with existing utilities)"""
+        return datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
     
     def update_capability(self, platform: str, capability_path: str, new_value: Any,
                          evidence: List[str] = None, confidence: str = "medium") -> None:
@@ -88,7 +77,7 @@ class AICapabilitiesManager:
         
         Args:
             platform: Platform name
-            capability_path: Dot-notation path to capability (e.g., 'core_capabilities.reasoning.logical_reasoning.capability_level')
+            capability_path: Dot-notation path to capability
             new_value: New value to set
             evidence: List of evidence supporting the update
             confidence: Confidence level (low, medium, high)
@@ -98,6 +87,11 @@ class AICapabilitiesManager:
             
         if platform not in self.capabilities:
             raise ValueError(f"No assessment initialized for platform: {platform}")
+        
+        # Archive the assessment before making changes (following helpers.py pattern)
+        self.capabilities[platform] = archive_and_update_metadata(
+            self.capabilities[platform], 'core_capabilities'
+        )
         
         assessment = self.capabilities[platform]
         path_array = capability_path.split('.')
@@ -122,15 +116,16 @@ class AICapabilitiesManager:
             if 'evidence' in current:
                 current['evidence'] = list(evidence)
             if 'testing_date' in current:
-                current['testing_date'] = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+                current['testing_date'] = self.get_iso_timestamp()
         
         # Add to changelog
         self.add_to_changelog(platform, capability_path, old_value, new_value, evidence)
         
-        # Update assessment metadata
-        assessment['metadata']['last_updated'] = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
-        current_version = float(assessment['metadata']['assessment_version'])
-        assessment['metadata']['assessment_version'] = f"{current_version + 0.1:.1f}"
+        # Update assessment metadata (following helpers.py metadata pattern)
+        if 'metadata' in assessment:
+            assessment['metadata']['last_updated'] = self.get_iso_timestamp()
+            current_version = assessment['metadata'].get('version', 0)
+            assessment['metadata']['version'] = current_version + 1
     
     def add_to_changelog(self, platform: str, capability_path: str, old_value: Any, 
                         new_value: Any, evidence: List[str]) -> None:
@@ -139,7 +134,7 @@ class AICapabilitiesManager:
         
         change_entry = {
             'version': assessment['metadata']['assessment_version'],
-            'date': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
+            'date': self.get_iso_timestamp(),
             'change_type': 'capability_update',
             'impact_level': self.determine_impact_level(old_value, new_value),
             'summary': f"Updated {capability_path}: {old_value} -> {new_value}",
@@ -237,7 +232,7 @@ class AICapabilitiesManager:
         """
         report = {
             'metadata': {
-                'comparison_date': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
+                'comparison_date': self.get_iso_timestamp(),
                 'platforms_compared': platforms,
                 'comparison_version': '1.0.0'
             },
@@ -245,71 +240,4 @@ class AICapabilitiesManager:
             'strengths_weaknesses': {},
             'use_case_recommendations': {},
             'market_positioning': {},
-            'future_outlook': {}
-        }
-        
-        # Key capability areas to compare (updated for Universal schema)
-        key_capabilities = [
-            "core_capabilities.reasoning_analysis.logical_reasoning.capability_level",
-            "core_capabilities.text_generation.quality_coherence.capability_level",
-            "core_capabilities.code_capabilities.python.proficiency",
-            "context_scale_assessment.context_window.token_limit",
-            "customization_adaptation.user_personalization.writing_style_learning",
-            "development_support.github_integration.direct_integration",
-            "external_integrations.integration_quality.third_party_ecosystem_size"
-        ]
-        
-        for capability in key_capabilities:
-            capability_name = capability.split('.')[-1]
-            report['capability_matrix'][capability_name] = self.compare_capabilities(platforms, capability)
-        
-        # Generate summary insights for each platform
-        for platform in platforms:
-            if platform in self.capabilities:
-                assessment = self.capabilities[platform]
-                positioning = assessment.get('competitive_positioning', {})
-                
-                report['strengths_weaknesses'][platform] = {
-                    'unique_strengths': positioning.get('unique_strengths', []),
-                    'competitive_advantages': positioning.get('competitive_advantages', []),
-                    'areas_for_improvement': positioning.get('areas_for_improvement', []),
-                    'last_updated': assessment['metadata']['assessment_date']
-                }
-        
-        return report
-    
-    def add_testing_evidence(self, platform: str, capability_path: str, 
-                           evidence: List[str], testing_notes: str = "") -> None:
-        """
-        Add testing evidence to capability
-        
-        Args:
-            platform: Platform name
-            capability_path: Dot-notation path to capability
-            evidence: List of evidence items
-            testing_notes: Additional testing notes
-        """
-        if platform not in self.capabilities:
-            raise ValueError(f"No assessment initialized for platform: {platform}")
-        
-        path_array = capability_path.split('.')
-        current = self.capabilities[platform]
-        
-        for segment in path_array:
-            if segment not in current:
-                current[segment] = {}
-            current = current[segment]
-        
-        # Add evidence and testing information
-        if 'evidence' not in current:
-            current['evidence'] = []
-        if 'testing_examples' not in current:
-            current['testing_examples'] = []
-        
-        current['evidence'].extend(evidence)
-        current['testing_date'] = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
-        
-        if testing_notes:
-            current['testing_examples'].append({
-                'date': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
-                '
+            '
