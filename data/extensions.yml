@@ -1,94 +1,371 @@
-# ===================================================================
-# Hierarchical File Extension and Type Definitions
-#
-# Structure:
-#   - Top-level keys are broad categories.
-#   - `sub_types` defines a nested hierarchy.
-#   - `extensions` lists file extensions for a given type.
-# ===================================================================
+# extensions.yml - File Type and Extension Definitions
+# Used by lib_extensions.py and lib_filters.py for file type classification
+
 file_types:
-  ApplicationData:
+  # Source Code Files
+  source:
+    extensions:
+      - ".py"      # Python
+      - ".js"      # JavaScript
+      - ".ts"      # TypeScript
+      - ".java"    # Java
+      - ".cpp"     # C++
+      - ".c"       # C
+      - ".h"       # C/C++ Headers
+      - ".hpp"     # C++ Headers
+      - ".cs"      # C#
+      - ".go"      # Go
+      - ".rs"      # Rust
+      - ".php"     # PHP
+      - ".rb"      # Ruby
+      - ".swift"   # Swift
+      - ".kt"      # Kotlin
+      - ".scala"   # Scala
+      - ".pl"      # Perl
+      - ".sh"      # Shell Script
+      - ".bash"    # Bash Script
+      - ".ps1"     # PowerShell
+      - ".bat"     # Batch File
+      - ".cmd"     # Command File
     sub_types:
-      Databases:
-        extensions: [.db, .sql, .mdb, .accdb, .sqlite]
-      Calendars:
-        extensions: [.ics, .ical, .icalendar, .ifb, .vcs, .cal, .pst, .dat]
-  Archives:
-    extensions: [.zip, .rar, .tar, .gz, .7z, .bz2, .xz]
-  Documents:
+      python:
+        extensions: [".py", ".pyw", ".pyc", ".pyo"]
+      javascript:
+        extensions: [".js", ".jsx", ".mjs", ".cjs"]
+      web:
+        extensions: [".html", ".htm", ".css", ".scss", ".sass", ".less"]
+      
+  # Image Files
+  image:
+    extensions:
+      - ".jpg"
+      - ".jpeg"
+      - ".png"
+      - ".gif"
+      - ".bmp"
+      - ".tiff"
+      - ".tif"
+      - ".svg"
+      - ".webp"
+      - ".ico"
+      - ".psd"
+      - ".raw"
+      - ".cr2"
+      - ".nef"
+      - ".arw"
     sub_types:
-      MS_Office:
-        extensions:
-          - .doc
-          - .docx
-          - .xls
-          - .xlsx
-          - .ppt
-          - .pptx
-          - .mdb
-          - .accdb
-          - .vsd
-          - .vsdx
-          - .pub
-          - .pot
-          - .potx
-          - .pps
-          - .ppsx
-          - .xlsm
-          - .xlt
-          - .xltx
-      OpenDocument:
-        extensions:
-          - .odt
-      PDF:
-        extensions:
-          - .pdf
-      Text:
-        extensions: [.txt, .md, .csv, .log]
-      StructuredText:
-        extensions: [.xml, .json, .toml, .yaml, .yml]
-  Media:
+      raster:
+        extensions: [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".tif", ".webp"]
+      vector:
+        extensions: [".svg", ".ai", ".eps"]
+      raw:
+        extensions: [".raw", ".cr2", ".nef", ".arw", ".dng"]
+
+  # Video Files  
+  video:
+    extensions:
+      - ".mp4"
+      - ".avi"
+      - ".mkv"
+      - ".mov"
+      - ".wmv"
+      - ".flv"
+      - ".webm"
+      - ".m4v"
+      - ".3gp"
+      - ".mpg"
+      - ".mpeg"
+      - ".ts"
+      - ".mts"
+      - ".vob"
     sub_types:
-      Images:
-        extensions: [.jpg, .jpeg, .png, .gif, .bmp, .tiff, .svg, .heic]
-      Audio:
-        extensions: [.mp3, .wav, .flac, .aac, .ogg, .m4a]
-      Video:
-        extensions: [.mp4, .avi, .mkv, .mov, .wmv, .flv, .mpeg]
-  Development:
+      streaming:
+        extensions: [".mp4", ".webm", ".m4v"]
+      professional:
+        extensions: [".mov", ".mts", ".vob"]
+
+  # Audio Files
+  audio:
+    extensions:
+      - ".mp3"
+      - ".wav"
+      - ".flac"
+      - ".aac"
+      - ".ogg"
+      - ".wma"
+      - ".m4a"
+      - ".opus"
+      - ".aiff"
+      - ".au"
     sub_types:
-      Compiled:
-        extensions: [.so, .dll, .class, .o, .obj, .a, .lib, .dex]
-      Configuration:
-        extensions: [.ini, .cfg, .conf, .plist, .env, .htaccess, .inf]
-      Disk_Images:
-        extensions: [.iso, .dmg, .vhd, .vmdk, .img, .bin, .nrg, .toast, .qcow2, .raw]
-      SourceCode:
-        sub_types:
-          Web:
-            extensions: [.html, .htm, .css, .js, .php, .asp, .jsp, .mhtml, .xhtml, .onion]
-          Scripting:
-            extensions: [.py, .rb, .sh, .bat, .bas]
-            sub_types:
-              PowerShell:
-                extensions: [.ps1, .psm1, .psd1]
-          CompiledLanguages:
-            extensions: [.java, .h, .cpp, .c, .go, .rs]
-          VBA:
-            extensions: [.cls, .frm]
-  System:
+      lossless:
+        extensions: [".wav", ".flac", ".aiff"]
+      compressed:
+        extensions: [".mp3", ".aac", ".ogg", ".wma", ".m4a", ".opus"]
+
+  # Document Files
+  document:
+    extensions:
+      - ".pdf"
+      - ".doc"
+      - ".docx"
+      - ".xls"
+      - ".xlsx"
+      - ".ppt"
+      - ".pptx"
+      - ".odt"
+      - ".ods"
+      - ".odp"
+      - ".rtf"
+      - ".txt"
+      - ".md"
+      - ".rst"
+      - ".tex"
     sub_types:
-      Executables:
-        extensions: [.exe, .bin, .sh, .bat, .msi, .apk]
-      Fonts:
-        extensions: [.ttf, .otf, .woff, .woff2]
-      SystemFiles:
-        extensions: [.sys, .dll, .ini, .cfg, .inf]
-      Installers:
-        extensions: [.dep, .deb, .rpm, .pkg, .msi, .jar, .apk, .whl, .gem, .tgz, .conda, .snap]
-  Network:
+      office:
+        extensions: [".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx"]
+      openoffice:
+        extensions: [".odt", ".ods", ".odp"]
+      text:
+        extensions: [".txt", ".md", ".rst", ".tex"]
+
+  # Archive Files
+  archive:
+    extensions:
+      - ".zip"
+      - ".rar"
+      - ".7z"
+      - ".tar"
+      - ".gz"
+      - ".bz2"
+      - ".xz"
+      - ".tar.gz"
+      - ".tar.bz2"
+      - ".tar.xz"
+      - ".tgz"
+      - ".tbz2"
+      - ".txz"
     sub_types:
-      Downloaders:
-        extensions: [.torrent, .nzb, .crdownload, .part, .dctmp, .download, .meta4, .metalink, .dlc]
-  Other:
-    extensions: [.pem, .crt]
+      common:
+        extensions: [".zip", ".rar", ".7z"]
+      unix:
+        extensions: [".tar", ".tar.gz", ".tar.bz2", ".tar.xz", ".tgz", ".tbz2", ".txz"]
+
+  # Configuration Files
+  config:
+    extensions:
+      - ".conf"
+      - ".cfg"
+      - ".ini"
+      - ".toml"
+      - ".yaml"
+      - ".yml"
+      - ".json"
+      - ".xml"
+      - ".env"
+      - ".properties"
+    sub_types:
+      structured:
+        extensions: [".yaml", ".yml", ".json", ".xml", ".toml"]
+      simple:
+        extensions: [".conf", ".cfg", ".ini", ".env", ".properties"]
+
+  # Executable Files
+  executable:
+    extensions:
+      - ".exe"
+      - ".msi"
+      - ".app"
+      - ".deb"
+      - ".rpm"
+      - ".pkg"
+      - ".dmg"
+      - ".run"
+      - ".bin"
+    sub_types:
+      windows:
+        extensions: [".exe", ".msi", ".bat", ".cmd"]
+      macos:
+        extensions: [".app", ".pkg", ".dmg"]
+      linux:
+        extensions: [".deb", ".rpm", ".run", ".bin"]
+
+  # Data Files
+  data:
+    extensions:
+      - ".csv"
+      - ".tsv"
+      - ".json"
+      - ".xml"
+      - ".yaml"
+      - ".yml"
+      - ".sql"
+      - ".db"
+      - ".sqlite"
+      - ".sqlite3"
+    sub_types:
+      tabular:
+        extensions: [".csv", ".tsv"]
+      database:
+        extensions: [".db", ".sqlite", ".sqlite3", ".sql"]
+      structured:
+        extensions: [".json", ".xml", ".yaml", ".yml"]
+
+  # Build and Project Files
+  build:
+    extensions:
+      - ".make"
+      - ".cmake"
+      - ".gradle"
+      - ".maven"
+      - ".sbt"
+      - ".ant"
+    sub_types:
+      makefiles:
+        extensions: [".make"]
+        patterns: ["Makefile", "makefile", "GNUmakefile"]
+      cmake:
+        extensions: [".cmake"]
+        patterns: ["CMakeLists.txt"]
+
+  # Temporary and Cache Files
+  temporary:
+    extensions:
+      - ".tmp"
+      - ".temp"
+      - ".cache"
+      - ".bak"
+      - ".backup"
+      - ".old"
+      - ".orig"
+      - ".swp"
+      - ".swo"
+      - ".log"
+    sub_types:
+      editor:
+        extensions: [".swp", ".swo"]
+        patterns: ["*~", "#*#"]
+      backup:
+        extensions: [".bak", ".backup", ".old", ".orig"]
+      cache:
+        extensions: [".cache", ".tmp", ".temp"]
+
+# Extension to type mapping (for quick lookup)
+extension_map:
+  # Source code
+  ".py": "source"
+  ".js": "source"
+  ".java": "source"
+  ".cpp": "source"
+  ".c": "source"
+  ".php": "source"
+  ".rb": "source"
+  ".go": "source"
+  
+  # Images
+  ".jpg": "image"
+  ".jpeg": "image"
+  ".png": "image"
+  ".gif": "image"
+  ".svg": "image"
+  ".bmp": "image"
+  
+  # Videos
+  ".mp4": "video"
+  ".avi": "video"
+  ".mkv": "video"
+  ".mov": "video"
+  ".webm": "video"
+  
+  # Audio
+  ".mp3": "audio"
+  ".wav": "audio"
+  ".flac": "audio"
+  ".aac": "audio"
+  ".ogg": "audio"
+  
+  # Documents
+  ".pdf": "document"
+  ".doc": "document"
+  ".docx": "document"
+  ".txt": "document"
+  ".md": "document"
+  
+  # Archives
+  ".zip": "archive"
+  ".rar": "archive"
+  ".tar": "archive"
+  ".gz": "archive"
+  
+  # Config
+  ".conf": "config"
+  ".cfg": "config"
+  ".ini": "config"
+  ".yaml": "config"
+  ".yml": "config"
+  ".json": "config"
+  
+  # Executables
+  ".exe": "executable"
+  ".msi": "executable"
+  ".app": "executable"
+  ".deb": "executable"
+  
+  # Data
+  ".csv": "data"
+  ".sql": "data"
+  ".db": "data"
+  ".sqlite": "data"
+  
+  # Temporary
+  ".tmp": "temporary"
+  ".cache": "temporary"
+  ".bak": "temporary"
+  ".log": "temporary"
+
+# Common ignore patterns by type
+ignore_patterns:
+  development:
+    files:
+      - "*.pyc"
+      - "*.pyo"
+      - "*.class"
+      - "*.o"
+      - "*.obj"
+      - "*.exe"
+      - "*.dll"
+      - "*.so"
+      - "*.dylib"
+    directories:
+      - "__pycache__"
+      - ".pytest_cache"
+      - "node_modules"
+      - ".git"
+      - ".svn"
+      - "build"
+      - "dist"
+      - ".venv"
+      - "venv"
+
+  system:
+    files:
+      - ".DS_Store"
+      - "Thumbs.db"
+      - "desktop.ini"
+      - "*.tmp"
+      - "*.temp"
+    directories:
+      - ".Trash"
+      - "$RECYCLE.BIN"
+      - ".thumbnails"
+
+  backup:
+    files:
+      - "*~"
+      - "*.bak"
+      - "*.backup"
+      - "*.old"
+      - "*.orig"
+    patterns:
+      - "#*#"
+      - ".#*"
