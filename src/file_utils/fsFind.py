@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 """
-findFiles.py - Enhanced File Finding with Integrated Filtering
+fsFind.py - Enhanced File Finding with Integrated Filtering
 
 Powerful and extensible tool for finding files and directories with comprehensive
-filtering capabilities via lib_filters.py integration.
+filtering capabilities via fsFilters.py integration.
 
 Usage:
-    findFiles.py [directories...] [options]
-    findFiles.py . --ext py --size-gt 1K
-    findFiles.py /project --filter-file search.yml
+    fsFind.py [directories...] [options]
+    fsFind.py . --ext py --size-gt 1K
+    fsFind.py /project --filter-file search.yml
 
 Examples:
-    findFiles.py . --recursive --ext py --size-gt 10K       # Large Python files
-    findFiles.py /logs --pattern "*.log" --modified-after 7d  # Recent logs
-    findFiles.py . --type image --git-ignore --recursive   # Tracked image files
-    findFiles.py --filter-file complex_search.yml          # Complex search from config
+    fsFind.py . --recursive --ext py --size-gt 10K       # Large Python files
+    fsFind.py /logs --pattern "*.log" --modified-after 7d  # Recent logs
+    fsFind.py . --type image --git-ignore --recursive   # Tracked image files
+    fsFind.py --filter-file complex_search.yml          # Complex search from config
 """
 
 import argparse
@@ -30,7 +30,7 @@ from typing import List, Set, Optional, Callable, Iterator
 from dev_utils.lib_logging import setup_logging, log_debug, log_info
 from dev_utils.lib_argparse_registry import register_arguments, parse_known_args
 from file_utils.lib_extensions import get_extension_data
-from file_utils.lib_filters import FileSystemFilter, apply_config_to_filter
+from file_utils.fsFilters import FileSystemFilter, apply_config_to_filter
 
 setup_logging(level=logging.ERROR)
 
@@ -348,7 +348,7 @@ def add_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument('--ext', help='Comma-separated list of file extensions')
     parser.add_argument('--type', help='Comma-separated list of file type categories')
     
-    # Enhanced filtering via lib_filters integration
+    # Enhanced filtering via fsFilters integration
     parser.add_argument('--filter-file', '-fc', help='YAML filter configuration file')
     
     # Size filters
@@ -413,28 +413,28 @@ def parse_arguments():
 def show_examples():
     """Display usage examples."""
     examples = """
-Usage Examples for findFiles.py:
+Usage Examples for fsFind.py:
 
 Basic File Finding:
-  findFiles.py                                 # Find all items in current directory
-  findFiles.py . --recursive                  # Recursive search
-  findFiles.py /project --include-dirs         # Include directories in results
-  findFiles.py . "*.py" --recursive           # Find Python files recursively
+  fsFind.py                                 # Find all items in current directory
+  fsFind.py . --recursive                  # Recursive search
+  fsFind.py /project --include-dirs         # Include directories in results
+  fsFind.py . "*.py" --recursive           # Find Python files recursively
 
 Legacy Pattern Matching:
-  findFiles.py . --substr test --recursive    # Files containing "test"
-  findFiles.py . --regex "^test.*\\.py$"      # Regex pattern matching
-  findFiles.py . --ext py,js --recursive      # Multiple extensions
-  findFiles.py . --type image,video           # File type categories
+  fsFind.py . --substr test --recursive    # Files containing "test"
+  fsFind.py . --regex "^test.*\\.py$"      # Regex pattern matching
+  fsFind.py . --ext py,js --recursive      # Multiple extensions
+  fsFind.py . --type image,video           # File type categories
 
 Enhanced Filtering:
-  findFiles.py . --size-gt 1M --size-lt 100M --recursive         # Size range
-  findFiles.py . --modified-after 7d --recursive                 # Recent files
-  findFiles.py . --file-pattern "*.py" --dir-pattern "test*"     # Pattern combinations
-  findFiles.py . --git-ignore --type-filter image --recursive   # Git-aware image search
+  fsFind.py . --size-gt 1M --size-lt 100M --recursive         # Size range
+  fsFind.py . --modified-after 7d --recursive                 # Recent files
+  fsFind.py . --file-pattern "*.py" --dir-pattern "test*"     # Pattern combinations
+  fsFind.py . --git-ignore --type-filter image --recursive   # Git-aware image search
 
 Filter Configuration:
-  findFiles.py . --filter-file search.yml --recursive    # Complex search from config
+  fsFind.py . --filter-file search.yml --recursive    # Complex search from config
   
   # search.yml example:
   file_patterns:
@@ -446,25 +446,25 @@ Filter Configuration:
 
 Advanced Examples:
   # Find large Python files modified recently, excluding tests
-  findFiles.py . --file-pattern "*.py" --size-gt 50K --modified-after 7d --dir-ignore "*test*" -r
+  fsFind.py . --file-pattern "*.py" --size-gt 50K --modified-after 7d --dir-ignore "*test*" -r
 
   # Find all tracked image files in a project
-  findFiles.py /project --type-filter image --git-ignore --recursive
+  fsFind.py /project --type-filter image --git-ignore --recursive
 
   # Search for config files with complex criteria
-  findFiles.py . --file-pattern "*.conf" --file-pattern "*.cfg" --file-pattern "*.ini" -r
+  fsFind.py . --file-pattern "*.conf" --file-pattern "*.cfg" --file-pattern "*.ini" -r
 
   # Find empty or very small files
-  findFiles.py . --size-lt 1K --recursive --show-stats
+  fsFind.py . --size-lt 1K --recursive --show-stats
 
 Pipeline Usage:
-  findFiles.py . --type image -r | fsFormat.py --format table --size
-  findFiles.py . --size-gt 100M -r | fsActions.py --move /large-files --execute
+  fsFind.py . --type image -r | fsFormat.py --format table --size
+  fsFind.py . --size-gt 100M -r | fsActions.py --move /large-files --execute
 
 Performance Tips:
-  findFiles.py . --git-ignore --recursive     # Skip ignored files for faster search
-  findFiles.py . --size-gt 1M -r --dry-run   # Preview search scope
-  findFiles.py . --pattern-filter "*.log" --modified-before 30d -r  # Target specific patterns
+  fsFind.py . --git-ignore --recursive     # Skip ignored files for faster search
+  fsFind.py . --size-gt 1M -r --dry-run   # Preview search scope
+  fsFind.py . --pattern-filter "*.log" --modified-before 30d -r  # Target specific patterns
 """
     print(examples)
 
@@ -472,10 +472,10 @@ Performance Tips:
 def show_verbose_help():
     """Display comprehensive help documentation."""
     help_text = """
-findFiles.py - Enhanced File Finding with Comprehensive Filtering
+fsFind.py - Enhanced File Finding with Comprehensive Filtering
 
 OVERVIEW:
-    Powerful file finding utility with advanced filtering capabilities via lib_filters.py
+    Powerful file finding utility with advanced filtering capabilities via fsFilters.py
     integration. Supports both legacy simple patterns and modern complex filtering.
 
 BASIC SEARCH OPTIONS:
@@ -491,7 +491,7 @@ LEGACY PATTERN MATCHING:
     --ext EXTENSIONS      Comma-separated extensions (py,js,txt)
     --type TYPES          Comma-separated type categories (image,video,audio)
 
-ENHANCED FILTERING (via lib_filters.py):
+ENHANCED FILTERING (via fsFilters.py):
     --filter-file FILE    Load comprehensive filters from YAML configuration
     
     Size Filtering:
@@ -536,7 +536,7 @@ FILTER CONFIGURATION FILE FORMAT:
       - "video"
     git_ignore: true
     
-    Load with: findFiles.py . --filter-file search.yml --recursive
+    Load with: fsFind.py . --filter-file search.yml --recursive
 
 INFORMATION AND HELP OPTIONS:
     --list-types          List all available file type categories
@@ -552,24 +552,24 @@ PERFORMANCE CONSIDERATIONS:
     - Pattern filters are applied early for better performance
 
 INTEGRATION WITH OTHER TOOLS:
-    findFiles.py works well in pipelines with:
+    fsFind.py works well in pipelines with:
     - fsFormat.py for formatted output
     - fsActions.py for bulk operations
-    - lib_filters.py for additional filtering
+    - fsFilters.py for additional filtering
     
     Examples:
-    findFiles.py . --type image -r | fsFormat.py --format json
-    findFiles.py . --size-gt 100M -r | fsActions.py --move /large --execute
+    fsFind.py . --type image -r | fsFormat.py --format json
+    fsFind.py . --size-gt 100M -r | fsActions.py --move /large --execute
 
 BACKWARD COMPATIBILITY:
     All legacy options are preserved for existing scripts:
-    findFiles.py . "*.py" --recursive --ext py --type image
+    fsFind.py . "*.py" --recursive --ext py --type image
     
     Enhanced options provide more power and precision:
-    findFiles.py . --file-pattern "*.py" --size-gt 1K --git-ignore -r
+    fsFind.py . --file-pattern "*.py" --size-gt 1K --git-ignore -r
 
-For examples: findFiles.py --help-examples
-For file types: findFiles.py --list-types
+For examples: fsFind.py --help-examples
+For file types: fsFind.py --list-types
 """
     print(help_text)
 
@@ -673,18 +673,18 @@ def main():
     
     # Handle no arguments case - show basic help
     if len(sys.argv) == 1:
-        print("findFiles.py - Enhanced File Finding Utility")
-        print("Usage: findFiles.py [directories...] [options]")
+        print("fsFind.py - Enhanced File Finding Utility")
+        print("Usage: fsFind.py [directories...] [options]")
         print("\nBasic Examples:")
-        print("  findFiles.py                      # Find all files in current directory")
-        print("  findFiles.py . --recursive        # Recursive search")
-        print("  findFiles.py . '*.py' -r          # Find Python files recursively")
-        print("  findFiles.py . --type image -r    # Find image files recursively")
+        print("  fsFind.py                      # Find all files in current directory")
+        print("  fsFind.py . --recursive        # Recursive search")
+        print("  fsFind.py . '*.py' -r          # Find Python files recursively")
+        print("  fsFind.py . --type image -r    # Find image files recursively")
         print("\nFor help:")
-        print("  findFiles.py --help               # Standard help")
-        print("  findFiles.py --help-examples      # Usage examples")
-        print("  findFiles.py --help-verbose       # Comprehensive help")
-        print("  findFiles.py --list-types         # Show available file types")
+        print("  fsFind.py --help               # Standard help")
+        print("  fsFind.py --help-examples      # Usage examples")
+        print("  fsFind.py --help-verbose       # Comprehensive help")
+        print("  fsFind.py --list-types         # Show available file types")
         return
     
     process_find_pipeline(args)

@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 
 """
-tree_printer.py
+treePrint.py
 
 Pretty-prints directory structures in ASCII format, similar to the Unix 'tree' command
 but with enhanced filtering and customization options.
 
 Usage:
-    tree_printer.py [path] [options]
-    find . -type f -name "*.py" | tree_printer.py --files
+    treePrint.py [path] [options]
+    find . -type f -name "*.py" | treePrint.py --files
 
 Examples:
-    tree_printer.py                              # Current directory, dirs only
-    tree_printer.py /path/to/dir --files         # Include files in a specific directory
-    tree_printer.py . --absolute                # Use absolute path for the root
-    cat file_list.txt | tree_printer.py --files # Visualize parent dirs of files in list
+    treePrint.py                              # Current directory, dirs only
+    treePrint.py /path/to/dir --files         # Include files in a specific directory
+    treePrint.py . --absolute                # Use absolute path for the root
+    cat file_list.txt | treePrint.py --files # Visualize parent dirs of files in list
 """
 
 import argparse
@@ -363,21 +363,21 @@ def show_examples():
 Basic Usage Examples:
 
 Simple Directory Trees:
-  tree_printer.py                           # Show current directory tree (dirs only)
-  tree_printer.py /path/to/directory        # Specific directory
-  tree_printer.py . --files                 # Include files
+  treePrint.py                           # Show current directory tree (dirs only)
+  treePrint.py /path/to/directory        # Specific directory
+  treePrint.py . --files                 # Include files
 
 Pipeline Usage:
-  findFiles --pattern "*test*" | tree_printer.py --files    # Tree view of found directories
-  echo "/path/dir1" | tree_printer.py --files               # Single directory from stdin
-  tree_printer.py --from-file dirlist.txt --files           # Directories from file
+  fsFind --pattern "*test*" | treePrint.py --files    # Tree view of found directories
+  echo "/path/dir1" | treePrint.py --files               # Single directory from stdin
+  treePrint.py --from-file dirlist.txt --files           # Directories from file
 
 Quick Filtering:
-  tree_printer.py . --files --pattern "*.py"           # Python files only
-  tree_printer.py . --ignore ".git,__pycache__,*.pyc"  # Ignore patterns
-  tree_printer.py . --max-depth 2 --files             # Limit depth
+  treePrint.py . --files --pattern "*.py"           # Python files only
+  treePrint.py . --ignore ".git,__pycache__,*.pyc"  # Ignore patterns
+  treePrint.py . --max-depth 2 --files             # Limit depth
 
-For comprehensive help with all parameters: tree_printer.py --help-verbose
+For comprehensive help with all parameters: treePrint.py --help-verbose
 """
     print(examples)
 
@@ -385,7 +385,7 @@ For comprehensive help with all parameters: tree_printer.py --help-verbose
 def show_verbose_help():
     """Display comprehensive help with all parameters and detailed use cases."""
     help_text = """
-tree_printer.py - Comprehensive Help and Examples
+treePrint.py - Comprehensive Help and Examples
 
 OVERVIEW:
     Pretty-prints directory structures in ASCII format with extensive filtering
@@ -393,137 +393,137 @@ OVERVIEW:
     and detailed file information display.
 
 INPUT METHODS:
-    1. Command line: tree_printer.py /path/to/dir
-    2. Pipeline:     find . -type d | tree_printer.py
-    3. File list:    tree_printer.py --from-file directories.txt
-    4. Current dir:  tree_printer.py (defaults to current directory)
+    1. Command line: treePrint.py /path/to/dir
+    2. Pipeline:     find . -type d | treePrint.py
+    3. File list:    treePrint.py --from-file directories.txt
+    4. Current dir:  treePrint.py (defaults to current directory)
 
 BASIC PARAMETERS:
 
 --files, -f
     Include files in output (default shows directories only)
-    Example: tree_printer.py --files
+    Example: treePrint.py --files
 
 --max-depth, -d N
     Limit tree depth to N levels
-    Example: tree_printer.py --max-depth 3 --files
+    Example: treePrint.py --max-depth 3 --files
 
 --pattern, -p PATTERN
     Include only files matching glob pattern (can be repeated)
-    Example: tree_printer.py --files --pattern "*.py" --pattern "*.md"
+    Example: treePrint.py --files --pattern "*.py" --pattern "*.md"
 
 --ignore, -i PATTERNS
     Comma-separated patterns to ignore
-    Example: tree_printer.py --ignore ".git,__pycache__,*.pyc,node_modules"
+    Example: treePrint.py --ignore ".git,__pycache__,*.pyc,node_modules"
 
 DISPLAY OPTIONS:
 
 --size, -s
     Show file sizes in human-readable format (B, K, M, G, T)
-    Example: tree_printer.py --files --size
+    Example: treePrint.py --files --size
 
 --modified, -m
     Show last modified dates (YYYY-MM-DD HH:MM format)
-    Example: tree_printer.py --files --modified
+    Example: treePrint.py --files --modified
 
 --permissions
     Show Unix-style file permissions (rwxrwxrwx format)
-    Example: tree_printer.py --files --permissions
+    Example: treePrint.py --files --permissions
 
 --ascii, -a
     Use ASCII characters (+--,|) instead of Unicode (├──,│)
-    Example: tree_printer.py --ascii --files
+    Example: treePrint.py --ascii --files
 
 --no-colors
     Disable colored output (useful for scripts/logs)
-    Example: tree_printer.py --files --no-colors
+    Example: treePrint.py --files --no-colors
 
 ADVANCED OPTIONS:
 
 --hidden
     Show hidden files and directories (starting with .)
-    Example: tree_printer.py --files --hidden
+    Example: treePrint.py --files --hidden
 
 --follow-symlinks
     Follow symbolic links into directories
-    Example: tree_printer.py --files --follow-symlinks
+    Example: treePrint.py --files --follow-symlinks
 
 --unsorted
     Don't sort directories before files (show in natural order)
-    Example: tree_printer.py --files --unsorted
+    Example: treePrint.py --files --unsorted
 
 --no-summary
     Don't show summary statistics at the end
-    Example: tree_printer.py --files --no-summary
+    Example: treePrint.py --files --no-summary
 
 --dry-run
     Show what directories would be processed without generating trees
-    Example: tree_printer.py --dry-run /path/to/dirs
+    Example: treePrint.py --dry-run /path/to/dirs
 
 COMMON USE CASES:
 
 1. Project Overview (Developer):
-   tree_printer.py --files --ignore ".git,__pycache__,node_modules,*.pyc"
+   treePrint.py --files --ignore ".git,__pycache__,node_modules,*.pyc"
    # Clean view of project structure without build artifacts
 
 2. Documentation Generation:
-   tree_printer.py --files --no-colors --ascii > project_structure.txt
+   treePrint.py --files --no-colors --ascii > project_structure.txt
    # Generate text file with project structure for documentation
 
 3. Large Directory Analysis:
-   tree_printer.py --max-depth 2 --size --files
+   treePrint.py --max-depth 2 --size --files
    # Shallow view with file sizes to understand disk usage
 
 4. Python Project Structure:
-   tree_printer.py --files --pattern "*.py" --pattern "*.md" --pattern "*.txt"
+   treePrint.py --files --pattern "*.py" --pattern "*.md" --pattern "*.txt"
    # Show only Python files and documentation
 
 5. System Administration:
-   tree_printer.py /etc --max-depth 2 --permissions
+   treePrint.py /etc --max-depth 2 --permissions
    # Check configuration directory structure with permissions
 
 6. Backup Planning:
-   tree_printer.py --files --size --modified --max-depth 3
+   treePrint.py --files --size --modified --max-depth 3
    # See file dates and sizes for backup decisions
 
 7. Security Audit:
-   tree_printer.py --files --permissions --hidden
+   treePrint.py --files --permissions --hidden
    # Include hidden files and show all permissions
 
 8. Quick Directory Count:
-   tree_printer.py --max-depth 1
+   treePrint.py --max-depth 1
    # Just show immediate subdirectories
 
 PIPELINE EXAMPLES:
 
 1. Process Multiple Project Directories:
-   find ~/projects -name "*.git" -type d | sed 's/\\.git$//' | tree_printer.py --files
+   find ~/projects -name "*.git" -type d | sed 's/\\.git$//' | treePrint.py --files
 
 2. Show Tree for Directories Containing Python Files:
-   find . -name "*.py" -type f | xargs dirname | sort -u | tree_printer.py --files
+   find . -name "*.py" -type f | xargs dirname | sort -u | treePrint.py --files
 
 3. Analyze Recently Modified Directories:
-   find . -type d -mtime -7 | tree_printer.py --files --modified
+   find . -type d -mtime -7 | treePrint.py --files --modified
 
 4. Filter by Size and Show Structure:
-   find . -type d -exec du -sh {} \\; | sort -hr | head -10 | cut -f2 | tree_printer.py
+   find . -type d -exec du -sh {} \\; | sort -hr | head -10 | cut -f2 | treePrint.py
 
 5. Git Repository Analysis:
-   git ls-files | xargs dirname | sort -u | tree_printer.py --files --pattern "*.py"
+   git ls-files | xargs dirname | sort -u | treePrint.py --files --pattern "*.py"
 
 ADVANCED COMBINATIONS:
 
 1. Full Project Documentation:
-   tree_printer.py --files --size --modified --ignore ".git,__pycache__" --ascii --no-colors
+   treePrint.py --files --size --modified --ignore ".git,__pycache__" --ascii --no-colors
 
 2. Detailed Security Audit:
-   tree_printer.py --files --permissions --hidden --follow-symlinks --size
+   treePrint.py --files --permissions --hidden --follow-symlinks --size
 
 3. Development Environment Overview:
-   tree_printer.py --files --pattern "*.py" --pattern "*.js" --pattern "*.md" --max-depth 4
+   treePrint.py --files --pattern "*.py" --pattern "*.js" --pattern "*.md" --max-depth 4
 
 4. Minimal Clean View:
-   tree_printer.py --max-depth 2 --no-summary --ignore ".*,__pycache__,node_modules"
+   treePrint.py --max-depth 2 --no-summary --ignore ".*,__pycache__,node_modules"
 
 FILE PATTERNS:
     *.py        Python files
@@ -558,7 +558,7 @@ PERFORMANCE TIPS:
     - Use --no-colors for faster output in scripts
     - Use --pattern to focus on specific file types
 
-For basic examples, use: tree_printer.py --help-examples
+For basic examples, use: treePrint.py --help-examples
 """
     print(help_text)
 

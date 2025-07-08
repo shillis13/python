@@ -2,13 +2,34 @@
 
 A comprehensive and modular file system utility suite with powerful filtering, formatting, and operation capabilities.
 
+## Recent Refactoring Overview
+
+This file utilities system has undergone comprehensive refactoring into a unified, modular system with shared filtering capabilities and enhanced functionality. The refactoring transformed four core utilities with expanded capabilities:
+
+### Refactored Utilities Summary
+
+**fsFilters.py** (formerly ignore_filter.py) - Central filtering system with size filtering (`--size-gt 1M`), date filtering (`--modified-after 7d`), pattern filtering (`--file-pattern "*.py"`), type/extension filtering (`--type image`), Git integration (`--git-ignore`), and YAML configuration support.
+
+**fsActions.py** (formerly fsActions.py) - Enhanced file operations with structure preservation (`--with-dir`), permission management (`--set-permissions 755`), attribute modification, and full fsFilters.py integration with safety defaults.
+
+**fsFormat.py** (formerly treePrint.py) - Multi-format display supporting tree, table, JSON, YAML, and CSV formats with customizable columns, sorting, grouping, and comprehensive filtering integration.
+
+**fsFind.py** (Enhanced) - Advanced file discovery maintaining backward compatibility while adding fsFilters.py integration, git-aware searching, enhanced statistics (`--show-stats`), and comprehensive help systems.
+
+### Key Architectural Improvements
+
+- **Unified Filtering Engine**: Shared filtering logic across all utilities with consistent command-line interface and YAML configuration support
+- **Safety and Usability**: Dry-run defaults for destructive operations, comprehensive help systems, statistics reporting, and graceful error handling  
+- **Pipeline Integration**: Tools designed to work together seamlessly with standard input/output handling and format compatibility
+- **Performance Optimization**: Git-aware filtering, early filtering to reduce processing, efficient directory traversal, and smart caching
+
 ## Overview
 
 This refactored file utilities system provides a cohesive set of tools for file system operations, built around a central filtering system that ensures consistency and reusability across all utilities.
 
 ## Core Components
 
-### 1. lib_filters.py - Central Filtering System
+### 1. fsFilters.py - Central Filtering System
 
 The foundation of the entire system, providing comprehensive filtering capabilities:
 
@@ -21,19 +42,19 @@ The foundation of the entire system, providing comprehensive filtering capabilit
 
 ```bash
 # Examples
-lib_filters.py . --size-gt 1M --modified-after 30d --git-ignore
-lib_filters.py . --type image --size-lt 10M --inverse
-lib_filters.py . --config filters.yml --dry-run
+fsFilters.py . --size-gt 1M --modified-after 30d --git-ignore
+fsFilters.py . --type image --size-lt 10M --inverse
+fsFilters.py . --config filters.yml --dry-run
 ```
 
 ### 2. fsActions.py - Enhanced File Operations
 
-Previously `dirFileActions.py`, now with advanced filtering and structure preservation:
+Previously `fsActions.py`, now with advanced filtering and structure preservation:
 
 - **Operations**: `--move`, `--copy`, `--delete`
 - **Structure Control**: `--with-dir`, `--base-path`
 - **Attribute Management**: `--set-permissions 755`, `--set-mtime`
-- **Integrated Filtering**: All lib_filters.py options available
+- **Integrated Filtering**: All fsFilters.py options available
 
 ```bash
 # Examples
@@ -44,7 +65,7 @@ fsActions.py --delete --pattern "*.tmp" --filter-file cleanup.yml --execute
 
 ### 3. fsFormat.py - Multi-Format Display
 
-Previously `tree_printer.py`, now supporting multiple output formats:
+Previously `treePrint.py`, now supporting multiple output formats:
 
 - **Formats**: `--tree`, `--table`, `--json`, `--yaml`, `--csv`
 - **Content Options**: `--files`, `--size`, `--modified`, `--permissions`
@@ -59,30 +80,30 @@ fsFormat.py . --json --type image --git-ignore > images.json
 fsFormat.py . --csv --size-gt 1M --columns name,size,path > large_files.csv
 ```
 
-### 4. findFiles.py - Enhanced File Discovery
+### 4. fsFind.py - Enhanced File Discovery
 
-Enhanced with full lib_filters.py integration while maintaining backward compatibility:
+Enhanced with full fsFilters.py integration while maintaining backward compatibility:
 
 - **Legacy Support**: All original options preserved
-- **Enhanced Filtering**: Full lib_filters.py integration
+- **Enhanced Filtering**: Full fsFilters.py integration
 - **Performance**: Git-aware searching, smart recursion
 - **Statistics**: `--show-stats`, `--dry-run`
 
 ```bash
 # Examples (legacy)
-findFiles.py . "*.py" --recursive --ext py
-findFiles.py . --substr test --type image
+fsFind.py . "*.py" --recursive --ext py
+fsFind.py . --substr test --type image
 
 # Examples (enhanced)
-findFiles.py . --file-pattern "*.py" --size-gt 10K --git-ignore --recursive
-findFiles.py . --filter-file search.yml --show-stats
+fsFind.py . --file-pattern "*.py" --size-gt 10K --git-ignore --recursive
+fsFind.py . --filter-file search.yml --show-stats
 ```
 
 ## Key Features
 
 ### Unified Filtering System
 
-All utilities share the same filtering engine via lib_filters.py:
+All utilities share the same filtering engine via fsFilters.py:
 
 - **Consistent Interface**: Same options work across all tools
 - **YAML Configuration**: Complex filters in reusable config files
@@ -135,16 +156,16 @@ All utilities work together in command pipelines:
 
 ```bash
 # Find large images, format as table, archive to /backup
-findFiles.py . --type image --size-gt 10M -r | \
+fsFind.py . --type image --size-gt 10M -r | \
 fsFormat.py --format table --size --modified | \
 fsActions.py --move /backup --with-dir --execute
 
 # Filter files by criteria, output as JSON
-lib_filters.py . --config filters.yml | \
+fsFilters.py . --config filters.yml | \
 fsFormat.py --format json --files > filtered_files.json
 
 # Find and clean up build artifacts
-findFiles.py . --filter-file cleanup.yml -r | \
+fsFind.py . --filter-file cleanup.yml -r | \
 fsActions.py --delete --dry-run  # preview first
 ```
 
@@ -154,7 +175,7 @@ fsActions.py --delete --dry-run  # preview first
 
 ```bash
 # Find source code files
-findFiles.py . --file-pattern "*.py" --file-pattern "*.js" --git-ignore -r
+fsFind.py . --file-pattern "*.py" --file-pattern "*.js" --git-ignore -r
 
 # Format project structure
 fsFormat.py . --tree --files --git-ignore --max-depth 3
@@ -163,17 +184,17 @@ fsFormat.py . --tree --files --git-ignore --max-depth 3
 fsActions.py --move /archive --size-gt 100M --modified-before 180d --with-dir -x
 
 # Clean up build artifacts
-lib_filters.py . --config dev_cleanup.yml | fsActions.py --delete --execute
+fsFilters.py . --config dev_cleanup.yml | fsActions.py --delete --execute
 ```
 
 ### System Administration
 
 ```bash
 # Find large log files
-findFiles.py /var/log --pattern "*.log" --size-gt 100M --modified-before 30d
+fsFind.py /var/log --pattern "*.log" --size-gt 100M --modified-before 30d
 
 # Security audit - find recently modified config files
-findFiles.py /etc --pattern "*.conf" --modified-after 7d --recursive --show-stats
+fsFind.py /etc --pattern "*.conf" --modified-after 7d --recursive --show-stats
 
 # Disk usage analysis
 fsFormat.py /home --table --size --sort-by size --reverse --size-gt 1G
@@ -186,7 +207,7 @@ fsActions.py --copy /backup --with-dir --base-path /home --type document --execu
 
 ```bash
 # Find and organize images
-findFiles.py ~/Pictures --type image --size-gt 1M -r | \
+fsFind.py ~/Pictures --type image --size-gt 1M -r | \
 fsFormat.py --format table --size --modified --columns name,size,modified,path
 
 # Archive old videos
@@ -265,12 +286,12 @@ All utilities support these common options:
    │   ├── lib_outputColors.py
    │   └── lib_argparse_registry.py
    ├── file_utils/
-   │   ├── lib_filters.py         # Central filtering system
+   │   ├── fsFilters.py         # Central filtering system
    │   ├── lib_extensions.py      # File type definitions
    │   ├── lib_fileinput.py       # Input handling utilities
-   │   ├── fsActions.py           # File operations (was dirFileActions.py)
-   │   ├── fsFormat.py            # Multi-format display (was tree_printer.py)
-   │   └── findFiles.py           # Enhanced file finding
+   │   ├── fsActions.py           # File operations (was fsActions.py)
+   │   ├── fsFormat.py            # Multi-format display (was treePrint.py)
+   │   └── fsFind.py           # Enhanced file finding
    ```
 
 2. **Python Path**: Make sure the `src` directory is in your Python path
@@ -285,26 +306,26 @@ All utilities support these common options:
 
 ```bash
 # Skip empty directories in output
-lib_filters.py . --skip-empty
+fsFilters.py . --skip-empty
 
 # Show only empty directories
-lib_filters.py . --show-empty
+fsFilters.py . --show-empty
 
 # Clean up empty directories
-lib_filters.py . --show-empty | fsActions.py --delete --execute
+fsFilters.py . --show-empty | fsActions.py --delete --execute
 ```
 
 ### Git Integration
 
 ```bash
 # Respect .gitignore files
-findFiles.py . --git-ignore --recursive
+fsFind.py . --git-ignore --recursive
 
 # Find only ignored files (useful for cleanup)
-lib_filters.py . --git-ignore --inverse
+fsFilters.py . --git-ignore --inverse
 
 # Use custom ignore file
-lib_filters.py . --ignore-file .dockerignore
+fsFilters.py . --ignore-file .dockerignore
 ```
 
 ### Performance Optimization
@@ -314,36 +335,36 @@ lib_filters.py . --ignore-file .dockerignore
 fsActions.py --move /backup --size-gt 1G --dry-run
 
 # Show statistics for large operations
-findFiles.py /large/directory --recursive --show-stats
+fsFind.py /large/directory --recursive --show-stats
 
 # Use filters to reduce search scope
-findFiles.py . --git-ignore --type source --recursive
+fsFind.py . --git-ignore --type source --recursive
 ```
 
 ## Migration from Legacy Tools
 
-### dirFileActions.py → fsActions.py
+### fsActions.py → fsActions.py
 
 - All original functionality preserved
 - Add `--with-dir` for structure preservation
 - Use `--filter-file` for complex filtering
 - Add `--execute` for safety (replaces `--exec`)
 
-### tree_printer.py → fsFormat.py
+### treePrint.py → fsFormat.py
 
 - Tree format is default (use `--tree` explicitly if needed)
 - Add `--format table|json|yaml|csv` for other formats
 - Use `--columns` to customize table/CSV output
 - Add filtering with `--filter-file`
 
-### ignore_filter.py → lib_filters.py
+### ignore_filter.py → fsFilters.py
 
 - Much more comprehensive filtering options
 - YAML configuration file support
 - Git integration built-in
 - Size and date filtering added
 
-### findFiles.py (Enhanced)
+### fsFind.py (Enhanced)
 
 - All legacy options preserved for backward compatibility
 - Add `--filter-file` for complex searches
@@ -391,3 +412,17 @@ See the configuration examples in `filter_config_examples.yml` for ready-to-use 
 - Recent activity monitoring
 
 Each example includes usage instructions and can be saved as individual YAML files for specific use cases.
+
+## Supporting Infrastructure
+
+### Configuration System
+- **extensions.yml**: Comprehensive file type definitions with hierarchical categories
+- **extensions.schema.yml**: Validation schema for type definitions ensuring data consistency
+- **filter_config_examples.yml**: Ready-to-use filter configurations for common scenarios
+- **YAML configuration support**: All utilities support `--filter-file` for complex operations
+
+### Documentation
+- **Enhanced README**: Complete system documentation with usage patterns and examples
+- **Usage examples**: Comprehensive examples for all utilities covering basic to advanced use cases
+- **Pipeline integration**: Examples of tool combinations and workflow automation
+- **Migration guide**: Backward compatibility notes and upgrade instructions

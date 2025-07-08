@@ -3,7 +3,7 @@
 fsFormat.py - Multi-Format File System Display
 
 Displays file system structures in various formats: tree, table, JSON, YAML, CSV.
-Renamed from tree_printer.py with expanded formatting capabilities.
+Renamed from treePrint.py with expanded formatting capabilities.
 
 Usage:
     fsFormat.py [paths...] [options]
@@ -31,7 +31,7 @@ from dev_utils.lib_argparse_registry import register_arguments, parse_known_args
 from dev_utils.lib_logging import setup_logging, log_debug
 from dev_utils.lib_outputColors import colorize_string
 from file_utils.lib_fileinput import get_file_paths_from_input
-from file_utils.lib_filters import FileSystemFilter, apply_config_to_filter
+from file_utils.fsFilters import FileSystemFilter, apply_config_to_filter
 
 setup_logging(level=logging.ERROR)
 
@@ -536,7 +536,7 @@ def add_args(parser: argparse.ArgumentParser) -> None:
     # Filter integration
     parser.add_argument('--filter-file', '-fc', help="YAML filter configuration file")
     
-    # Quick filter options (subset of lib_filters for convenience)
+    # Quick filter options (subset of fsFilters for convenience)
     parser.add_argument('--pattern', '-pat', help="Pattern for both files and directories")
     parser.add_argument('--file-pattern', '-fp', action='append', default=[],
                        help="File name patterns to include")
@@ -596,7 +596,7 @@ Filtering Integration:
 
 Pipeline Usage:
   find . -name "*.py" | fsFormat.py --format table --size        # Table from find
-  lib_filters.py . --type image | fsFormat.py --format json     # JSON for filtered images
+  fsFilters.py . --type image | fsFormat.py --format json     # JSON for filtered images
 
 Grouping and Sorting:
   fsFormat.py . --files --group-by type --format table          # Group by file type
@@ -660,7 +660,7 @@ GROUPING AND SORTING:
 FILTERING INTEGRATION:
     --filter-file FILE    Load filters from YAML configuration
     
-    Quick filters (subset of lib_filters.py):
+    Quick filters (subset of fsFilters.py):
     --pattern PATTERN     Pattern for files and directories
     --file-pattern        File-specific patterns
     --dir-pattern         Directory-specific patterns
@@ -702,12 +702,12 @@ CSV Format:
 PIPELINE INTEGRATION:
     fsFormat.py works with output from:
     - find command
-    - lib_filters.py
+    - fsFilters.py
     - Any tool that outputs file paths
     
     Examples:
     find . -name "*.py" | fsFormat.py --format table --size
-    lib_filters.py . --size-gt 1M | fsFormat.py --format json
+    fsFilters.py . --size-gt 1M | fsFormat.py --format json
 
 PERFORMANCE TIPS:
     - Use --max-depth for large directories

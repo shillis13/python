@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-lib_filters.py - Comprehensive File System Filtering Library
+fsFilters.py - Comprehensive File System Filtering Library
 
 Provides unified filtering capabilities for files and directories based on:
 - Name patterns (glob and regex)
@@ -10,15 +10,15 @@ Provides unified filtering capabilities for files and directories based on:
 - Custom filter combinations
 
 Usage:
-    lib_filters.py [paths...] [options]
-    find . -type f | lib_filters.py --size-gt 1M --modified-after 2024-01-01
-    lib_filters.py /path/to/dir --git-ignore --file-pattern "*.py" --inverse
+    fsFilters.py [paths...] [options]
+    find . -type f | fsFilters.py --size-gt 1M --modified-after 2024-01-01
+    fsFilters.py /path/to/dir --git-ignore --file-pattern "*.py" --inverse
 
 Examples:
-    lib_filters.py . --size-gt 100K --size-lt 10M        # Files between 100K-10M
-    lib_filters.py . --modified-after 2024-01-01          # Modified after date
-    lib_filters.py . --git-ignore --inverse               # Show only ignored files
-    lib_filters.py . --skip-empty --dir-pattern "test*"   # Skip empty test dirs
+    fsFilters.py . --size-gt 100K --size-lt 10M        # Files between 100K-10M
+    fsFilters.py . --modified-after 2024-01-01          # Modified after date
+    fsFilters.py . --git-ignore --inverse               # Show only ignored files
+    fsFilters.py . --skip-empty --dir-pattern "test*"   # Skip empty test dirs
 """
 
 import argparse
@@ -542,45 +542,45 @@ def parse_arguments():
 def show_examples():
     """Display usage examples."""
     examples = """
-Usage Examples for lib_filters.py:
+Usage Examples for fsFilters.py:
 
 Size Filtering:
-  lib_filters.py . --size-gt 1M --size-lt 100M    # Files between 1M-100M
-  lib_filters.py . --size-eq 0                    # Empty files
+  fsFilters.py . --size-gt 1M --size-lt 100M    # Files between 1M-100M
+  fsFilters.py . --size-eq 0                    # Empty files
 
 Date Filtering:
-  lib_filters.py . --modified-after 2024-01-01    # Modified this year
-  lib_filters.py . --modified-after 7d            # Modified in last 7 days
-  lib_filters.py . --created-before 1w            # Created over a week ago
+  fsFilters.py . --modified-after 2024-01-01    # Modified this year
+  fsFilters.py . --modified-after 7d            # Modified in last 7 days
+  fsFilters.py . --created-before 1w            # Created over a week ago
 
 Pattern Filtering:
-  lib_filters.py . --file-pattern "*.py" --file-pattern "*.js"  # Python and JS files
-  lib_filters.py . --dir-pattern "test*" --inverse              # Non-test directories
-  lib_filters.py . --pattern "*.log" --ignore                   # All log files (shortcut)
+  fsFilters.py . --file-pattern "*.py" --file-pattern "*.js"  # Python and JS files
+  fsFilters.py . --dir-pattern "test*" --inverse              # Non-test directories
+  fsFilters.py . --pattern "*.log" --ignore                   # All log files (shortcut)
 
 Type and Extension:
-  lib_filters.py . --type image --type video      # Media files
-  lib_filters.py . --extension py --extension js  # Specific extensions
+  fsFilters.py . --type image --type video      # Media files
+  fsFilters.py . --extension py --extension js  # Specific extensions
 
 Git Integration:
-  lib_filters.py . --git-ignore                   # Respect .gitignore
-  lib_filters.py . --git-ignore --inverse         # Show only ignored files
-  lib_filters.py . --ignore-file .dockerignore    # Use custom ignore file
+  fsFilters.py . --git-ignore                   # Respect .gitignore
+  fsFilters.py . --git-ignore --inverse         # Show only ignored files
+  fsFilters.py . --ignore-file .dockerignore    # Use custom ignore file
 
 Empty Directories:
-  lib_filters.py . --skip-empty                   # Hide empty directories
-  lib_filters.py . --show-empty                   # Show only empty directories
+  fsFilters.py . --skip-empty                   # Hide empty directories
+  fsFilters.py . --show-empty                   # Show only empty directories
 
 Complex Combinations:
-  lib_filters.py . --type image --size-gt 1M --modified-after 30d  # Large recent images
-  lib_filters.py . --git-ignore --file-pattern "*.py" --inverse    # Ignored Python files
+  fsFilters.py . --type image --size-gt 1M --modified-after 30d  # Large recent images
+  fsFilters.py . --git-ignore --file-pattern "*.py" --inverse    # Ignored Python files
 
 Pipeline Usage:
-  find . -type f | lib_filters.py --size-gt 100M  # Large files from find
-  lib_filters.py --from-file files.txt --type video  # Filter file list
+  find . -type f | fsFilters.py --size-gt 100M  # Large files from find
+  fsFilters.py --from-file files.txt --type video  # Filter file list
 
 Configuration File:
-  lib_filters.py . --config filters.yml           # Use YAML config
+  fsFilters.py . --config filters.yml           # Use YAML config
 """
     print(examples)
 
@@ -588,7 +588,7 @@ Configuration File:
 def show_verbose_help():
     """Display comprehensive help."""
     help_text = """
-lib_filters.py - Comprehensive File System Filtering
+fsFilters.py - Comprehensive File System Filtering
 
 OVERVIEW:
     Advanced filtering utility for files and directories supporting size, date,
@@ -663,18 +663,18 @@ CONFIGURATION FILE FORMAT (YAML):
     git_ignore: true
 
 INPUT METHODS:
-    1. Command line paths: lib_filters.py /path1 /path2
-    2. Standard input: find . | lib_filters.py --size-gt 1M
-    3. File list: lib_filters.py --from-file paths.txt
-    4. Current directory: lib_filters.py (no arguments)
+    1. Command line paths: fsFilters.py /path1 /path2
+    2. Standard input: find . | fsFilters.py --size-gt 1M
+    3. File list: fsFilters.py --from-file paths.txt
+    4. Current directory: fsFilters.py (no arguments)
 
 COMBINING FILTERS:
     All filters are combined with AND logic. Use --inverse for NOT logic.
     
     Example: Large recent Python files not in git
-    lib_filters.py . --file-pattern "*.py" --size-gt 100K --modified-after 30d --git-ignore --inverse
+    fsFilters.py . --file-pattern "*.py" --size-gt 100K --modified-after 30d --git-ignore --inverse
 
-For basic examples: lib_filters.py --help-examples
+For basic examples: fsFilters.py --help-examples
 """
     print(help_text)
 
@@ -804,11 +804,11 @@ def main():
     
     # Handle no arguments case
     if len(sys.argv) == 1:
-        print("lib_filters.py - File System Filtering Utility")
-        print("Usage: lib_filters.py [paths...] [options]")
-        print("For help: lib_filters.py --help")
-        print("For examples: lib_filters.py --help-examples")
-        print("For detailed help: lib_filters.py --help-verbose")
+        print("fsFilters.py - File System Filtering Utility")
+        print("Usage: fsFilters.py [paths...] [options]")
+        print("For help: fsFilters.py --help")
+        print("For examples: fsFilters.py --help-examples")
+        print("For detailed help: fsFilters.py --help-verbose")
         return
     
     process_filters_pipeline(args)

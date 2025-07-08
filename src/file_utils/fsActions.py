@@ -3,7 +3,7 @@
 fsActions.py - Enhanced File System Operations
 
 Performs operations on files and directories with advanced filtering and hierarchy options.
-Renamed from dirFileActions.py with expanded capabilities.
+Renamed from fsActions.py with expanded capabilities.
 
 Usage:
     fsActions.py [options] --move /target/dir
@@ -29,7 +29,7 @@ from dev_utils.lib_logging import setup_logging, log_info, log_debug
 from dev_utils.lib_dryrun import dry_run_decorator
 from dev_utils.lib_argparse_registry import register_arguments, parse_known_args
 from file_utils.lib_fileinput import get_file_paths_from_input
-from file_utils.lib_filters import FileSystemFilter, apply_config_to_filter
+from file_utils.fsFilters import FileSystemFilter, apply_config_to_filter
 
 setup_logging()
 
@@ -261,7 +261,7 @@ def add_args(parser: argparse.ArgumentParser) -> None:
     # Filtering integration
     parser.add_argument('--filter-file', '-fc', help="YAML filter configuration file")
     
-    # Individual filter options (subset of lib_filters for convenience)
+    # Individual filter options (subset of fsFilters for convenience)
     parser.add_argument('--file-pattern', '-fp', action='append', default=[], 
                        help="File name patterns to include")
     parser.add_argument('--dir-pattern', '-dp', action='append', default=[], 
@@ -325,7 +325,7 @@ Permissions and Attributes:
 
 Pipeline Usage:
   find . -name "*.bak" | fsActions.py --move /cleanup --execute       # Pipeline from find
-  lib_filters.py . --size-gt 1G | fsActions.py --move /large --execute  # With lib_filters
+  fsFilters.py . --size-gt 1G | fsActions.py --move /large --execute  # With fsFilters
 
 Complex Examples:
   # Archive large old images with structure
@@ -385,7 +385,7 @@ PERMISSION AND ATTRIBUTE MODIFICATION:
 FILTERING INTEGRATION:
     --filter-file FILE        Load filter configuration from YAML file
     
-    Quick Filter Options (subset of lib_filters.py):
+    Quick Filter Options (subset of fsFilters.py):
     --file-pattern PATTERN    File name patterns
     --dir-pattern PATTERN     Directory name patterns  
     --pattern PATTERN         Pattern for both files and directories
@@ -415,7 +415,7 @@ SAFETY FEATURES:
     - Dry-run mode by default
     - Operation statistics and error reporting
     - Graceful handling of conflicts and errors
-    - Integration with lib_filters.py for safe selection
+    - Integration with fsFilters.py for safe selection
 
 FILTER CONFIGURATION FILE FORMAT:
     # filters.yml
@@ -429,7 +429,7 @@ FILTER CONFIGURATION FILE FORMAT:
 
 PERFORMANCE TIPS:
     - Use --filter-file for complex filter combinations
-    - Combine with lib_filters.py for advanced pre-filtering
+    - Combine with fsFilters.py for advanced pre-filtering
     - Use --dry-run first to verify operations
     - --with-dir preserves structure but may be slower for large operations
 

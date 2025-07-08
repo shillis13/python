@@ -1,9 +1,9 @@
-# Filter Configuration Examples for lib_filters.py and related utilities
+# Filter Configuration Examples for fsFilters.py and related utilities
 # Save as filters.yml and use with --filter-file or --config option
 
 # =============================================================================
 # Example 1: Development Project Cleanup
-# Usage: lib_filters.py . --config dev_cleanup.yml
+# Usage: fsFilters.py . --config dev_cleanup.yml
 # =============================================================================
 dev_cleanup:
   # Target build artifacts and temporary files
@@ -65,7 +65,7 @@ large_files:
 
 # =============================================================================
 # Example 3: Source Code Analysis
-# Usage: findFiles.py . --filter-file source_code.yml --recursive
+# Usage: fsFind.py . --filter-file source_code.yml --recursive
 # =============================================================================
 source_code:
   # Programming language files
@@ -134,7 +134,7 @@ media_files:
 
 # =============================================================================
 # Example 5: Security Audit
-# Usage: lib_filters.py /etc --filter-file security_audit.yml --recursive
+# Usage: fsFilters.py /etc --filter-file security_audit.yml --recursive
 # =============================================================================
 security_audit:
   # Configuration and sensitive files
@@ -161,7 +161,7 @@ security_audit:
 
 # =============================================================================
 # Example 6: Log File Analysis
-# Usage: findFiles.py /var/log --filter-file log_analysis.yml --show-stats
+# Usage: fsFind.py /var/log --filter-file log_analysis.yml --show-stats
 # =============================================================================
 log_analysis:
   # Log file patterns
@@ -212,7 +212,7 @@ duplicate_prep:
 
 # =============================================================================
 # Example 8: Code Quality Check
-# Usage: lib_filters.py . --filter-file code_quality.yml --inverse
+# Usage: fsFilters.py . --filter-file code_quality.yml --inverse
 # =============================================================================
 code_quality:
   # Files that shouldn't be in source control
@@ -266,7 +266,7 @@ disk_space:
 
 # =============================================================================
 # Example 10: Recent Activity Monitor
-# Usage: findFiles.py . --filter-file recent_activity.yml --recursive --show-stats
+# Usage: fsFind.py . --filter-file recent_activity.yml --recursive --show-stats
 # =============================================================================
 recent_activity:
   # Very recent files
@@ -296,13 +296,13 @@ recent_activity:
 # 
 # 1. Save specific sections to individual YAML files
 # 2. Use with any of the utilities:
-#    - lib_filters.py . --config dev_cleanup.yml
+#    - fsFilters.py . --config dev_cleanup.yml
 #    - fsActions.py --filter-file large_files.yml --move /archive
-#    - findFiles.py . --filter-file source_code.yml --recursive
+#    - fsFind.py . --filter-file source_code.yml --recursive
 #    - fsFormat.py --filter-file media_files.yml --format table
 #
 # 3. Combine with command line options:
-#    - findFiles.py . --filter-file source_code.yml --size-gt 100K --recursive
+#    - fsFind.py . --filter-file source_code.yml --size-gt 100K --recursive
 #    - fsActions.py --filter-file large_files.yml --copy /backup --with-dir
 #
 # 4. Create custom configurations by mixing and matching options
