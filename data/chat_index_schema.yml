@@ -1,0 +1,72 @@
+# chat_index_schema.yml
+# JSON Schema definition for the master chat index file.
+# v1.1: Added key_insights and versioning for individual conversation entries.
+
+$schema: "http://json-schema.org/draft-07/schema#"
+title: "Chat Index Schema"
+description: "Schema for the master index file that catalogs all individual chat history files."
+type: "object"
+
+properties:
+  metadata:
+    type: "object"
+    description: "Metadata for the index file itself."
+    properties:
+      last_updated:
+        type: "string"
+        format: "date-time"
+      version:
+        type: "integer"
+        minimum: 1
+      total_conversations:
+        type: "integer"
+        minimum: 0
+      format_version:
+        type: "string"
+        pattern: "^[0-9]+\\.[0-9]+$"
+    required: ["last_updated", "version", "total_conversations", "format_version"]
+
+  conversations:
+    type: "array"
+    description: "An array of all cataloged chat conversations."
+    items:
+      type: "object"
+      properties:
+        conversation_id:
+          type: "string"
+          pattern: "^conv_[0-9]{8}T[0-9]{6}Z(_[a-z0-9]+)?$"
+        title:
+          type: "string"
+          minLength: 1
+        abstract: # Renamed from 'summary' for clarity
+          type: "string"
+          description: "A paragraph-length summary of the conversation's topics and outcomes, akin to a paper's abstract."
+        key_insights: # <-- NEW
+          type: "array"
+          description: "A list of key take-aways or important conclusions from the chat."
+          items:
+            type: "string"
+        start_date:
+          type: "string"
+          format: "date-time"
+        last_updated: # <-- NEW (for the entry itself)
+          type: "string"
+          format: "date-time"
+          description: "When this index entry was last modified."
+        version: # <-- NEW (for the entry itself)
+            type: "integer"
+            minimum: 1
+            description: "The version of this index entry, incremented on each update."
+        tags:
+          type: "array"
+          items:
+            type: "string"
+        file_path:
+          type: "string"
+        message_count:
+          type: "integer"
+          minimum: 0
+      required: ["conversation_id", "title", "abstract", "start_date", "last_updated", "version", "tags", "file_path", "message_count"]
+
+required: ["metadata", "conversations"]
+
