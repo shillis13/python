@@ -1,0 +1,115 @@
+# chat_history_schema.yml
+# JSON Schema definition for YAML chat history format
+# Version 1.2: Added optional 'thoughts' key for assistant messages.
+
+$schema: "http://json-schema.org/draft-07/schema#"
+title: "Chat History Schema"
+description: "Schema for validating YAML chat history files containing multi-session conversations"
+type: "object"
+
+properties:
+  metadata:
+    type: "object"
+    properties:
+      conversation_id:
+        type: "string"
+        pattern: "^conv_[0-9]{8}T[0-9]{6}Z_[a-zA-Z0-9]+$"
+      created:
+        type: "string"
+        format: "date-time"
+      last_updated:
+        type: "string"
+        format: "date-time"
+      version:
+        type: "integer"
+        minimum: 1
+      total_messages:
+        type: "integer"
+        minimum: 0
+      total_exchanges:
+        type: "integer"
+        minimum: 0
+      tags:
+        type: "array"
+        items:
+          type: "string"
+      format_version:
+        type: "string"
+        pattern: "^[0-9]+\\.[0-9]+$"
+    required: ["conversation_id", "created", "last_updated", "version", "total_messages", "total_exchanges", "format_version"]
+
+  chat_sessions:
+    type: "array"
+    minItems: 1
+    items:
+      type: "object"
+      properties:
+        session_id:
+          type: "string"
+          pattern: "^session_[0-9]{8}T[0-9]{6}Z_[a-zA-Z0-9]+$"
+        started:
+          type: "string"
+          format: "date-time"
+        ended:
+          type: ["string", "null"]
+          format: "date-time"
+        platform:
+          type: "string"
+        model_version:
+          type: "string"
+        continued_from:
+          type: ["string", "null"]
+        tags:
+          type: "array"
+          items: { "type": "string" }
+        messages:
+          type: "array"
+          items:
+            type: "object"
+            properties:
+              message_id: { "type": "string" }
+              message_number: { "type": "integer" }
+              parent_message_id: { "type": ["string", "null"] }
+              conversation_id: { "type": "string" }
+              session_id: { "type": "string" }
+              timestamp: { "type": "string", "format": "date-time" }
+              role: { "type": "string", "enum": ["user", "assistant", "system"] }
+              thoughts: # <-- NEW KEY
+                type: "string"
+                description: "The internal monologue or plan of the AI assistant prior to generating the content. Should only be present for the 'assistant' role."
+              content: { "type": "string" }
+              attachments:
+                type: "array"
+                items:
+                  type: "object"
+                  properties:
+                    type: { "type": "string" }
+                    filename: { "type": "string" }
+                    description: { "type": "string" }
+                    filesize: { "type": "integer", "minimum": 0 }
+                    filetype: { "type": "string" }
+                    uploaded_at: { "type": "string", "format": "date-time" }
+                    dimensions: {
+                      "type": "object",
+                      "properties": { "width": { "type": "integer" }, "height": { "type": "integer" } }
+                    }
+                    artifact_id: { "type": "string" }
+                    artifact_type: { "type": "string" }
+                    title: { "type": "string" }
+                    created_at: { "type": "string", "format": "date-time" }
+                  required: ["type"]
+              tags:
+                type: "array"
+                items: { "type": "string" }
+              metadata:
+                type: "object"
+                properties:
+                  estimated_tokens: { "type": "integer", "minimum": 0 }
+                  char_count: { "type": "integer", "minimum": 0 }
+                  word_count: { "type": "integer", "minimum": 0 }
+                required: ["estimated_tokens", "char_count", "word_count"]
+            required: ["message_id", "message_number", "conversation_id", "session_id", "timestamp", "role", "content", "metadata"]
+      required: ["session_id", "started", "platform", "messages"]
+
+required: ["metadata", "chat_sessions"]
+
