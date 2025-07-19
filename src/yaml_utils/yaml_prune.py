@@ -1,50 +1,67 @@
-# prune.py
+#!/usr/bin/env python3
+# delete_item.py
 import argparse
 import sys
-import re
-from helpers import load_yaml, save_yaml
+from yaml_utils.yaml_helpers import load_yaml, save_yaml, archive_and_update_metadata
+
+"""
+Deletes an item from a list within a YAML data structure by its index.
+
+Args:
+    data (dict): The YAML data, loaded as a Python dictionary.
+    key_path (str): The dot-notation path to the list (e.g., 'rules.data').
+    index (int): The index of the item to delete.
+
+Returns:
+    dict: The modified data structure.
+
+Raises:
+    KeyError: If the key_path does not resolve to a valid location.
+    TypeError: If the key_path resolves to a non-list item.
+    IndexError: If the index is out of bounds for the list.
+"""
+def delete_yaml_item(data, key_path, index):
+    keys = key_path.split('.')
+    current_level = data
+
+    for k in keys:
+        current_level = current_level[k]
+
+    if not isinstance(current_level, list):
+        raise TypeError(f"Error: Key '{key_path}' does not point to a list.")
+
+    if abs(index) >= len(current_level):
+        raise IndexError(f"Error: Index {index} is out of bounds for list of size {len(current_level)}.")
+
+    del current_level[index]
+    return data
 
 def main():
-    parser = argparse.ArgumentParser(description="Prune the history of archived keys in an instruction file.")
+    parser = argparse.ArgumentParser(description="Delete an item from a list by its index.")
     parser.add_argument("filepath", help="Path to the YAML file.")
-    parser.add_argument("--keep", type=int, default=5, help="The number of most recent archives to keep for each key.")
+    parser.add_argument("--key", required=True, help="The key of the list (e.g., 'rules.data').")
+    parser.add_argument("--index", required=True, type=int, help="The index of the item to delete.")
     args = parser.parse_args()
 
-    data = load_yaml(args.filepath)
-    
-    keys_to_prune = {}
-    # Regex to find archived keys like 'rules_20250626T212838Z'
-    archive_pattern = re.compile(r"^([a-zA-Z0-9]+)_(\d{8}T\d{6}Z)$")
+    try:
+        data = load_yaml(args.filepath)
 
-    for key in data.keys():
-        match = archive_pattern.match(key)
-        if match:
-            base_key, timestamp = match.groups()
-            if base_key not in keys_to_prune:
-                keys_to_prune[base_key] = []
-            keys_to_prune[base_key].append(key)
+        parent_key = args.key.split('.')[0]
+        data = archive_and_update_metadata(data, parent_key)
 
-    if not keys_to_prune:
-        print("No archived keys found to prune.")
-        sys.exit(0)
+        data = delete_yaml_item(data, args.key, args.index)
 
-    pruned_count = 0
-    for base_key, archives in keys_to_prune.items():
-        # Sort archives chronologically (newest first)
-        archives.sort(reverse=True)
-        
-        if len(archives) > args.keep:
-            keys_to_delete = archives[args.keep:]
-            for key_to_delete in keys_to_delete:
-                del data[key_to_delete]
-                pruned_count += 1
-            print(f"Pruned {len(keys_to_delete)} old archives for base key '{base_key}'.")
-
-    if pruned_count > 0:
         save_yaml(data, args.filepath)
-        print(f"✅ Pruning complete. Total archives removed: {pruned_count}.")
-    else:
-        print("No archives needed pruning based on the '--keep' value.")
+        print(f"✅ Successfully deleted item at index {args.index} from '{args.key}'.")
+
+    except (KeyError, TypeError, IndexError) as e:
+        print(f"Error: Could not perform deletion. Details: {e}", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}", file=sys.stderr)
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
+
+

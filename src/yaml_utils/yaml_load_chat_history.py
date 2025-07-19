@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 #========================================
 #region load_chat_history_file
 """

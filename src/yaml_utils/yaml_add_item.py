@@ -1,7 +1,37 @@
+#!/usr/bin/env python3
 # add_item.py
 import argparse
 import sys
-from helpers import load_yaml, save_yaml, archive_and_update_metadata
+from yaml_utils.yaml_helpers import load_yaml, save_yaml, archive_and_update_metadata
+
+"""
+Adds an item to a list within a YAML data structure.
+
+Args:
+    data (dict): The YAML data, loaded as a Python dictionary.
+    key_path (str): The dot-notation path to the list (e.g., 'rules.data').
+    value (any): The new value to append to the list.
+
+Returns:
+    dict: The modified data structure.
+
+Raises:
+    KeyError: If the key_path does not resolve to a valid location.
+    TypeError: If the key_path resolves to a non-list item.
+"""
+def add_yaml_item(data, key_path, value):
+    keys = key_path.split('.')
+    current_level = data
+
+    for k in keys:
+        current_level = current_level[k]
+
+    if not isinstance(current_level, list):
+        raise TypeError(f"Error: Key '{key_path}' does not point to a list.")
+
+    current_level.append(value)
+    return data
+
 
 def main():
     parser = argparse.ArgumentParser(description="Add an item to a list within the YAML, archiving the parent state.")
@@ -10,29 +40,25 @@ def main():
     parser.add_argument("--value", required=True, help="The new value to append to the list.")
     args = parser.parse_args()
 
-    data = load_yaml(args.filepath)
-    
-    parent_key = args.key.split('.')[0]
-    data = archive_and_update_metadata(data, parent_key)
-
-    keys = args.key.split('.')
-    current_level = data
     try:
-        for k in keys:
-            current_level = current_level[k]
-        
-        if not isinstance(current_level, list):
-            print(f"Error: Key '{args.key}' does not point to a list.", file=sys.stderr)
-            sys.exit(1)
-        
-        current_level.append(args.value)
+        data = load_yaml(args.filepath)
 
-    except (KeyError, TypeError):
-        print(f"Error: Key '{args.key}' could not be resolved.", file=sys.stderr)
+        parent_key = args.key.split('.')[0]
+        data = archive_and_update_metadata(data, parent_key)
+
+        data = add_yaml_item(data, args.key, args.value)
+
+        save_yaml(data, args.filepath)
+        print(f"✅ Successfully added item to '{args.key}' in '{args.filepath}'.")
+
+    except (KeyError, TypeError) as e:
+        print(f"Error: Could not resolve key '{args.key}'. Details: {e}", file=sys.stderr)
         sys.exit(1)
-
-    save_yaml(data, args.filepath)
-    print(f"✅ Successfully added item to '{args.key}' in '{args.filepath}'.")
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}", file=sys.stderr)
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
+
+

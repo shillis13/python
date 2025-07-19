@@ -29,7 +29,7 @@ sys.path.insert(0, str(_src_dir))
 # This will now correctly find the yaml_utils package within the src directory.
 from yaml_utils.yaml_helpers import load_yaml as load_yaml_file
 from yaml_utils.yaml_validate import validate_data
-from yaml_utils.yaml_treePrint import print_tree
+from yaml_utils.yaml_tree_printer import yaml_tree_print
 
 # ========================================
 # endregion

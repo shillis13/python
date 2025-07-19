@@ -1,0 +1,99 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.9, pytest-7.4.4, pluggy-1.6.0
+rootdir: /Users/shawnhillis/bin/all_languages/python/tests
+configfile: pytest.ini
+plugins: anyio-4.3.0
+collected 6 items
+
+test_archive_utils.py::test_create_and_list_zip PASSED                   [ 16%]
+test_archive_utils.py::test_create_and_list_encrypted_zip PASSED         [ 33%]
+test_archive_utils.py::test_create_and_list_tar PASSED                   [ 50%]
+test_archive_utils.py::test_extract_zip PASSED                           [ 66%]
+test_archive_utils.py::test_extract_encrypted_zip FAILED                 [ 83%]
+test_archive_utils.py::test_extract_tar PASSED                           [100%]
+
+=================================== FAILURES ===================================
+__________________________ test_extract_encrypted_zip __________________________
+
+test_structure = ('/private/var/folders/ct/0srshfq13pl0dj7jlf9hd4g40000gp/T/pytest-of-shawnhillis/pytest-1/test_extract_encrypted_zip0/...t/0srshfq13pl0dj7jlf9hd4g40000gp/T/pytest-of-shawnhillis/pytest-1/test_extract_encrypted_zip0/source/subdir/file2.py'])
+tmp_path = PosixPath('/private/var/folders/ct/0srshfq13pl0dj7jlf9hd4g40000gp/T/pytest-of-shawnhillis/pytest-1/test_extract_encrypted_zip0')
+
+    def test_extract_encrypted_zip(test_structure, tmp_path):
+        base_dir, file_list = test_structure
+        archive_path = str(tmp_path / "extract_encrypted.zip")
+        extract_dir = tmp_path / "extracted_encrypted_zip"
+        password = "supersecret"
+    
+        lib_archive.create_archive(archive_path, file_list, base_dir, password=password)
+    
+        # Test extraction with correct password
+        lib_archive.extract_archive(archive_path, str(extract_dir), password=password)
+        dcmp = filecmp.dircmp(base_dir, str(extract_dir))
+        assert not dcmp.left_only and not dcmp.right_only and not dcmp.diff_files
+    
+        # Test extraction with incorrect password
+        extract_fail_dir = tmp_path / "extract_fail_zip"
+        with pytest.raises(ValueError, match="Password is required or incorrect"):
+>           lib_archive.extract_archive(archive_path, str(extract_fail_dir), password="wrongpassword")
+
+test_archive_utils.py:106: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+../../../python/src/archive_utils/lib_archive.py:84: in extract_archive
+    _extract_zip(archive_path, output_dir, password, verbose)
+../../../python/src/archive_utils/lib_archive.py:105: in _extract_zip
+    raise e
+../../../python/src/archive_utils/lib_archive.py:101: in _extract_zip
+    zipf.extract(member, output_dir)
+../../../../myenv/lib/python3.12/site-packages/pyzipper/zipfile.py:2085: in extract
+    return self._extract_member(member, path, pwd)
+../../../../myenv/lib/python3.12/site-packages/pyzipper/zipfile.py:2159: in _extract_member
+    with self.open(member, pwd=pwd) as source, \
+../../../../myenv/lib/python3.12/site-packages/pyzipper/zipfile.py:2013: in open
+    return self._open_to_read(mode, zinfo, pwd)
+../../../../myenv/lib/python3.12/site-packages/pyzipper/zipfile.py:2024: in _open_to_read
+    raise e
+../../../../myenv/lib/python3.12/site-packages/pyzipper/zipfile.py:2021: in _open_to_read
+    return self.zipextfile_cls(zef_file, mode, zinfo, True, pwd)
+../../../../myenv/lib/python3.12/site-packages/pyzipper/zipfile.py:1203: in __init__
+    self.read_init()
+../../../../myenv/lib/python3.12/site-packages/pyzipper/zipfile.py:1218: in read_init
+    self._decrypter = self.get_decrypter()
+../../../../myenv/lib/python3.12/site-packages/pyzipper/zipfile.py:1306: in get_decrypter
+    decrypter = self._decrypter_cls(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <pyzipper.zipfile_aes.AESZipDecrypter object at 0x10d779580>
+zinfo = <AESZipInfo filename='file1.txt' compress_type=deflate filemode='-rw-r--r--' file_size=15 compress_size=43>
+pwd = b'wrongpassword'
+encryption_header = b'\xa6z\x17\x9e#\xbf\xa6n\x11\x8b<\x99\xba5X\x99\x1aa'
+
+    def __init__(self, zinfo, pwd, encryption_header):
+        self.filename = zinfo.filename
+    
+        key_length = WZ_KEY_LENGTHS[zinfo.wz_aes_strength]
+        salt_length = WZ_SALT_LENGTHS[zinfo.wz_aes_strength]
+    
+        salt = struct.unpack(
+            "<{}s".format(salt_length),
+            encryption_header[:salt_length]
+        )[0]
+        pwd_verify_length = 2
+        pwd_verify = encryption_header[salt_length:]
+        dkLen = 2*key_length + pwd_verify_length
+        keymaterial = PBKDF2(pwd, salt, count=1000, dkLen=dkLen)
+    
+        encpwdverify = keymaterial[2*key_length:]
+        if encpwdverify != pwd_verify:
+>           raise RuntimeError("Bad password for file %r" % zinfo.filename)
+E           RuntimeError: Bad password for file 'file1.txt'
+
+../../../../myenv/lib/python3.12/site-packages/pyzipper/zipfile_aes.py:61: RuntimeError
+=============================== warnings summary ===============================
+test_archive_utils.py::test_extract_tar
+  /Users/shawnhillis/bin/python/src/archive_utils/lib_archive.py:114: DeprecationWarning: Python 3.14 will, by default, filter extracted tar archives and reject files or modify their metadata. Use the filter argument to control this behavior.
+    tarf.extractall(path=output_dir)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test_archive_utils.py::test_extract_encrypted_zip - RuntimeError: Bad ...
+==================== 1 failed, 5 passed, 1 warning in 0.15s ====================

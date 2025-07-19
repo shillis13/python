@@ -52,7 +52,7 @@ def backup_files(file_paths: List[str], archive_dir: str = "Archive",
                     shutil.copy2(file_path, backup_path)
                     
                 backup_info.append((str(file_path), str(backup_path)))
-                log_info(f"{'Would backup' if dry_run else 'Backed up'} {file_path} to {backup_path}")
+                log_info(f"{'Would backup' if dry_run else 'Backed up'} {file_path} to {backup_path}. Use --exec or -x to execute")
             else:
                 log_warn(f"File not found: {file_path}")
         except Exception as e:
@@ -61,25 +61,25 @@ def backup_files(file_paths: List[str], archive_dir: str = "Archive",
     return backup_info
 
 
+"""
+Expands wildcard patterns in file paths.
+
+Args:
+    file_paths (list of str): The file paths, which may include wildcards.
+ Returns:
+    list of str: The expanded file paths.
+"""
 @log_function
 def expand_wildcards(file_paths: List[str]) -> List[str]:
-    """
-    Expands wildcard patterns in file paths.
-
-    Args:
-        file_paths (list of str): The file paths, which may include wildcards.
-
-    Returns:
-        list of str: The expanded file paths.
-    """
     expanded_paths = []
     for path in file_paths:
         expanded_paths.extend(glob.glob(path))
     return expanded_paths
 
 
+
+"""Register command line arguments for this module."""
 def add_args(parser: argparse.ArgumentParser) -> None:
-    """Register command line arguments for this module."""
     parser.add_argument('files', nargs='*', help="Paths of files to back up, supports wildcards like *.py.")
     parser.add_argument('--archive-dir', default="Archive", 
                        help="Directory where backups will be stored (default: Archive).")
@@ -95,14 +95,14 @@ def add_args(parser: argparse.ArgumentParser) -> None:
 register_arguments(add_args)
 
 
+"""Parse command line arguments."""
 def parse_arguments():
-    """Parse command line arguments."""
     args, _ = parse_known_args(description="Back up files with timestamp for pipeline processing.")
     return args
 
 
+"""Main pipeline processing loop."""
 def process_files_pipeline(args):
-    """Main pipeline processing loop."""
     file_paths, dry_run_detected = get_file_paths_from_input(args)
     
     if not file_paths:
@@ -140,8 +140,8 @@ def process_files_pipeline(args):
     print(f"✅ {operation_type} {successful_backups} files to '{args.archive_dir}'.", file=sys.stderr)
 
 
+"""Main entry point."""
 def main():
-    """Main entry point."""
     args = parse_arguments()
     
     # Legacy mode: if files are provided directly via command line and no pipeline input

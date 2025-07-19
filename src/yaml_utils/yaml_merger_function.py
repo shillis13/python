@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 #========================================
 #region merge_chat_histories
 """
