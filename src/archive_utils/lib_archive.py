@@ -23,25 +23,27 @@ def _get_tar_mode(archive_path):
     elif archive_path.endswith('.tar'):
         return 'w:'
     else:
-        raise ValueError(f"Unsupported tar extension for '{archive_path}'")
+        # Default to .tar.gz if no specific compression extension is found
+        return 'w:gz'
 
 """
-Factory function to create an archive based on file extension.
+Creates an archive of a specified type (zip or tar).
 
 Args:
     archive_path (str): The path to the archive file to be created.
     file_list (list): A list of absolute paths to the files to be added.
     base_dir (str): The base directory to calculate relative paths from.
+    archive_type (str): The type of archive to create ('zip' or 'tar').
     password (str, optional): Password for AES encryption (zip only).
     verbose (bool): If True, prints progress.
 """
-def create_archive(archive_path, file_list, base_dir, password=None, verbose=False):
-    if archive_path.endswith('.zip'):
+def create_archive(archive_path, file_list, base_dir, archive_type, password=None, verbose=False):
+    if archive_type == 'zip':
         _create_zip(archive_path, file_list, base_dir, password, verbose)
-    elif any(archive_path.endswith(ext) for ext in ['.tar', '.gz', '.bz2', '.xz', '.tgz', '.tbz2', '.txz']):
+    elif archive_type == 'tar':
         _create_tar(archive_path, file_list, base_dir, verbose)
     else:
-        raise ValueError(f"Unsupported archive format for '{archive_path}'. Use .zip or .tar.*")
+        raise ValueError(f"Unsupported archive_type '{archive_type}'. Use 'zip' or 'tar'.")
 
 """Creates a zip archive, with optional AES encryption."""
 def _create_zip(archive_path, file_list, base_dir, password, verbose):
@@ -49,7 +51,7 @@ def _create_zip(archive_path, file_list, base_dir, password, verbose):
     with pyzipper.AESZipFile(archive_path, 'w', compression=pyzipper.ZIP_DEFLATED, encryption=encryption) as zipf:
         if password:
             zipf.setpassword(password.encode('utf-8'))
-
+        
         iterable = tqdm(file_list, desc="Zipping files", unit="file", disable=not verbose)
         for file_path in iterable:
             arcname = os.path.relpath(file_path, base_dir)
@@ -75,7 +77,7 @@ Args:
 """
 def extract_archive(archive_path, output_dir, password=None, verbose=False):
     os.makedirs(output_dir, exist_ok=True)
-
+    
     if pyzipper.is_zipfile(archive_path):
         _extract_zip(archive_path, output_dir, password, verbose)
     elif tarfile.is_tarfile(archive_path):
@@ -89,27 +91,22 @@ def _extract_zip(archive_path, output_dir, password, verbose):
         pwd_bytes = password.encode('utf-8') if password else None
         if pwd_bytes:
             zipf.setpassword(pwd_bytes)
-
+        
         member_list = zipf.infolist()
         iterable = tqdm(member_list, desc="Extracting zip", unit="file", disable=not verbose)
         for member in iterable:
             try:
                 zipf.extract(member, output_dir)
             except RuntimeError as e:
-                # FIX: Catch the specific RuntimeError from pyzipper and convert
-                # it to a more user-friendly and consistent ValueError.
-                # This now handles both "Bad password" and "password required" cases.
                 if 'password' in str(e).lower():
                     raise ValueError("Extraction failed: Password is required or incorrect for this zip file.")
-                raise e # Re-raise other unexpected RuntimeErrors
+                raise e
 
 """Extracts a tar archive."""
 def _extract_tar(archive_path, output_dir, verbose):
     with tarfile.open(archive_path, 'r:*') as tarf:
         if verbose:
             print(f"Extracting tar archive '{os.path.basename(archive_path)}'...")
-        # FIX: Added filter='data' to address the DeprecationWarning and
-        # adopt modern, secure defaults for tar extraction.
         tarf.extractall(path=output_dir, filter='data')
         if verbose:
             print("Extraction complete.")
@@ -130,5 +127,4 @@ def list_archive_contents(archive_path, password=None):
             return tarf.getnames()
     else:
         raise ValueError(f"'{archive_path}' is not a recognized zip or tar file.")
-
 
