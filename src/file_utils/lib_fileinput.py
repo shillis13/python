@@ -90,11 +90,12 @@ def expand_path(path: Union[str, Path]) -> List[str]:
     expanded_paths = []
     
     if path_obj.is_dir():
-        # List all files in the specified directory (non-recursive)
+        # Recursively list all files in the specified directory
         try:
-            for item in path_obj.iterdir():
-                if item.is_file():
-                    expanded_paths.append(str(item))
+            for root, _, files in os.walk(path_obj):
+                for name in files:
+                    file_path = os.path.join(root, name)
+                    expanded_paths.append(file_path)
         except PermissionError:
             try:
                 logging.warning(f"Permission denied accessing directory: {path_obj}")

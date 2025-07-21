@@ -54,7 +54,10 @@ def _create_zip(archive_path, file_list, base_dir, password, verbose):
         
         iterable = tqdm(file_list, desc="Zipping files", unit="file", disable=not verbose)
         for file_path in iterable:
+            if not os.path.isfile(file_path):
+                continue  # Skip directories
             arcname = os.path.relpath(file_path, base_dir)
+            print(f"Adding to zip: {file_path} as {arcname}")
             zipf.write(file_path, arcname)
 
 """Creates a tar archive."""
@@ -63,7 +66,10 @@ def _create_tar(archive_path, file_list, base_dir, verbose):
     with tarfile.open(archive_path, mode) as tarf:
         iterable = tqdm(file_list, desc="Taring files", unit="file", disable=not verbose)
         for file_path in iterable:
+            if not os.path.isfile(file_path):
+                continue  # Skip directories
             arcname = os.path.relpath(file_path, base_dir)
+            print(f"Adding to tar: {file_path} as {arcname}")
             tarf.add(file_path, arcname)
 
 """
