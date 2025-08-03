@@ -530,11 +530,15 @@ def add_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument('--help-verbose', action='store_true', help="Show detailed help")
 
 
-register_arguments(add_args)
+_args_registered = False
 
 
 def parse_arguments():
     """Parse command line arguments."""
+    global _args_registered
+    if not _args_registered:
+        register_arguments(add_args)
+        _args_registered = True
     args, _ = parse_known_args(description="Advanced file system filtering utility.")
     return args
 

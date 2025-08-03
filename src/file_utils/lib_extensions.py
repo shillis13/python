@@ -42,7 +42,7 @@ _extension_data = None
 
 # Schema file is expected to be co-located with this script inside 'file_utils'.
 _package_dir = Path(__file__).resolve().parent
-# SCHEMA_FILE = _package_dir / "extensions.schema.yml"
+# SCHEMA_FILE = _package_dir / "extensions_schema.yml"
 # ========================================
 # endregion
 
@@ -131,9 +131,9 @@ def get_extension_data() -> dict | None:
         return None
 
     # Dynamically find the schema file in the same search paths.
-    schema_path = find_file("extensions.schema.yml", search_dirs)
+    schema_path = find_file("extensions_schema.yml", search_dirs)
     if not schema_path:
-        print("Error: Could not find 'extensions.schema.yml'.")
+        print("Error: Could not find 'extensions_schema.yml'.")
         print(f"Searched in: {[str(d) for d in search_dirs]}")
         return None
 
