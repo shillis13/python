@@ -37,13 +37,25 @@ Args:
     password (str, optional): Password for AES encryption (zip only).
     verbose (bool): If True, prints progress.
 """
-def create_archive(archive_path, file_list, base_dir, archive_type, password=None, verbose=False):
+def create_archive(archive_path, file_list, base_dir, archive_type=None, password=None, verbose=False):
+    """Create an archive inferring the type from ``archive_path``.
+
+    Older callers expected ``archive_type`` to be optional and determined by
+    the file extension.  To remain backward compatible the parameter is now
+    optional and, when omitted, the function inspects ``archive_path`` to
+    decide between ``zip`` and ``tar`` formats.
+    """
+    if archive_type is None:
+        archive_type = 'zip' if archive_path.endswith('.zip') else 'tar'
+
     if archive_type == 'zip':
         _create_zip(archive_path, file_list, base_dir, password, verbose)
     elif archive_type == 'tar':
         _create_tar(archive_path, file_list, base_dir, verbose)
     else:
-        raise ValueError(f"Unsupported archive_type '{archive_type}'. Use 'zip' or 'tar'.")
+        raise ValueError(
+            f"Unsupported archive_type '{archive_type}'. Use 'zip' or 'tar'."
+        )
 
 """Creates a zip archive, with optional AES encryption."""
 def _create_zip(archive_path, file_list, base_dir, password, verbose):
