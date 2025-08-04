@@ -199,18 +199,28 @@ class EnhancedFileFinder:
             return False
         
         file_ext = path.suffix.lower()
-        file_type = self.extension_data.get('extensions', {}).get(file_ext)
-        
+        ext_map = self.extension_data.get('extensions', {})
+        type_map = self.extension_data.get('types', {})
+        target_types = [ft.lower() for ft in file_types]
+
+        # If extension maps directly to a type, walk up the hierarchy
+        file_type = ext_map.get(file_ext)
         if file_type:
-            return file_type.lower() in [ft.lower() for ft in file_types]
-        
-        # Also check via regex patterns if available
-        for file_type_name in file_types:
-            type_info = self.extension_data.get('types', {}).get(file_type_name.lower())
-            if type_info and 'extensions' in type_info:
-                if file_ext in type_info['extensions']:
+            current = file_type.lower()
+            while current:
+                if current in target_types:
                     return True
-        
+                parent = type_map.get(current, {}).get('parent')
+                current = parent.lower() if isinstance(parent, str) else None
+            return False
+
+        # Fall back to scanning requested types for matching extensions
+        for file_type_name in target_types:
+            type_info = type_map.get(file_type_name)
+            if type_info and 'extensions' in type_info:
+                if file_ext in [ext.lower() for ext in type_info['extensions']]:
+                    return True
+
         return False
     
     def print_stats(self):

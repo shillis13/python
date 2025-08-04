@@ -21,15 +21,23 @@ Args:
     schema_instance (dict): The Python object representing the validation schema.
 
 Returns:
-    bool: True if validation is successful.
-
-Raises:
-    jsonschema.exceptions.ValidationError: If the data does not conform to the schema.
-    jsonschema.exceptions.SchemaError: If the schema itself is invalid.
+    tuple[bool, str]: A tuple where the first element indicates whether
+        validation succeeded and the second contains an error message when
+        validation fails.
 """
 def validate_data(data_instance, schema_instance):
-    validate(instance=data_instance, schema=schema_instance)
-    return True
+    try:
+        validate(instance=data_instance, schema=schema_instance)
+    except exceptions.ValidationError as e:
+        path = " -> ".join(map(str, e.path))
+        message = e.message
+        if path:
+            message += f"\nPath: {path}"
+        return False, message
+    except exceptions.SchemaError as e:
+        return False, f"Schema error: {e.message}"
+
+    return True, ""
 
 
 """
@@ -56,21 +64,12 @@ def main():
         print(f"Error: Could not parse YAML file - {e}", file=sys.stderr)
         sys.exit(1)
 
-    try:
-        validate_data(data_instance=data_instance, schema_instance=schema_instance)
+    is_valid, message = validate_data(data_instance=data_instance, schema_instance=schema_instance)
+    if is_valid:
         print(f"✅ Validation successful: '{args.data_file}' adheres to the schema in '{args.schema_file}'.")
-    except exceptions.ValidationError as e:
+    else:
         print(f"❌ VALIDATION FAILED for '{args.data_file}':", file=sys.stderr)
-        print(f"Error: {e.message}", file=sys.stderr)
-        # The path attribute provides a clear location of the error in the data
-        path = " -> ".join(map(str, e.path))
-        if path:
-            print(f"Path: {path}", file=sys.stderr)
-        sys.exit(1)
-    except exceptions.SchemaError as e:
-        print(f"❌ SCHEMA ERROR:", file=sys.stderr)
-        print(f"The schema file '{args.schema_file}' is invalid.", file=sys.stderr)
-        print(f"Error: {e.message}", file=sys.stderr)
+        print(f"Error: {message}", file=sys.stderr)
         sys.exit(1)
 
 

@@ -1,37 +1,35 @@
-# Schema for extensions.yml
+# JSON Schema for validating extensions.yml
+# Defines the structure for file type definitions used by lib_extensions.
 
-# This defines the top-level structure of the file.
-# It must contain a single key: 'file_types'.
-type: map
-mapping:
-  "file_types":
-    type: map
-    # The value of 'file_types' must be a map where each key
-    # corresponds to our recursive 'type_definition'.
-    mapping:
-      "=:":
-        # The '=:' key is a generic rule that applies to all keys at this level.
-        # It includes the definition for a type.
-        include: type_definition
+type: object
+required:
+  - file_types
+properties:
+  file_types:
+    type: object
+    patternProperties:
+      ".*":
+        $ref: "#/definitions/type_definition"
+    additionalProperties: false
+additionalProperties: true
 
-# This is a named definition that can be reused. It defines
-# the structure for a single type category (like 'Documents' or 'Media').
 definitions:
   type_definition:
-    type: map
-    mapping:
-      # A type can optionally have an 'extensions' key.
-      "extensions":
-        type: seq # 'seq' means a sequence or list.
-        # Each item in the sequence must be a string starting with a period.
-        sequence:
-          - type: str
-            pattern: /^\./
-      # A type can also have 'sub_types', which allows for nesting.
-      "sub_types":
-        type: map
-        # Each key under 'sub_types' must also conform to the 'type_definition'.
-        # This is what makes the schema recursive.
-        mapping:
-          "=:":
-            include: type_definition
+    type: object
+    properties:
+      extensions:
+        type: array
+        items:
+          type: string
+          pattern: '^\.'
+      patterns:
+        type: array
+        items:
+          type: string
+      sub_types:
+        type: object
+        patternProperties:
+          ".*":
+            $ref: "#/definitions/type_definition"
+        additionalProperties: false
+    additionalProperties: false
