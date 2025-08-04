@@ -57,18 +57,20 @@ _package_dir = Path(__file__).resolve().parent
 class ExtensionInfo(dict):
     """Load extension metadata from a simple CSV file.
 
-    The CSV is expected to have the columns ``extension``, ``category``,
-    ``name`` and ``description``.  Data is stored so that lookups by
-    extension (e.g. ``.txt``) return a mapping with the original fields and
-    lookups by category return a regular expression matching all extensions
-    in that category.  This lightweight container is sufficient for the
-    unit tests which exercise legacy behaviour of the original project.
+    Besides populating the mapping interface used directly by a few unit
+    tests, constructing an :class:`ExtensionInfo` instance also seeds the
+    module-level ``_extension_data`` cache.  This mirrors the behaviour of
+    the historical YAML based implementation where loading the extensions
+    file made type information available globally via
+    :func:`get_extension_data`.
     """
 
     def __init__(self, csv_path: str | Path):
         path = Path(csv_path)
         data: Dict[str, Dict[str, str]] = {}
         category_map: Dict[str, Set[str]] = defaultdict(set)
+        ext_map: Dict[str, str] = {}
+        type_map: Dict[str, Dict[str, object]] = {}
 
         with path.open(newline="") as fh:
             reader = csv.DictReader(fh)
@@ -76,6 +78,8 @@ class ExtensionInfo(dict):
                 ext = row.get("extension", "").strip()
                 if not ext:
                     continue
+                if not ext.startswith('.'):
+                    ext = f".{ext}"
                 category = row.get("category", "").strip()
                 name = row.get("name", "").strip()
                 description = row.get("description", "").strip()
@@ -86,10 +90,20 @@ class ExtensionInfo(dict):
                 }
                 if category:
                     category_map[category].add(ext.lstrip("."))
+                    ext_map[ext.lower()] = category
 
         for category, exts in category_map.items():
             pattern = "|".join(sorted(exts))
             data[category] = {"regex": rf"\.({pattern})$"}
+            type_map[category.lower()] = {
+                "parent": None,
+                "children": [],
+                "extensions": [f".{e}" for e in sorted(exts)],
+            }
+
+        # Expose structured data for other modules
+        global _extension_data
+        _extension_data = {"types": type_map, "extensions": ext_map}
 
         super().__init__(data)
 

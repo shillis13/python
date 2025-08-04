@@ -18,6 +18,21 @@ from .fsFilters import (
 class FileSystemFilter(_FileSystemFilter):
     """Subclass adding ``inverse`` support to :meth:`should_include`."""
 
+    def load_extension_data(self):
+        """Load extension metadata via the locally imported helper.
+
+        The :mod:`fsFilters` module defines ``FileSystemFilter`` with a
+        ``load_extension_data`` method that pulls in
+        ``file_utils.lib_extensions.get_extension_data``.  The tests patch
+        ``file_utils.lib_filters.get_extension_data`` expecting our wrapper
+        to honour that stub.  By overriding the method here and delegating
+        to the symbol imported into this module we ensure the patching
+        works as intended and avoid inadvertently loading the heavy YAML
+        configuration during the tests.
+        """
+        if not self.extension_data:
+            self.extension_data = get_extension_data()
+
     def should_include(self, path: Path, base_path: Path | None = None) -> bool:
         include = super().should_include(path, base_path)
         return not include if self.inverse else include
