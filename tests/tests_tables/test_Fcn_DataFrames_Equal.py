@@ -3,7 +3,7 @@ import sys
 import pytest
 import pandas as pd
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from lib_miscDataTableFcns import dataframes_equal
+from DataTableFunctions.lib_miscDataTableFcns import dataframes_equal
 
 def test_identical_dataframes():
     df1 = pd.DataFrame({'A': [1, 2, 3], 'B': [4, 5, 6]})

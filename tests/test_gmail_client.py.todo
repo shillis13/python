@@ -9,9 +9,9 @@ sys.path.insert(0, os.path.join(ROOT, "src"))
 
 import pytest
 
-from src.email.gmail_client.gmail_auth import GmailAuth
-from src.email.gmail_client.gmail_send import send_email
-from src.email.gmail_client.gmail_receive import search_emails, get_email_body, get_email_attachments
+from src.email_tools.gmail_client.gmail_auth import GmailAuth
+from src.email_tools.gmail_client.gmail_send import send_email
+from src.email_tools.gmail_client.gmail_receive import search_emails, get_email_body, get_email_attachments
 
 class DummyCreds:
     valid = True

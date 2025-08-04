@@ -18,7 +18,7 @@ from unittest.mock import Mock, patch, mock_open, MagicMock
 import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
 
-from file_utils.lib_filters import (
+from file_utils.fsFilters import (
     SizeFilter, DateFilter, GitIgnoreFilter, FileSystemFilter,
     apply_config_to_filter, load_config_file, process_filters_pipeline
 )

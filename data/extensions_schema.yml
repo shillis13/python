@@ -1,21 +1,38 @@
-# Schema for extensions.yml
-
-# This defines the top-level structure of the file.
-# It must contain a single key: 'file_types'.
-type: map
-mapping:
-  "file_types":
-    type: map
-    # The value of 'file_types' must be a map where each key
-    # corresponds to our recursive 'type_definition'.
-    mapping:
-      "=:":
-        # The '=:' key is a generic rule that applies to all keys at this level.
-        # It includes the definition for a type.
-        include: type_definition
-
-# This is a named definition that can be reused. It defines
-# the structure for a single type category (like 'Documents' or 'Media').
+$schema: "http://json-schema.org/draft-07/schema#"
+title: "Extensions Schema"
+description: "Schema for validating the extensions.yml file"
+type: object
+required:
+  - file_types
+properties:
+  file_types:
+    type: object
+    additionalProperties:
+      $ref: "#/definitions/type_definition"
+  extension_map:
+    type: object
+    patternProperties:
+      "^\\..+":
+        type: string
+  ignore_patterns:
+    type: object
+    additionalProperties:
+      type: object
+      properties:
+        files:
+          type: array
+          items:
+            type: string
+        directories:
+          type: array
+          items:
+            type: string
+        patterns:
+          type: array
+          items:
+            type: string
+      additionalProperties: false
+additionalProperties: false
 definitions:
   type_definition:
     type: map
@@ -35,3 +52,21 @@ definitions:
         mapping:
           "=:":
             include: type_definition
+    type: object
+    properties:
+      extensions:
+        type: array
+        items:
+          type: string
+          pattern: "^\\."
+      patterns:
+        type: array
+        items:
+          type: string
+      sub_types:
+        type: object
+        additionalProperties:
+          $ref: "#/definitions/type_definition"
+    additionalProperties: false
+
+

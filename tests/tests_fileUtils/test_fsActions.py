@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 from file_utils.fsActions import (
     FileSystemActions, create_filter_from_args, process_actions_pipeline
 )
-from file_utils.lib_filters import FileSystemFilter
+from file_utils.fsFilters import FileSystemFilter
 
 
 class TestFileSystemActions:

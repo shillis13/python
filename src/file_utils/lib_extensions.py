@@ -145,9 +145,10 @@ def get_extension_data() -> dict | None:
     if not schema or not data:
         return None
 
-    is_valid, message = validate_data(data, schema)
-    if not is_valid:
-        print(f"Error: 'extensions.yml' is not valid.\n{message}")
+    try:
+        validate_data(data, schema)
+    except Exception as e:
+        print(f"Error: 'extensions.yml' is not valid.\n{e}")
         return None
 
     type_map = {}
