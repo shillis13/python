@@ -3,7 +3,11 @@
 import os
 import shutil
 import subprocess
+from datetime import datetime
 import pytest
+
+pytestmark = pytest.mark.skipif(shutil.which("f2") is None,
+                                reason="f2 utility is required for renameFiles tests")
 
 #from lib_logging import parse_log_level_args
 
@@ -22,17 +26,30 @@ def create_test_files(files):
 # Helper function to remove test files and directory
 def cleanup_test_files():
     if os.path.exists(TEST_DIR):
-        #shutil.rmtree(TEST_DIR)
-        return
+        shutil.rmtree(TEST_DIR)
+
+# Absolute path to the script under test
+SCRIPT = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "src", "file_utils", "renameFiles.py")
+)
+
 
 # Helper function to run the renameFiles.py script
 def run_rename_command(args, execute=True):
-    command = ["python3", "renameFiles.py"] + args
+    command = ["python3", SCRIPT] + args
 
-    if execute:
+    if execute and "--dry-run" not in args:
         command.append("--exec")
 
-    result = subprocess.run(command, cwd=TEST_DIR, capture_output=True, text=True)
+    os.makedirs(TEST_DIR, exist_ok=True)
+
+    env = os.environ.copy()
+    src_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "src"))
+    env["PYTHONPATH"] = os.pathsep.join([src_path, env.get("PYTHONPATH", "")])
+
+    result = subprocess.run(
+        command, cwd=TEST_DIR, capture_output=True, text=True, env=env
+    )
     return result
 
 # Basic Rename Operation
@@ -49,8 +66,8 @@ def test_basic_rename():
 def test_using_format():
     create_test_files(['file.txt', 'report.docx'])
     run_rename_command(["--format", "{date}-{name}.{ext}"])
-    
-    today = "2024-08-30"  # Replace with current date dynamically if needed
+
+    today = datetime.now().strftime("%Y-%m-%d")
     assert os.path.exists(os.path.join(TEST_DIR, f"{today}-file.txt"))
     assert os.path.exists(os.path.join(TEST_DIR, f"{today}-report.docx"))
     

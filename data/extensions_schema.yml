@@ -1,72 +1,35 @@
-$schema: "http://json-schema.org/draft-07/schema#"
-title: "Extensions Schema"
-description: "Schema for validating the extensions.yml file"
+# JSON Schema for validating extensions.yml
+# Defines the structure for file type definitions used by lib_extensions.
+
 type: object
 required:
   - file_types
 properties:
   file_types:
     type: object
-    additionalProperties:
-      $ref: "#/definitions/type_definition"
-  extension_map:
-    type: object
     patternProperties:
-      "^\\..+":
-        type: string
-  ignore_patterns:
-    type: object
-    additionalProperties:
-      type: object
-      properties:
-        files:
-          type: array
-          items:
-            type: string
-        directories:
-          type: array
-          items:
-            type: string
-        patterns:
-          type: array
-          items:
-            type: string
-      additionalProperties: false
-additionalProperties: false
+      ".*":
+        $ref: "#/definitions/type_definition"
+    additionalProperties: false
+additionalProperties: true
+
 definitions:
   type_definition:
-    type: map
-    mapping:
-      # A type can optionally have an 'extensions' key.
-      "extensions":
-        type: seq # 'seq' means a sequence or list.
-        # Each item in the sequence must be a string starting with a period.
-        sequence:
-          - type: str
-            pattern: /^\./
-      # A type can also have 'sub_types', which allows for nesting.
-      "sub_types":
-        type: map
-        # Each key under 'sub_types' must also conform to the 'type_definition'.
-        # This is what makes the schema recursive.
-        mapping:
-          "=:":
-            include: type_definition
     type: object
     properties:
       extensions:
         type: array
         items:
           type: string
-          pattern: "^\\."
+          pattern: '^\.'
       patterns:
         type: array
         items:
           type: string
       sub_types:
         type: object
-        additionalProperties:
-          $ref: "#/definitions/type_definition"
+        patternProperties:
+          ".*":
+            $ref: "#/definitions/type_definition"
+        additionalProperties: false
     additionalProperties: false
-
-

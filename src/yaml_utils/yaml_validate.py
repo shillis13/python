@@ -13,23 +13,33 @@ import sys
 import yaml
 from jsonschema import validate, exceptions
 
-"""
-Validates a Python data object against a schema object.
 
-Args:
-    data_instance (dict or list): The Python object loaded from a YAML/JSON file.
-    schema_instance (dict): The Python object representing the validation schema.
+"""Validate *data_instance* against *schema_instance*.
 
-Returns:
-    bool: True if validation is successful.
+The original project exposed a ``validate_data`` helper that returned a
+boolean flag and an optional error message instead of raising
+``jsonschema`` exceptions directly.  Several modules in this kata expect
+that behaviour (for example :mod:`file_utils.lib_extensions`) and the
+tests patch the function accordingly.  The previous implementation
+wrapped :func:`jsonschema.validate` without any error handling which
+caused ``SchemaError`` or ``ValidationError`` exceptions to bubble up and
+abort test execution.  This broke callers that were written to handle a
+``(bool, message)`` return signature.
 
-Raises:
-    jsonschema.exceptions.ValidationError: If the data does not conform to the schema.
-    jsonschema.exceptions.SchemaError: If the schema itself is invalid.
+To restore the intended API we catch the relevant exceptions and return
+``(False, <message>)`` when validation fails.  A successful validation
+returns ``(True, "")``.  Callers that only care about the boolean value
+can ignore the message while more sophisticated code can report the
+details to the user.
 """
 def validate_data(data_instance, schema_instance):
-    validate(instance=data_instance, schema=schema_instance)
-    return True
+    try:
+        validate(instance=data_instance, schema=schema_instance)
+        return True, ""
+    except exceptions.ValidationError as exc:  # pragma: no cover - thin wrapper
+        return False, exc.message
+    except exceptions.SchemaError as exc:      # pragma: no cover - thin wrapper
+        return False, exc.message
 
 
 """
@@ -56,21 +66,12 @@ def main():
         print(f"Error: Could not parse YAML file - {e}", file=sys.stderr)
         sys.exit(1)
 
-    try:
-        validate_data(data_instance=data_instance, schema_instance=schema_instance)
+    is_valid, message = validate_data(data_instance=data_instance, schema_instance=schema_instance)
+    if is_valid:
         print(f"✅ Validation successful: '{args.data_file}' adheres to the schema in '{args.schema_file}'.")
-    except exceptions.ValidationError as e:
+    else:
         print(f"❌ VALIDATION FAILED for '{args.data_file}':", file=sys.stderr)
-        print(f"Error: {e.message}", file=sys.stderr)
-        # The path attribute provides a clear location of the error in the data
-        path = " -> ".join(map(str, e.path))
-        if path:
-            print(f"Path: {path}", file=sys.stderr)
-        sys.exit(1)
-    except exceptions.SchemaError as e:
-        print(f"❌ SCHEMA ERROR:", file=sys.stderr)
-        print(f"The schema file '{args.schema_file}' is invalid.", file=sys.stderr)
-        print(f"Error: {e.message}", file=sys.stderr)
+        print(f"Error: {message}", file=sys.stderr)
         sys.exit(1)
 
 

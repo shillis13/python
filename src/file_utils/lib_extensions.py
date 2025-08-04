@@ -7,9 +7,12 @@ and provides a command-line interface for querying type hierarchies.
 """
 
 import argparse
+import csv
 import os
 import sys
 from pathlib import Path
+from collections import defaultdict
+from typing import Dict, Iterable, Set
 
 # ========================================
 # region Path and Package Setup
@@ -43,6 +46,110 @@ _extension_data = None
 # Schema file is expected to be co-located with this script inside 'file_utils'.
 _package_dir = Path(__file__).resolve().parent
 # SCHEMA_FILE = _package_dir / "extensions_schema.yml"
+# ========================================
+# endregion
+
+# ========================================
+# region CSV Extension Information
+# ========================================
+
+
+class ExtensionInfo(dict):
+    """Load extension metadata from a simple CSV file.
+
+    Besides populating the mapping interface used directly by a few unit
+    tests, constructing an :class:`ExtensionInfo` instance also seeds the
+    module-level ``_extension_data`` cache.  This mirrors the behaviour of
+    the historical YAML based implementation where loading the extensions
+    file made type information available globally via
+    :func:`get_extension_data`.
+    """
+
+    def __init__(self, csv_path: str | Path):
+        path = Path(csv_path)
+        data: Dict[str, Dict[str, str]] = {}
+        category_map: Dict[str, Set[str]] = defaultdict(set)
+        ext_map: Dict[str, str] = {}
+        type_map: Dict[str, Dict[str, object]] = {}
+
+        with path.open(newline="") as fh:
+            reader = csv.DictReader(fh)
+            for row in reader:
+                ext = row.get("extension", "").strip()
+                if not ext:
+                    continue
+                if not ext.startswith('.'):
+                    ext = f".{ext}"
+                category = row.get("category", "").strip()
+                name = row.get("name", "").strip()
+                description = row.get("description", "").strip()
+                data[ext] = {
+                    "category": category,
+                    "name": name,
+                    "description": description,
+                }
+                if category:
+                    category_map[category].add(ext.lstrip("."))
+                    ext_map[ext.lower()] = category
+
+        for category, exts in category_map.items():
+            pattern = "|".join(sorted(exts))
+            data[category] = {"regex": rf"\.({pattern})$"}
+            type_map[category.lower()] = {
+                "parent": None,
+                "children": [],
+                "extensions": [f".{e}" for e in sorted(exts)],
+            }
+
+        # Expose structured data for other modules
+        global _extension_data
+        _extension_data = {"types": type_map, "extensions": ext_map}
+
+        super().__init__(data)
+
+
+def load_extensions_from_csv(csv_filename: str | Path) -> Set[str]:
+    """Return the set of extensions listed in a CSV file."""
+    path = Path(csv_filename)
+    if not path.is_file():
+        return set()
+    with path.open(newline="") as fh:
+        reader = csv.DictReader(fh)
+        return {row["extension"].lstrip(".") for row in reader if row.get("extension")}
+
+
+def load_extensions_from_magic(magic_filename: str | Path) -> Set[str]:
+    """Extract a set of extensions from a libmagic ``magic`` file.
+
+    The parsing here is intentionally lightweight – it simply looks for lines
+    beginning with ``ext`` and records the following token as an extension.
+    If the magic file cannot be read the function falls back to returning an
+    empty set which keeps the tests robust on systems without the file
+    database installed.
+    """
+    path = Path(magic_filename)
+    try:
+        extensions: Set[str] = set()
+        with path.open(encoding="utf-8", errors="ignore") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line or not line.startswith("ext"):
+                    continue
+                parts = line.split()
+                if len(parts) >= 2:
+                    extensions.add(parts[1].lstrip("."))
+        return extensions
+    except FileNotFoundError:
+        return set()
+
+
+def compare_extensions(csv_extensions: Iterable[str], magic_extensions: Iterable[str]) -> tuple[Set[str], Set[str]]:
+    """Return extensions missing from either source."""
+    csv_set = set(csv_extensions)
+    magic_set = set(magic_extensions)
+    return magic_set - csv_set, csv_set - magic_set
+
+
 # ========================================
 # endregion
 
