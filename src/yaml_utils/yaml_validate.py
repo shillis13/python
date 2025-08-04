@@ -13,6 +13,7 @@ import sys
 import yaml
 from jsonschema import validate, exceptions
 
+
 """Validate *data_instance* against *schema_instance*.
 
 The original project exposed a ``validate_data`` helper that returned a
@@ -65,21 +66,12 @@ def main():
         print(f"Error: Could not parse YAML file - {e}", file=sys.stderr)
         sys.exit(1)
 
-    try:
-        validate_data(data_instance=data_instance, schema_instance=schema_instance)
+    is_valid, message = validate_data(data_instance=data_instance, schema_instance=schema_instance)
+    if is_valid:
         print(f"✅ Validation successful: '{args.data_file}' adheres to the schema in '{args.schema_file}'.")
-    except exceptions.ValidationError as e:
+    else:
         print(f"❌ VALIDATION FAILED for '{args.data_file}':", file=sys.stderr)
-        print(f"Error: {e.message}", file=sys.stderr)
-        # The path attribute provides a clear location of the error in the data
-        path = " -> ".join(map(str, e.path))
-        if path:
-            print(f"Path: {path}", file=sys.stderr)
-        sys.exit(1)
-    except exceptions.SchemaError as e:
-        print(f"❌ SCHEMA ERROR:", file=sys.stderr)
-        print(f"The schema file '{args.schema_file}' is invalid.", file=sys.stderr)
-        print(f"Error: {e.message}", file=sys.stderr)
+        print(f"Error: {message}", file=sys.stderr)
         sys.exit(1)
 
 
