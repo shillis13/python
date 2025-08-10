@@ -14,17 +14,22 @@ from dev_utils.lib_logging import *
 from dev_utils.lib_dryrun import *
 from dev_utils.lib_undo import *
 from dev_utils.lib_outputColors import *
-from dev_utils.lib_argparse_registry import register_arguments, parse_known_args
+from dev_utils.lib_argparse_registry import (
+    register_arguments,
+    build_parser,
+)
 
 
 def rename_files(command):
     """Executes the f2 command with the given arguments."""
     try:
-        #log_debug(f"Running command: {' '.join(command)}")
         log_info(f"Running command: {' '.join(command)}")
         subprocess.run(command, check=True)
     except subprocess.CalledProcessError as e:
         log_error(f"Command failed with error: {e}")
+        sys.exit(1)
+    except FileNotFoundError:
+        log_error("f2 executable not found. Ensure it is installed and in PATH.")
         sys.exit(1)
 
 
@@ -32,71 +37,77 @@ def build_f2_command(args):
     """Construct the f2 command based on the provided arguments."""
     command = ["f2"]
 
-    if args.find:
-        command.extend(["--find", args.find])
-        log_debug(f"Added --find argument: {args.find}")
-    
-    if args.replace:
-        command.extend(["--replace", args.replace])
-        log_debug(f"Added --replace argument: {args.replace}")
+    if args.undo:
+        command.append("--undo")
+        log_debug("Added --undo argument to revert last operation")
+    else:
+        if args.find:
+            command.extend(["--find", args.find])
+            log_debug(f"Added --find argument: {args.find}")
 
-    #if args.format:
-    #    command.extend(["--format", args.format])
-    #    log_debug(f"Added --format argument: {args.format}")
+        if args.replace:
+            command.extend(["--replace", args.replace])
+            log_debug(f"Added --replace argument: {args.replace}")
 
-    if args.indexing:
-        command.append(f"--replace={{%0{args.indexing}d}}")
-        log_debug(f"Added --replace argument for indexing: {args.indexing}")
+        if args.format:
+            command.extend(["--format", args.format])
+            log_debug(f"Added --format argument: {args.format}")
 
-    if args.remove_vowels:
-        command.extend(["--find", "[aeiouAEIOU]", "--replace", ""])
-        log_debug("Added --find and --replace arguments to remove vowels")
+        if args.indexing:
+            command.append(f"--replace={{%0{args.indexing}d}}")
+            log_debug(f"Added --replace argument for indexing: {args.indexing}")
 
-    if args.change_case:
-        if args.change_case == 'upper':
-            command.append("--upper")
-        elif args.change_case == 'lower':
-            command.append("--lower")
-        elif args.change_case == 'camel':
-            command.append("--camel")
-        elif args.change_case == 'proper':
-            command.append("--proper")
-        log_debug(f"Added --change-case argument: {args.change_case}")
+        if args.remove_vowels:
+            command.extend(["--find", "[aeiouAEIOU]", "--replace", ""])
+            log_debug("Added --find and --replace arguments to remove vowels")
 
-    if not args.no_clean:
-        # Remove special characters
-        command.extend(["--find", r"[^\w\-_\. ]", "--replace", ""])
-        log_debug("Added --find and --replace arguments to remove special characters")
+        if args.change_case:
+            if args.change_case == 'upper':
+                command.append("--upper")
+            elif args.change_case == 'lower':
+                command.append("--lower")
+            elif args.change_case == 'camel':
+                command.append("--camel")
+            elif args.change_case == 'proper':
+                command.append("--proper")
+            log_debug(f"Added --change-case argument: {args.change_case}")
 
-        # Trim leading and trailing spaces
-        command.extend(["--find", r"^\s+|\s+$", "--replace", ""])
-        log_debug("Added --find and --replace arguments to trim leading and trailing spaces")
+        if args.no_clean:
+            command.extend(["--find", r"[^\w\-_\. ]", "--replace", ""])
+            log_debug("Added --find and --replace arguments to remove special characters")
 
-    if args.replace_white_space:
-        command.extend(["--find", r"\s", "--replace", args.replace_white_space])
-        # command.extend(["--find", r'[ ]{1,}', "--replace",  r'_'])
-        log_info(f"Added --find and --replace arguments to replace whitespace with: {args.replace_white_space}")
+            command.extend(["--find", r"^\s+|\s+$", "--replace", ""])
+            log_debug(
+                "Added --find and --replace arguments to trim leading and trailing spaces"
+            )
 
-    if args.remove_white_space:
-        command.extend(["--find", r"\s", "--replace", ""])
-        log_info("Added --find and --replace arguments to remove all whitespace")
+        if args.replace_white_space:
+            command.extend(["--find", r"\s", "--replace", args.replace_white_space])
+            log_info(
+                f"Added --find and --replace arguments to replace whitespace with: {args.replace_white_space}"
+            )
 
-    # Check if --fileByFirstChar is set and construct f2 command accordingly
-    if args.fileByFirstChar:
-        command.extend(["--find", "(.)(.*)", "--replace", "{<$1>.up}/$1$2", "-e"])
-        log_debug("Added fileByFirstChar logic to move files into dirs by first letter")
+        if args.remove_white_space:
+            command.extend(["--find", r"\s", "--replace", ""])
+            log_info("Added --find and --replace arguments to remove all whitespace")
 
-    if not args.dry_run:
-        command.append("--exec")
-        log_debug("Added --exec argument to commit the changes")
+        if args.fileByFirstChar:
+            command.extend(["--find", "(.)(.*)", "--replace", "{<$1>.up}/$1$2", "-e"])
+            log_debug(
+                "Added fileByFirstChar logic to move files into dirs by first letter"
+            )
 
-    if args.help_f2:
-        command.append("--help")
-        log_debug("Added --help argument to show f2 help")
+        if not args.dry_run:
+            command.append("--exec")
+            log_debug("Added --exec argument to commit the changes")
 
-    if args.recursive:
-        command.append("--recursive")
-        log_debug("Search subdirs recursively")
+        if args.help_f2:
+            command.append("--help")
+            log_debug("Added --help argument to show f2 help")
+
+        if args.recursive:
+            command.append("--recursive")
+            log_debug("Search subdirs recursively")
 
     log_info(f"Constructed command: {' '.join(command)}")
     return command
@@ -118,7 +129,8 @@ def print_usage():
       --change-case=<case>         Change case of filenames: upper, lower, camel, proper
       --replace-white-space=<char> Replace whitespace with specified character
       --remove-white-space         Remove all whitespace from filenames
-      --no-clean                   Skip trimming and special character removal
+      --no-clean                   Remove special characters and trim whitespace
+      --undo                       Undo the last renaming operation
       --recursive | -R             Search all subfolders recursively
       --dry-run                    Simulate the rename actions without making any changes
       --exec | -x                  Execute the renaming operation and commit the changes
@@ -186,7 +198,8 @@ def add_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument('--change-case', '-cc', type=str, choices=['upper', 'lower', 'camel', 'proper'], help='Change case of filenames.')
     parser.add_argument('--replace-white-space', '-repws', type=str, help='Replace whitespace in filenames with specified character.')
     parser.add_argument('--remove-white-space', '-remws', action='store_true', help='Remove all whitespace from filenames.')
-    parser.add_argument('--no-clean', '-nc', action='store_true', help='Skip trimming and special character removal.')
+    parser.add_argument('--no-clean', '-nc', action='store_true', help='Remove special characters and trim leading/trailing whitespace.')
+    parser.add_argument('--undo', action='store_true', help='Undo the last renaming operation.')
     parser.add_argument('--recursive', '-R', action='store_true', help='Search subfolders recursively.')
     parser.add_argument('--dry-run', dest='dry_run', action='store_true', default=True,
                         help='Simulate the rename actions without making any changes (default).')
@@ -204,7 +217,8 @@ register_arguments(add_args)
 
 
 def parse_args():
-    args, _ = parse_known_args(description='Wrapper for f2 command-line file renaming tool.')
+    parser = build_parser(description='Wrapper for f2 command-line file renaming tool.')
+    args = parser.parse_args()
     return args
 
 
