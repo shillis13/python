@@ -274,6 +274,56 @@ class TreePrinter:
             print(summary)
 
 
+    def _build_tree_from_paths(self, root: Path, paths: List[Path]) -> dict:
+        """Build a nested dictionary representing only the specified paths."""
+        tree: dict = {}
+        for path in paths:
+            try:
+                rel_parts = path.relative_to(root).parts
+            except ValueError:
+                # Skip paths outside the root
+                continue
+            node = tree
+            for part in rel_parts:
+                node = node.setdefault(part, {})
+        return tree
+
+    def _print_tree_from_map(self, tree: dict, prefix: str, parent_path: Path) -> None:
+        """Recursively print the tree built from a path map."""
+        items = sorted(tree.items(), key=lambda x: x[0].lower())
+        for i, (name, subtree) in enumerate(items):
+            is_last = i == len(items) - 1
+            branch = self.chars['last'] if is_last else self.chars['branch']
+            next_prefix = prefix + (self.chars['space'] if is_last else self.chars['vertical'])
+            current_path = parent_path / name
+
+            display_name = self.colorize_item(name, current_path)
+            info = self.get_item_info(current_path)
+
+            symlink_target = ""
+            if current_path.is_symlink():
+                try:
+                    target = current_path.readlink()
+                    symlink_target = f" -> {target}"
+                    self.stats['symlinks'] += 1
+                except (OSError, PermissionError):
+                    symlink_target = " -> [broken link]"
+
+            print(f"{prefix}{branch}{display_name}{info}{symlink_target}")
+
+            if current_path.is_dir() and not current_path.is_symlink():
+                if subtree:
+                    self._print_tree_from_map(subtree, next_prefix, current_path)
+                self.stats['dirs'] += 1
+            elif current_path.is_file() and not current_path.is_symlink():
+                self.stats['files'] += 1
+
+    def print_selected_paths(self, root: Path, paths: List[Path]) -> None:
+        """Print a tree that includes only the specified paths."""
+        tree = self._build_tree_from_paths(root, paths)
+        self._print_tree_from_map(tree, "", root)
+
+
 def get_display_path(directory: Path, absolute: bool) -> str:
     """
     Determines the display path for a directory, supporting relative and absolute formats.
@@ -568,27 +618,77 @@ def process_directories_pipeline(args):
     # Get directory paths from various sources
     input_paths, dry_run_detected = get_file_paths_from_input(args)
 
-    # If no piped/file input, use command line args. If none, default to current dir.
-    if not input_paths:
-        input_paths = args.paths or ['.']
+    # If paths were piped in, treat them as explicit selections and build a
+    # minimal tree containing only those paths.
+    if input_paths:
+        if dry_run_detected:
+            args.dry_run = True
 
-    if dry_run_detected:
-        args.dry_run = True
+        resolved_items: List[Path] = []
+        for path_str in input_paths:
+            path = Path(path_str).expanduser()
+            if not path.exists():
+                print(f"⚠️  Skipping non-existent path: {path}", file=sys.stderr)
+                continue
+            resolved_items.append(path.resolve())
 
-    # This is the core logic for handling file lists: derive unique parent directories
+        if not resolved_items:
+            print("ℹ️  No valid paths to process.", file=sys.stderr)
+            return
+
+        # Determine the common root directory
+        common_roots = [p if p.is_dir() else p.parent for p in resolved_items]
+        root_dir = Path(os.path.commonpath(common_roots))
+
+        if args.dry_run:
+            print("DRY RUN: The following paths would be processed:", file=sys.stderr)
+            for p in resolved_items:
+                print(f"  - {p}", file=sys.stderr)
+            return
+
+        ignore_patterns = [p.strip() for p in args.ignore.split(',')] if args.ignore else []
+
+        printer = TreePrinter(
+            show_files=True,  # Explicit selections should always include files
+            max_depth=args.max_depth,
+            ignore_patterns=ignore_patterns,
+            file_patterns=args.file_patterns or [],
+            show_size=args.size,
+            show_modified=args.modified,
+            show_permissions=args.permissions,
+            use_colors=not args.no_colors,
+            use_ascii=args.ascii,
+            sort_dirs_first=not args.unsorted,
+            show_hidden=args.hidden,
+            follow_symlinks=args.follow_symlinks,
+        )
+
+        display_name = get_display_path(root_dir, args.absolute)
+        colorized_name = printer.colorize_item(display_name, root_dir)
+        info = printer.get_item_info(root_dir)
+        print(f"{colorized_name}{info}")
+
+        printer.print_selected_paths(root_dir, resolved_items)
+
+        if not args.no_summary:
+            printer.print_summary()
+        print("✅ Successfully processed 1 directory.", file=sys.stderr)
+        return
+
+    # No piped input: fall back to processing command line paths or current
+    # directory exactly as before
+
+    paths = args.paths or ['.']
     unique_dirs = set()
-    for path_str in input_paths:
-        path = Path(path_str)
+    for path_str in paths:
+        path = Path(path_str).expanduser()
         if not path.exists():
             print(f"⚠️  Skipping non-existent path: {path}", file=sys.stderr)
             continue
-
-        # Resolve to an absolute path to handle duplicates reliably
         resolved_path = path.resolve()
         if resolved_path.is_dir():
             unique_dirs.add(resolved_path)
         elif resolved_path.is_file():
-            # If it's a file, use its parent directory
             unique_dirs.add(resolved_path.parent)
 
     sorted_dirs = sorted(list(unique_dirs))
@@ -597,16 +697,14 @@ def process_directories_pipeline(args):
         print("ℹ️  No valid directories found to process.", file=sys.stderr)
         return
 
-    if args.dry_run:
+    if args.dry_run or dry_run_detected:
         print("DRY RUN: The following directories would be processed:", file=sys.stderr)
         for directory in sorted_dirs:
             print(f"  - {directory}", file=sys.stderr)
         return
 
-    # Parse ignore patterns from the comma-separated argument
     ignore_patterns = [p.strip() for p in args.ignore.split(',')] if args.ignore else []
 
-    # Set up the tree printer, passing all arguments
     printer = TreePrinter(
         show_files=args.files,
         max_depth=args.max_depth,
@@ -619,18 +717,15 @@ def process_directories_pipeline(args):
         use_ascii=args.ascii,
         sort_dirs_first=not args.unsorted,
         show_hidden=args.hidden,
-        follow_symlinks=args.follow_symlinks
+        follow_symlinks=args.follow_symlinks,
     )
 
-    # Process each unique directory
     processed_count = 0
     try:
         for i, directory in enumerate(sorted_dirs):
-            # Add separator between multiple directories
             if i > 0:
                 print("\n" + "=" * 50 + "\n")
 
-            # Use the helper to get the root path display string (absolute or relative)
             display_name = get_display_path(directory, args.absolute)
 
             colorized_name = printer.colorize_item(display_name, directory)
@@ -641,19 +736,26 @@ def process_directories_pipeline(args):
             processed_count += 1
 
     except KeyboardInterrupt:
-        print(f"\n❌ Interrupted by user after processing {processed_count} directories.", file=sys.stderr)
+        print(
+            f"\n❌ Interrupted by user after processing {processed_count} directories.",
+            file=sys.stderr,
+        )
     except Exception as e:
         print(f"❌ An unexpected error occurred: {e}", file=sys.stderr)
 
-    # Print summary for all directories processed
     if not args.no_summary and processed_count > 0:
         if len(sorted_dirs) > 1:
             print()
-            print(f"Processed {processed_count} director{'ies' if processed_count != 1 else 'y'}")
+            print(
+                f"Processed {processed_count} director{'ies' if processed_count != 1 else 'y'}"
+            )
         printer.print_summary()
 
     if processed_count > 0:
-        print(f"✅ Successfully processed {processed_count} director{'ies' if processed_count != 1 else 'y'}.", file=sys.stderr)
+        print(
+            f"✅ Successfully processed {processed_count} director{'ies' if processed_count != 1 else 'y'}.",
+            file=sys.stderr,
+        )
 
 
 def main():

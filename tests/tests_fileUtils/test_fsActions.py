@@ -116,7 +116,7 @@ class TestFileSystemActions:
         target = Path("/dest/file.txt")
         
         # Mock target parent mkdir
-        with patch.object(target.parent, 'mkdir'):
+        with patch('pathlib.Path.mkdir'):
             result = actions.move_file(source, target, dry_run=False)
         
         assert result is True
@@ -141,7 +141,7 @@ class TestFileSystemActions:
         target = Path("/dest/file.txt")
         
         with patch('file_utils.fsActions.shutil.move', side_effect=PermissionError("Access denied")):
-            with patch.object(target.parent, 'mkdir'):
+            with patch('pathlib.Path.mkdir'):
                 result = actions.move_file(source, target, dry_run=False)
         
         assert result is False
@@ -167,8 +167,8 @@ class TestFileSystemActions:
         target = Path("/dest/file.txt")
         
         # Mock source as file
-        with patch.object(source, 'is_dir', return_value=False):
-            with patch.object(target.parent, 'mkdir'):
+        with patch('pathlib.Path.is_dir', return_value=False):
+            with patch('pathlib.Path.mkdir'):
                 result = actions.copy_file(source, target, dry_run=False)
         
         assert result is True
@@ -183,8 +183,8 @@ class TestFileSystemActions:
         target = Path("/dest/dir")
         
         # Mock source as directory
-        with patch.object(source, 'is_dir', return_value=True):
-            with patch.object(target.parent, 'mkdir'):
+        with patch('pathlib.Path.is_dir', return_value=True):
+            with patch('pathlib.Path.mkdir'):
                 result = actions.copy_file(source, target, dry_run=False)
         
         assert result is True
@@ -208,7 +208,7 @@ class TestFileSystemActions:
         source = Path("/source/file.txt")
         
         # Mock source as file
-        with patch.object(source, 'is_dir', return_value=False):
+        with patch('pathlib.Path.is_dir', return_value=False):
             result = actions.delete_file(source, dry_run=False)
         
         assert result is True
@@ -222,7 +222,7 @@ class TestFileSystemActions:
         source = Path("/source/dir")
         
         # Mock source as directory
-        with patch.object(source, 'is_dir', return_value=True):
+        with patch('pathlib.Path.is_dir', return_value=True):
             result = actions.delete_file(source, dry_run=False)
         
         assert result is True
@@ -235,8 +235,8 @@ class TestFileSystemActions:
         source = Path("/source/file.txt")
         
         # Mock source as file and unlink to raise PermissionError
-        with patch.object(source, 'is_dir', return_value=False):
-            with patch.object(source, 'unlink', side_effect=PermissionError("Access denied")):
+        with patch('pathlib.Path.is_dir', return_value=False):
+            with patch('pathlib.Path.unlink', side_effect=PermissionError("Access denied")):
                 result = actions.delete_file(source, dry_run=False)
         
         assert result is False
@@ -269,7 +269,7 @@ class TestFileSystemActions:
         path = Path("/test/file.txt")
         
         # Mock chmod to raise ValueError for invalid mode
-        with patch.object(path, 'chmod', side_effect=ValueError("invalid mode")):
+        with patch('pathlib.Path.chmod', side_effect=ValueError("invalid mode")):
             result = actions.set_permissions(path, "invalid", dry_run=False)
         
         assert result is False
@@ -286,8 +286,8 @@ class TestFileSystemActions:
         mock_stat = Mock()
         mock_stat.st_atime = 1640995200
         mock_stat.st_mtime = 1640995200
-        
-        with patch.object(path, 'stat', return_value=mock_stat):
+
+        with patch('pathlib.Path.stat', return_value=mock_stat):
             result = actions.set_attributes(path, attributes, dry_run=False)
         
         assert result is True
@@ -672,9 +672,10 @@ class TestErrorHandlingIntegration:
         readonly_dir.chmod(0o444)  # Read-only
         
         target = readonly_dir / "target.txt"
-        
+
         try:
-            result = self.actions.copy_file(source, target, dry_run=False)
+            with patch('file_utils.fsActions.shutil.copy2', side_effect=PermissionError("Access denied")):
+                result = self.actions.copy_file(source, target, dry_run=False)
             # Should handle the permission error gracefully
             assert result is False
             assert self.actions.stats['errors'] == 1

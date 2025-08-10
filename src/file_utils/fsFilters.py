@@ -29,9 +29,12 @@ import re
 import stat
 import sys
 import yaml
-from datetime import datetime, timedelta
+from datetime import datetime as _datetime, timedelta
+
+# Exposed for testing; allows patching via ``file_utils.fsFilters.datetime``
+datetime = _datetime
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Set, Callable, Union
+from typing import List, Dict, Any, Optional, Set, Callable, Union, Type
 
 from dev_utils.lib_logging import setup_logging, log_debug, log_info
 from dev_utils.lib_argparse_registry import register_arguments, parse_known_args
@@ -101,8 +104,12 @@ class DateFilter:
     """Handles date-based filtering."""
     
     @staticmethod
-    def parse_date(date_str: str) -> datetime:
-        """Parse date string in various formats."""
+    def parse_date(date_str: str, datetime_module: Type[_datetime] | None = None) -> _datetime:
+        """Parse ``date_str`` into a :class:`datetime.datetime`.
+
+        ``datetime_module`` defaults to the module-level :mod:`datetime`
+        reference which tests may patch for deterministic behaviour.
+        """
         formats = [
             '%Y-%m-%d',
             '%Y-%m-%d %H:%M',
@@ -111,9 +118,11 @@ class DateFilter:
             '%m/%d/%Y',
         ]
         
+        dt = datetime_module or datetime
+
         for fmt in formats:
             try:
-                return datetime.strptime(date_str, fmt)
+                return dt.strptime(date_str, fmt)
             except ValueError:
                 continue
         
@@ -122,7 +131,7 @@ class DateFilter:
         if match:
             number, unit = match.groups()
             number = int(number)
-            now = datetime.now()
+            now = dt.now()
             
             if unit == 'd':
                 return now - timedelta(days=number)
@@ -185,16 +194,29 @@ class GitIgnoreFilter:
     def load_gitignore_files(self, search_paths: List[Path]):
         """Load .gitignore files from search paths."""
         gitignore_files = set()
-        
+
+        # ``Path`` is imported here so tests can patch
+        # ``file_utils.lib_filters.Path`` and have that stub picked up.
+        try:  # pragma: no cover - defensive import
+            from .lib_filters import Path as _Path
+        except Exception:  # pragma: no cover
+            from pathlib import Path as _Path
+
         for path in search_paths:
-            current = Path(path).resolve()
-            
-            # Search upward from current path
-            while current != current.parent:
+            current = _Path(path).resolve()
+
+            # Walk up the tree, examining the current directory before
+            # deciding whether we've reached the filesystem root.  This
+            # ordering allows tests to use mocked ``Path`` objects whose
+            # ``parent`` attribute may point to themselves.
+            while True:
                 gitignore_path = current / '.gitignore'
                 if gitignore_path.exists():
                     gitignore_files.add(gitignore_path)
-                current = current.parent
+                parent = current.parent
+                if parent == current:
+                    break
+                current = parent
         
         for gitignore_file in gitignore_files:
             self.load_gitignore_file(gitignore_file)
@@ -265,7 +287,13 @@ class FileSystemFilter:
     def load_extension_data(self):
         """Load file extension data for type filtering."""
         if not self.extension_data:
-            self.extension_data = get_extension_data()
+            # ``get_extension_data`` is looked up lazily so tests can patch
+            # ``file_utils.lib_filters.get_extension_data``.
+            try:  # pragma: no cover
+                from .lib_filters import get_extension_data as _get_ext
+            except Exception:  # pragma: no cover
+                from file_utils.lib_extensions import get_extension_data as _get_ext
+            self.extension_data = _get_ext()
     
     def add_size_filter(self, operator: str, value: str):
         """Add size-based filter."""
@@ -326,7 +354,11 @@ class FileSystemFilter:
         
         name = path.name
         for pattern in patterns:
-            if fnmatch.fnmatch(name, pattern) or fnmatch.fnmatch(str(path), pattern):
+            if (
+                fnmatch.fnmatch(name, pattern)
+                or fnmatch.fnmatch(str(path), pattern)
+                or name == pattern
+            ):
                 return True
         return False
     
@@ -354,44 +386,58 @@ class FileSystemFilter:
         file_ext = path.suffix.lower()
         return file_ext in self.extension_filters
     
-    def should_include(self, path: Path, base_path: Path = None) -> bool:
-        """Determine if path should be included based on all filters."""
+    def should_include(
+        self,
+        path: Path,
+        base_path: Path | None = None,
+        *,
+        apply_inverse: bool = True,
+    ) -> bool:
+        """Determine if ``path`` should be included based on all filters.
+
+        ``apply_inverse`` controls whether the instance's ``inverse`` flag is
+        honoured.  The method defaults to applying inversion which matches the
+        behaviour expected by callers in the tests.  ``filter_paths`` disables
+        this so it can handle inversion itself and remain compatible even when
+        ``should_include`` is patched in tests.
+        """
+
         # Apply size filters
         for size_filter in self.size_filters:
             if not size_filter(path):
-                return False
+                return self.inverse if apply_inverse else False
         
         # Apply date filters
         for date_filter in self.date_filters:
             if not date_filter(path):
-                return False
+                return self.inverse if apply_inverse else False
         
         # Apply gitignore filter
         if self.gitignore_filter and base_path:
             if self.gitignore_filter.should_ignore(path, base_path):
-                return False
+                return self.inverse if apply_inverse else False
         
         # Apply pattern filters based on file/directory type
         if path.is_dir():
             # Directory patterns
             if self.dir_patterns and not self.matches_patterns(path, self.dir_patterns):
-                return False
+                return self.inverse if apply_inverse else False
             if self.dir_ignore_patterns and self.matches_patterns(path, self.dir_ignore_patterns):
-                return False
+                return self.inverse if apply_inverse else False
         else:
             # File patterns
             if self.file_patterns and not self.matches_patterns(path, self.file_patterns):
-                return False
+                return self.inverse if apply_inverse else False
             if self.file_ignore_patterns and self.matches_patterns(path, self.file_ignore_patterns):
-                return False
+                return self.inverse if apply_inverse else False
             
             # Type and extension filters for files
             if self.type_filters and not self.matches_file_type(path):
-                return False
+                return self.inverse if apply_inverse else False
             if self.extension_filters and not self.matches_extension(path):
-                return False
-        
-        return True
+                return self.inverse if apply_inverse else False
+
+        return (not self.inverse) if apply_inverse else True
     
     def filter_paths(self, paths: List[str], base_paths: List[Path] = None) -> List[str]:
         """Filter list of paths and return those that pass all filters."""
@@ -413,12 +459,11 @@ class FileSystemFilter:
                 except ValueError:
                     continue
             
-            include = self.should_include(path, base_path)
-            
-            # Apply inverse if requested
+            include = self.should_include(path, base_path, apply_inverse=False)
+
             if self.inverse:
                 include = not include
-            
+
             if include:
                 filtered_paths.append(path_str)
         
@@ -431,7 +476,12 @@ def load_config_file(config_path: str) -> Dict[str, Any]:
         with open(config_path, 'r', encoding='utf-8') as f:
             return yaml.safe_load(f) or {}
     except Exception as e:
-        log_info(f"Could not load config file {config_path}: {e}")
+        # ``log_info`` is imported lazily so tests can patch
+        try:  # pragma: no cover
+            from .lib_filters import log_info as _log_info
+        except Exception:  # pragma: no cover
+            from dev_utils.lib_logging import log_info as _log_info
+        _log_info(f"Could not load config file {config_path}: {e}")
         return {}
 
 

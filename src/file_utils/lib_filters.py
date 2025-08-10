@@ -4,7 +4,7 @@ from pathlib import Path
 
 from .fsFilters import (
     SizeFilter,
-    DateFilter,
+    DateFilter as _DateFilter,
     GitIgnoreFilter,
     FileSystemFilter as _FileSystemFilter,
     apply_config_to_filter,
@@ -16,26 +16,31 @@ from .fsFilters import (
 
 
 class FileSystemFilter(_FileSystemFilter):
-    """Subclass adding ``inverse`` support to :meth:`should_include`."""
+    """Compatibility wrapper that exposes test-friendly hooks."""
 
     def load_extension_data(self):
         """Load extension metadata via the locally imported helper.
 
-        The :mod:`fsFilters` module defines ``FileSystemFilter`` with a
-        ``load_extension_data`` method that pulls in
-        ``file_utils.lib_extensions.get_extension_data``.  The tests patch
-        ``file_utils.lib_filters.get_extension_data`` expecting our wrapper
-        to honour that stub.  By overriding the method here and delegating
-        to the symbol imported into this module we ensure the patching
-        works as intended and avoid inadvertently loading the heavy YAML
-        configuration during the tests.
+        Delegating through :func:`get_extension_data` defined in this module
+        keeps the function patchable in tests while avoiding the cost of
+        loading the YAML data repeatedly.
         """
         if not self.extension_data:
             self.extension_data = get_extension_data()
 
-    def should_include(self, path: Path, base_path: Path | None = None) -> bool:
-        include = super().should_include(path, base_path)
-        return not include if self.inverse else include
+
+class DateFilter(_DateFilter):
+    """Expose ``DateFilter`` using this module's ``datetime`` symbol.
+
+    Tests patch :mod:`file_utils.lib_filters.datetime` expecting
+    :func:`DateFilter.parse_date` to respect that stub.  By overriding the
+    method and delegating to the implementation from :mod:`fsFilters` with
+    our local ``datetime`` object we make the behaviour patch-friendly.
+    """
+
+    @staticmethod
+    def parse_date(date_str: str, datetime_module: type[datetime] | None = None) -> datetime:
+        return _DateFilter.parse_date(date_str, datetime if datetime_module is None else datetime_module)
 
 __all__ = [
     "SizeFilter",

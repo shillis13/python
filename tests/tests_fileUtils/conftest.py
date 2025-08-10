@@ -61,3 +61,7 @@ for _name, _fn in list(globals().items()):
         "simulate_stdin_input",
     }:
         setattr(builtins, _name, _fn)
+
+# Provide ``os`` through builtins so tests can access it without an explicit
+# import.  The test modules expect ``os.path`` to be available globally.
+setattr(builtins, "os", os)

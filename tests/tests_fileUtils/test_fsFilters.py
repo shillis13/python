@@ -129,20 +129,22 @@ class TestDateFilter:
     
     def test_parse_date_relative_days(self):
         """Test parsing relative date in days."""
-        with patch('file_utils.lib_filters.datetime') as mock_datetime:
+        with patch('file_utils.fsFilters.datetime') as mock_datetime:
             mock_now = datetime(2024, 1, 15, 12, 0, 0)
             mock_datetime.now.return_value = mock_now
-            
+            mock_datetime.strptime.side_effect = ValueError
+
             result = DateFilter.parse_date("7d")
             expected = mock_now - timedelta(days=7)
             assert result == expected
     
     def test_parse_date_relative_weeks(self):
         """Test parsing relative date in weeks."""
-        with patch('file_utils.lib_filters.datetime') as mock_datetime:
+        with patch('file_utils.fsFilters.datetime') as mock_datetime:
             mock_now = datetime(2024, 1, 15, 12, 0, 0)
             mock_datetime.now.return_value = mock_now
-            
+            mock_datetime.strptime.side_effect = ValueError
+
             result = DateFilter.parse_date("2w")
             expected = mock_now - timedelta(weeks=2)
             assert result == expected

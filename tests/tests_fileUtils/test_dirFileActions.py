@@ -10,7 +10,7 @@ def test_read_filenames_from_file():
     # Assertion
     assert not os.path.exists("file1.txt"), "file1.txt should be deleted"
     assert not os.path.exists("file2.txt"), "file2.txt should be deleted"
-    assert os.path.exists("file3.txt"), "file3.txt should not exist and thus not deleted"
+    assert not os.path.exists("file3.txt"), "file3.txt should not exist and thus not be deleted"
 
     # Cleanup
     cleanup_test_files(["file1.txt", "file2.txt", "filenames.txt"])
