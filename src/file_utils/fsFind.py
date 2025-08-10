@@ -79,8 +79,14 @@ class EnhancedFileFinder:
         """
         # Normalize inputs
         substrings = substrings or []
-        extensions = extensions or []
-        file_types = file_types or []
+        if isinstance(extensions, str):
+            extensions = [ext.strip() for ext in extensions.split(',') if ext.strip()]
+        else:
+            extensions = extensions or []
+        if isinstance(file_types, str):
+            file_types = [ft.strip() for ft in file_types.split(',') if ft.strip()]
+        else:
+            file_types = file_types or []
         
         if file_types:
             self.load_extension_data()
@@ -200,7 +206,8 @@ class EnhancedFileFinder:
         
         file_ext = path.suffix.lower()
         ext_map = self.extension_data.get('extensions', {})
-        type_map = self.extension_data.get('types', {})
+        type_map_raw = self.extension_data.get('types', {})
+        type_map = {k.lower(): v for k, v in type_map_raw.items()}
         target_types = [ft.lower() for ft in file_types]
 
         # If extension maps directly to a type, walk up the hierarchy
@@ -584,30 +591,64 @@ For file types: fsFind.py --list-types
     print(help_text)
 
 
+def _get_display_root(directory: Path) -> str:
+    """Return a user-friendly representation of a directory path.
+
+    Uses ``~`` for paths inside the user's home directory so results can be
+    copied/pasted directly into the shell, matching the behaviour of
+    ``treePrint.get_display_path``.
+    """
+    try:
+        home_dir = Path.home().resolve()
+        resolved_dir = directory.expanduser().resolve()
+        if home_dir == resolved_dir or str(resolved_dir).startswith(str(home_dir) + os.sep):
+            rel_path = resolved_dir.relative_to(home_dir)
+            return str(Path('~') / rel_path).replace("\\", "/")
+        if directory.is_absolute():
+            return str(resolved_dir)
+        return str(directory)
+    except Exception:
+        return str(directory)
+
+
+def _format_result(path: Path, roots: dict) -> str:
+    """Format a search result relative to its corresponding root directory."""
+    resolved_path = path.expanduser().resolve()
+    for base, display_root in roots.items():
+        try:
+            relative = resolved_path.relative_to(base)
+            return str(Path(display_root) / relative).replace("\\", "/")
+        except ValueError:
+            continue
+    return str(resolved_path)
+
+
 def process_find_pipeline(args):
     """Main pipeline processing function."""
     # Handle information requests
     if args.list_types:
         list_available_types()
         return
-    
+
     if args.help_examples:
         show_examples()
         return
-    
+
     if args.help_verbose:
         show_verbose_help()
         return
-    
+
     # Validate directories
-    search_dirs = []
+    search_dirs: List[str] = []
+    roots: dict = {}
     for directory in args.directories:
-        dir_path = Path(directory)
+        dir_path = Path(directory).expanduser()
         if dir_path.exists() and dir_path.is_dir():
-            search_dirs.append(directory)
+            search_dirs.append(str(dir_path))
+            roots[dir_path.resolve()] = _get_display_root(dir_path)
         else:
             print(f"⚠️  Skipping invalid directory: {directory}", file=sys.stderr)
-    
+
     if not search_dirs:
         print("❌ No valid directories to search.", file=sys.stderr)
         return
@@ -637,29 +678,34 @@ def process_find_pipeline(args):
     
     # Perform search
     try:
-        results = list(finder.find_files(
-            directories=search_dirs,
-            recursive=args.recursive,
-            file_pattern=args.pattern,
-            substrings=substrings,
-            regex=args.regex,
-            extensions=extensions,
-            file_types=file_types,
-            fs_filter=fs_filter,
-            include_dirs=args.include_dirs,
-            follow_symlinks=args.follow_symlinks
-        ))
-        
-        # Output results
-        for result in results:
+        results = list(
+            finder.find_files(
+                directories=search_dirs,
+                recursive=args.recursive,
+                file_pattern=args.pattern,
+                substrings=substrings,
+                regex=args.regex,
+                extensions=extensions,
+                file_types=file_types,
+                fs_filter=fs_filter,
+                include_dirs=args.include_dirs,
+                follow_symlinks=args.follow_symlinks,
+            )
+        )
+
+        formatted_results = [
+            _format_result(Path(r), roots) for r in results
+        ]
+
+        for result in formatted_results:
             print(result)
-        
+
         # Show statistics if requested
         if args.show_stats:
             finder.print_stats()
         
         # Success message
-        total_found = len(results)
+        total_found = len(formatted_results)
         search_mode = "recursive" if args.recursive else "non-recursive"
         dirs_searched = len(search_dirs)
         

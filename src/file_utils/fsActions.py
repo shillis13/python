@@ -438,50 +438,88 @@ For examples: fsActions.py --help-examples
     print(help_text)
 
 
-def create_filter_from_args(args) -> FileSystemFilter:
-    """Create FileSystemFilter from command line arguments."""
+def create_filter_from_args(args) -> FileSystemFilter | None:
+    """Create a :class:`FileSystemFilter` from ``args`` if filters are present."""
+
+    has_filters = any([
+        getattr(args, 'filter_file', None),
+        isinstance(getattr(args, 'size_gt', None), str),
+        isinstance(getattr(args, 'size_lt', None), str),
+        isinstance(getattr(args, 'size_eq', None), str),
+        isinstance(getattr(args, 'modified_after', None), str),
+        isinstance(getattr(args, 'modified_before', None), str),
+        isinstance(getattr(args, 'created_after', None), str),
+        isinstance(getattr(args, 'created_before', None), str),
+        (getattr(args, 'file_pattern_filter', []) or getattr(args, 'dir_pattern_filter', [])),
+        isinstance(getattr(args, 'pattern_filter', None), str),
+        (getattr(args, 'file_ignore', []) or getattr(args, 'dir_ignore', [])),
+        isinstance(getattr(args, 'ignore_filter', None), str),
+        getattr(args, 'type_filter', []),
+        getattr(args, 'extension_filter', []),
+        getattr(args, 'git_ignore_filter', False),
+    ])
+    if not has_filters:
+        return None
+
     fs_filter = FileSystemFilter()
-    
-    # Load filter configuration file if specified
-    if args.filter_file:
+
+    if getattr(args, 'filter_file', None):
         try:
             with open(args.filter_file, 'r', encoding='utf-8') as f:
                 config = yaml.safe_load(f) or {}
             apply_config_to_filter(fs_filter, config)
         except Exception as e:
             log_info(f"Could not load filter file {args.filter_file}: {e}")
-    
-    # Apply command line filter arguments
-    if args.pattern:
-        fs_filter.add_file_pattern(args.pattern)
-        fs_filter.add_dir_pattern(args.pattern)
-    
-    for pattern in args.file_pattern:
+
+    pattern = getattr(args, 'pattern', None)
+    if isinstance(pattern, str) and pattern:
         fs_filter.add_file_pattern(pattern)
-    
-    for pattern in args.dir_pattern:
         fs_filter.add_dir_pattern(pattern)
-    
-    if args.size_gt:
+
+    pattern_filter = getattr(args, 'pattern_filter', None)
+    if isinstance(pattern_filter, str) and pattern_filter:
+        fs_filter.add_file_pattern(pattern_filter)
+        fs_filter.add_dir_pattern(pattern_filter)
+
+    for pattern in getattr(args, 'file_pattern_filter', []) or []:
+        fs_filter.add_file_pattern(pattern)
+
+    for pattern in getattr(args, 'dir_pattern_filter', []) or []:
+        fs_filter.add_dir_pattern(pattern)
+
+    if isinstance(getattr(args, 'size_gt', None), str):
         fs_filter.add_size_filter('gt', args.size_gt)
-    if args.size_lt:
+    if isinstance(getattr(args, 'size_lt', None), str):
         fs_filter.add_size_filter('lt', args.size_lt)
-    
-    if args.modified_after:
+    if isinstance(getattr(args, 'size_eq', None), str):
+        fs_filter.add_size_filter('eq', args.size_eq)
+
+    if isinstance(getattr(args, 'modified_after', None), str):
         fs_filter.add_date_filter('after', args.modified_after, 'modified')
-    if args.modified_before:
+    if isinstance(getattr(args, 'modified_before', None), str):
         fs_filter.add_date_filter('before', args.modified_before, 'modified')
-    
-    for file_type in args.type:
+    if isinstance(getattr(args, 'created_after', None), str):
+        fs_filter.add_date_filter('after', args.created_after, 'created')
+    if isinstance(getattr(args, 'created_before', None), str):
+        fs_filter.add_date_filter('before', args.created_before, 'created')
+
+    ignore_filter = getattr(args, 'ignore_filter', None)
+    if isinstance(ignore_filter, str) and ignore_filter:
+        fs_filter.add_file_ignore_pattern(ignore_filter)
+        fs_filter.add_dir_ignore_pattern(ignore_filter)
+
+    for pattern in getattr(args, 'file_ignore', []) or []:
+        fs_filter.add_file_ignore_pattern(pattern)
+
+    for pattern in getattr(args, 'dir_ignore', []) or []:
+        fs_filter.add_dir_ignore_pattern(pattern)
+
+    for file_type in getattr(args, 'type_filter', []) or []:
         fs_filter.add_type_filter(file_type)
-    
-    for ext in args.extension:
+
+    for ext in getattr(args, 'extension_filter', []) or []:
         fs_filter.add_extension_filter(ext)
-    
-    if args.git_ignore:
-        # Will be set up later with actual paths
-        pass
-    
+
     return fs_filter
 
 

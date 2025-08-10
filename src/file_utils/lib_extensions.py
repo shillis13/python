@@ -95,7 +95,7 @@ class ExtensionInfo(dict):
         for category, exts in category_map.items():
             pattern = "|".join(sorted(exts))
             data[category] = {"regex": rf"\.({pattern})$"}
-            type_map[category.lower()] = {
+            type_map[category] = {
                 "parent": None,
                 "children": [],
                 "extensions": [f".{e}" for e in sorted(exts)],

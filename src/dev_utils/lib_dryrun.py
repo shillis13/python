@@ -17,15 +17,19 @@ def dry_run_decorator(custom_message=None):
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            dry_run_flag = get_attr(args, kwargs, 'dry_run', False)
-            print_args()
-            print_kwargs()
+            """Execute ``func`` unless ``dry_run`` is truthy in the arguments."""
+            dry_run_flag = get_attr(args, kwargs, "dry_run", False)
             if dry_run_flag:
-                message = custom_message(*args, **kwargs) if callable(custom_message) else "Dry run enabled, action is simulated."
+                message = (
+                    custom_message(*args, **kwargs)
+                    if callable(custom_message)
+                    else "Dry run enabled, action is simulated."
+                )
                 print(f"Dry run: {message}")
-            else:
-                return func(*args, **kwargs)
+            return func(*args, **kwargs)
+
         return wrapper
+
     return decorator
 
 
