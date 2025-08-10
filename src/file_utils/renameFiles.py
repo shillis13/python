@@ -9,6 +9,15 @@ import argparse
 import subprocess
 import sys
 import logging
+from pathlib import Path
+
+# Ensure the project "src" directory is on ``sys.path`` so that sibling
+# modules (e.g., ``dev_utils``) can be imported when this script is executed
+# directly or via a symlink.
+CURRENT_FILE = Path(__file__).resolve()
+SRC_DIR = CURRENT_FILE.parent.parent
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
 
 from dev_utils.lib_logging import *
 from dev_utils.lib_dryrun import *
