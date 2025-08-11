@@ -29,8 +29,11 @@ from dev_utils.lib_argparse_registry import (
 )
 
 
+"""
+Executes the f2 command with the given arguments.
+"""
+
 def rename_files(command):
-    """Executes the f2 command with the given arguments."""
     try:
         log_info(f"Running command: {' '.join(command)}")
         subprocess.run(command, check=True)
@@ -40,15 +43,19 @@ def rename_files(command):
     except FileNotFoundError:
         log_error("f2 executable not found. Ensure it is installed and in PATH.")
         sys.exit(1)
-
+"""
+Construct the f2 command based on the provided arguments.
+"""
 
 def build_f2_command(args):
-    """Construct the f2 command based on the provided arguments."""
     command = ["f2"]
 
     if args.undo:
         command.append("--undo")
         log_debug("Added --undo argument to revert last operation")
+        if not args.dry_run:
+            command.append("--exec")
+            log_debug("Added --exec argument to commit the undo operation")
     else:
         if args.find:
             command.extend(["--find", args.find])
@@ -66,10 +73,6 @@ def build_f2_command(args):
             command.append(f"--replace={{%0{args.indexing}d}}")
             log_debug(f"Added --replace argument for indexing: {args.indexing}")
 
-        if args.remove_vowels:
-            command.extend(["--find", "[aeiouAEIOU]", "--replace", ""])
-            log_debug("Added --find and --replace arguments to remove vowels")
-
         if args.change_case:
             if args.change_case == 'upper':
                 command.append("--upper")
@@ -80,6 +83,10 @@ def build_f2_command(args):
             elif args.change_case == 'proper':
                 command.append("--proper")
             log_debug(f"Added --change-case argument: {args.change_case}")
+
+        if args.remove_vowels:
+            command.extend(["--find", "[aeiouAEIOU]", "--replace", ""])
+            log_debug("Added --find and --replace arguments to remove vowels")
 
         if args.no_clean:
             command.extend(["--find", r"[^\w\-_\. ]", "--replace", ""])
