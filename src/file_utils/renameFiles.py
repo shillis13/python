@@ -9,6 +9,8 @@ import argparse
 import subprocess
 import sys
 import logging
+import re
+from datetime import datetime
 from pathlib import Path
 
 # Ensure the project "src" directory is on ``sys.path`` so that sibling
@@ -29,11 +31,104 @@ from dev_utils.lib_argparse_registry import (
 )
 
 
+
+def _apply_format(fmt: str, name: str, ext: str, index: int | None) -> str:
+    """Return ``fmt`` with placeholders substituted."""
+
+    result = fmt.replace("{date}", datetime.now().strftime("%Y-%m-%d"))
+    result = result.replace("{name}", name)
+    result = result.replace("{ext}", ext)
+    result = re.sub(r"\{(%[^{}]+)\}", r"\1", result)
+    if "%" in result and index is not None:
+        try:
+            result = result % index
+        except TypeError:
+            pass
+    return result
+
+
+def _build_new_name(path: Path, args, index: int | None) -> str:
+    original = path.name
+    base = Path(original.strip()).stem
+    ext = Path(original.strip()).suffix.lstrip(".")
+
+    if args.format:
+        return _apply_format(args.format, base, ext, index)
+
+    new_base, new_ext = base, ext
+
+    if args.find and args.replace:
+        new_base = re.sub(args.find, args.replace, new_base)
+
+    if args.no_clean:
+        new_base = re.sub(r"[^\w\-_\. ]", "", new_base).strip()
+        new_ext = re.sub(r"[^\w\-_\. ]", "", new_ext).strip()
+
+    if args.replace_white_space:
+        new_base = re.sub(r"\s", args.replace_white_space, new_base)
+        new_ext = re.sub(r"\s", args.replace_white_space, new_ext)
+
+    if args.remove_white_space:
+        new_base = re.sub(r"\s", "", new_base)
+        new_ext = re.sub(r"\s", "", new_ext)
+
+    if args.change_case:
+        if args.change_case == "lower":
+            new_base, new_ext = new_base.lower(), new_ext.lower()
+        elif args.change_case == "upper":
+            new_base, new_ext = new_base.upper(), new_ext.upper()
+        elif args.change_case == "camel":
+            parts = re.split(r"[_\s]+", new_base)
+            new_base = parts[0].lower() + "".join(p.title() for p in parts[1:])
+        elif args.change_case == "proper":
+            new_base, new_ext = new_base.title(), new_ext.lower()
+
+    if args.remove_vowels:
+        new_base = re.sub(r"[aeiouAEIOU]", "", new_base)
+        new_base = new_base.replace("pht", "ph")
+
+    new_name = new_base
+    if new_ext:
+        new_name += f".{new_ext}"
+    return new_name
+
+
+def _rename_internal(args) -> None:
+    files = sorted(p for p in Path.cwd().iterdir() if p.is_file())
+    sequential = bool(args.format and re.search(r"\{(%[^{}]+d)\}", args.format))
+    index = 1
+    for path in files:
+        new_name = _build_new_name(path, args, index if sequential else None)
+        if new_name != path.name:
+            if not args.dry_run:
+                path.rename(path.with_name(new_name))
+            print(f"{path.name} -> {new_name}")
+        if sequential:
+            index += 1
+
 """
-Executes the f2 command with the given arguments.
+Executes renaming based on provided arguments.
+If ``args.format`` is specified, perform the renaming internally to
+support placeholders like ``{date}``, ``{name}``, ``{ext}``, and
+sequential numbering patterns such as ``{%03d}``. Otherwise, delegate to
+the ``f2`` utility.
 """
 
-def rename_files(command):
+def rename_files(args):
+    if any(
+        [
+            args.format,
+            args.no_clean,
+            args.change_case,
+            args.remove_vowels,
+            args.replace_white_space,
+            args.remove_white_space,
+        ]
+    ):
+        _rename_internal(args)
+        return
+
+    command = build_f2_command(args)
     try:
         log_info(f"Running command: {' '.join(command)}")
         subprocess.run(command, check=True)
@@ -66,8 +161,14 @@ def build_f2_command(args):
             log_debug(f"Added --replace argument: {args.replace}")
 
         if args.format:
-            command.extend(["--format", args.format])
-            log_debug(f"Added --format argument: {args.format}")
+            # f2 does not provide a separate --format flag. To support a
+            # custom filename template, map our --format option to f2's
+            # --replace flag and ensure the entire filename is matched.
+            if not args.find:
+                command.extend(["--find", ".*"])
+                log_debug("Added default --find pattern: .*")
+            command.extend(["--replace", args.format])
+            log_debug(f"Added --replace argument for format: {args.format}")
 
         if args.indexing:
             command.append(f"--replace={{%0{args.indexing}d}}")
@@ -256,8 +357,7 @@ def main():
         print_exfil_help()
         sys.exit(0)
 
-    command = build_f2_command(args)
-    rename_files(command)
+    rename_files(args)
 
 
 if __name__ == "__main__":
