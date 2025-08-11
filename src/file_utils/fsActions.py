@@ -558,18 +558,23 @@ def process_actions_pipeline(args):
     
     # Create filter and apply filtering
     fs_filter = create_filter_from_args(args)
-    
+
     # Set up git ignore if requested
     if args.git_ignore:
-        base_paths = [Path(p).parent if Path(p).is_file() else Path(p) 
+        if fs_filter is None:
+            fs_filter = FileSystemFilter()
+        base_paths = [Path(p).parent if Path(p).is_file() else Path(p)
                      for p in input_paths if Path(p).exists()]
         if base_paths:
             fs_filter.enable_gitignore(base_paths)
-    
-    # Apply filtering
-    base_paths = [Path(p).parent if Path(p).is_file() else Path(p) 
-                 for p in input_paths if Path(p).exists()]
-    filtered_paths = fs_filter.filter_paths(input_paths, base_paths)
+
+    # Apply filtering if filters are defined; otherwise keep original paths
+    if fs_filter:
+        base_paths = [Path(p).parent if Path(p).is_file() else Path(p)
+                     for p in input_paths if Path(p).exists()]
+        filtered_paths = fs_filter.filter_paths(input_paths, base_paths)
+    else:
+        filtered_paths = input_paths
     
     if not filtered_paths:
         print("ℹ️ No files remain after filtering.", file=sys.stderr)
