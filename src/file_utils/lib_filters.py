@@ -2,6 +2,8 @@
 from datetime import datetime
 from pathlib import Path
 
+from typing import Any, Dict
+
 from .fsFilters import (
     SizeFilter,
     DateFilter as _DateFilter,
@@ -9,10 +11,16 @@ from .fsFilters import (
     FileSystemFilter as _FileSystemFilter,
     apply_config_to_filter,
     get_extension_data,
-    load_config_file,
+    load_config_file as _load_config_file,
     log_info,
     process_filters_pipeline,
 )
+
+
+def load_config_file(config_path: str, config_name: str | None = None) -> Dict[str, Any]:
+    """Wrapper around :func:`fsFilters.load_config_file` for backward compatibility."""
+
+    return _load_config_file(config_path, config_name)
 
 
 class FileSystemFilter(_FileSystemFilter):
