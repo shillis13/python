@@ -266,6 +266,54 @@ def list_available_types():
         print("No file type categories available.")
 
 
+# -- Backwards compatible wrapper functions ---------------------------------
+
+# Many legacy callers imported helpers directly from :mod:`fsFind`.  The
+# refactored implementation moved the functionality into the
+# :class:`EnhancedFileFinder` class and exposed high level helpers via the
+# ``findFiles`` module.  The tests in this kata still expect the original
+# functions to exist on this module, so we provide thin wrappers here.
+
+# A module level finder instance is sufficient for the simple use cases these
+# helpers cover.
+_default_finder = EnhancedFileFinder()
+
+
+def find_files(directory, **kwargs):
+    """Yield files beneath ``directory`` matching supplied filters.
+
+    Parameters
+    ----------
+    directory : str or Path or Iterable[str | Path]
+        Directory (or directories) to search.  A single path is accepted for
+        backward compatibility with the original function signature.
+
+    Other keyword arguments are forwarded to
+    :meth:`EnhancedFileFinder.find_files`.
+    """
+
+    # Allow callers to pass a single directory or an iterable of directories.
+    if isinstance(directory, (str, os.PathLike)):
+        directories = [directory]
+    else:
+        directories = list(directory)
+
+    # ``find_files`` returns a generator; we simply return the iterator
+    # produced by the finder so the caller can iterate lazily.
+    return _default_finder.find_files(directories, **kwargs)
+
+
+def print_verbose_help(parser=None):  # pragma: no cover - very small wrapper
+    """Backward compatible name for :func:`show_verbose_help`.
+
+    The *parser* argument is accepted for compatibility with older call sites
+    which expected a parser object to be passed in, but it is unused in the
+    new implementation.
+    """
+
+    show_verbose_help()
+
+
 def create_filter_from_args(args) -> Optional[FileSystemFilter]:
     """Create FileSystemFilter from command line arguments."""
     # Check if any filter arguments are provided
