@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 
 from file_utils.fsFilters import (
     SizeFilter, DateFilter, GitIgnoreFilter, FileSystemFilter,
-    apply_config_to_filter, load_config_file, process_filters_pipeline
+    apply_config_to_filter, process_filters_pipeline, load_config_file
 )
 
 
@@ -389,11 +389,35 @@ class TestConfigurationFunctions:
     def test_load_config_file_success(self):
         """Test successful config file loading."""
         config_data = {'size_gt': '1M', 'file_patterns': ['*.py']}
-        
+
         with patch('builtins.open', mock_open(read_data=yaml.dump(config_data))):
             result = load_config_file('test.yml')
-            
+
         assert result == config_data
+
+    def test_load_config_file_named_section(self):
+        """Test loading a specific configuration section."""
+        config_data = {
+            'dev_cleanup': {'size_gt': '1M'},
+            'other': {'size_gt': '2M'},
+        }
+
+        with patch('builtins.open', mock_open(read_data=yaml.dump(config_data))):
+            result = load_config_file('test.yml', 'dev_cleanup')
+
+        assert result == {'size_gt': '1M'}
+
+    def test_load_config_file_colon_syntax(self):
+        """Test loading configuration using the path:section syntax."""
+        config_data = {
+            'dev_cleanup': {'size_gt': '1M'},
+            'other': {'size_gt': '2M'},
+        }
+
+        with patch('builtins.open', mock_open(read_data=yaml.dump(config_data))):
+            result = load_config_file('test.yml:dev_cleanup')
+
+        assert result == {'size_gt': '1M'}
     
     def test_load_config_file_not_found(self):
         """Test config file loading when file not found."""

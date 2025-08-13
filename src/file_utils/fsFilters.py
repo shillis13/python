@@ -470,11 +470,26 @@ class FileSystemFilter:
         return filtered_paths
 
 
-def load_config_file(config_path: str) -> Dict[str, Any]:
-    """Load filter configuration from YAML file."""
+def load_config_file(config_path: str, config_name: str | None = None) -> Dict[str, Any]:
+    """Load filter configuration from YAML file.
+
+    ``config_path`` may optionally include a ``":"``-delimited section name
+    (e.g. ``"filters.yml:dev_cleanup"``).  Alternatively the section name may
+    be supplied via ``config_name``.  When provided, only the matching
+    configuration dictionary is returned; otherwise the entire document is
+    returned.
+    """
+
+    # Support passing "path:section" in a single string for convenience
+    if config_name is None and ":" in config_path:
+        config_path, _, config_name = config_path.partition(":")
+
     try:
         with open(config_path, 'r', encoding='utf-8') as f:
-            return yaml.safe_load(f) or {}
+            config = yaml.safe_load(f) or {}
+            if config_name and isinstance(config, dict):
+                return config.get(config_name, {})
+            return config
     except Exception as e:
         # ``log_info`` is imported lazily so tests can patch
         try:  # pragma: no cover
@@ -572,7 +587,7 @@ def add_args(parser: argparse.ArgumentParser) -> None:
     
     # Special options
     parser.add_argument('--inverse', action='store_true', help="Invert filter results")
-    parser.add_argument('--config', '-c', help="YAML configuration file")
+    parser.add_argument('--config', '-c', help="YAML configuration file optionally followed by ':section'")
     parser.add_argument('--dry-run', action='store_true', help="Show what would be filtered without outputting results")
     
     # Help options
@@ -634,7 +649,7 @@ Pipeline Usage:
   fsFilters.py --from-file files.txt --type video  # Filter file list
 
 Configuration File:
-  fsFilters.py . --config filters.yml           # Use YAML config
+  fsFilters.py . --config filters.yml:dev_cleanup  # Use named config section
 """
     print(examples)
 
@@ -701,7 +716,7 @@ EMPTY DIRECTORY HANDLING:
 
 SPECIAL OPTIONS:
     --inverse                          Invert all filter results
-    --config FILE                      Load filters from YAML configuration
+    --config FILE[:SECTION]            Load filters from YAML configuration
     --dry-run                          Show filtering stats without output
 
 CONFIGURATION FILE FORMAT (YAML):
