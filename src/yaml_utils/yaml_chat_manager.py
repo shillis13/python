@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional, Union
 # from yaml_helpers import load_yaml, save_yaml
 
 # For self-containment, we'll include the helper functions here.
+# Load a YAML file and handle errors.
 def load_yaml(filepath: Union[str, Path]) -> Optional[Dict[str, Any]]:
     """Loads a YAML file and handles errors."""
     try:
@@ -29,6 +30,7 @@ def load_yaml(filepath: Union[str, Path]) -> Optional[Dict[str, Any]]:
         print(f"Error parsing YAML file: {e}")
         return None
 
+# Save data to a YAML file.
 def save_yaml(data: Dict[str, Any], filepath: Union[str, Path]) -> None:
     """Saves data to a YAML file."""
     try:
@@ -38,6 +40,7 @@ def save_yaml(data: Dict[str, Any], filepath: Union[str, Path]) -> None:
         print(f"Error writing to file '{filepath}': {e}")
 
 
+# Manage the creation, modification, and persistence of chat history files.
 class ChatHistoryManager:
     """
     Manages the creation, modification, and persistence of a chat history.

@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional, Union
 
 # Assume yaml_helpers.py is in the same directory or accessible in the path
 # For self-containment, we'll include the necessary helper functions.
+# Load a YAML file and handle errors.
 def load_yaml(filepath: Union[str, Path]) -> Optional[Dict[str, Any]]:
     """Loads a YAML file and handles errors."""
     try:
@@ -25,6 +26,7 @@ def load_yaml(filepath: Union[str, Path]) -> Optional[Dict[str, Any]]:
         print(f"Error parsing YAML file: {e}")
         return None
 
+# Save data to a YAML file.
 def save_yaml(data: Dict[str, Any], filepath: Union[str, Path]) -> None:
     """Saves data to a YAML file."""
     try:
@@ -34,6 +36,7 @@ def save_yaml(data: Dict[str, Any], filepath: Union[str, Path]) -> None:
         print(f"Error writing to file '{filepath}': {e}")
 
 
+# Manage the lifecycle of the master chat index.
 class ChatIndexManager:
     """Manages the lifecycle of the master chat index."""
 
