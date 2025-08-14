@@ -1,5 +1,6 @@
 import sys
 
+# Calculate the probability of a sequence based on the given inputs.
 def p_calc(n, p, memo=None):
     if memo is None:
         memo = {}
@@ -17,6 +18,7 @@ def p_calc(n, p, memo=None):
         return total_probability
 # ------------------------------------------------------------------------------
 
+# Read input from stdin and output computed probabilities.
 def main():
     input_data = sys.stdin.read().strip().split('\n')
     c = int(input_data[0])
@@ -31,6 +33,7 @@ def main():
         print(result)
 # ------------------------------------------------------------------------------
 
+# Run basic test cases for the probability calculator.
 def test():
     # List of test cases in the format (n, p, expected_result)
     test_cases = [

@@ -24,6 +24,7 @@ from file_utils import lib_fileinput
 
 ## Removed custom get_files_from_paths; will use lib_fileinput
 
+# Configure the parser for the 'create' command.
 def setup_create_parser(subparsers):
     """Sets up the 'create' command parser."""
     create_parser = subparsers.add_parser('create', help='Create a new archive.')
@@ -36,6 +37,7 @@ def setup_create_parser(subparsers):
     create_parser.set_defaults(func=handle_create)
 
 
+# Execute the logic for the 'create' command.
 def handle_create(args):
     """Handles the 'create' command."""
     lib_logging.log_info(f"Starting 'create' operation for archive: {args.archive_name}")
@@ -79,6 +81,7 @@ def handle_create(args):
     except Exception as e:
         lib_logging.log_error(f"Failed to create archive: {e}", exc_info=True)
 
+# Configure the parser for the 'extract' command.
 def setup_extract_parser(subparsers):
     """Sets up the 'extract' command parser."""
     extract_parser = subparsers.add_parser('extract', help='Extract an archive.')
@@ -88,6 +91,7 @@ def setup_extract_parser(subparsers):
     extract_parser.set_defaults(func=handle_extract)
 
 
+# Execute the logic for the 'extract' command.
 def handle_extract(args):
     """Handles the 'extract' command."""
     lib_logging.log_info(f"Starting 'extract' operation for archive: {args.archive_name}")
@@ -107,6 +111,7 @@ def handle_extract(args):
     except Exception as e:
         lib_logging.log_error(f"Failed to extract archive: {e}", exc_info=True)
 
+# Configure the parser for the 'list' command.
 def setup_list_parser(subparsers):
     """Sets up the 'list' command parser."""
     list_parser = subparsers.add_parser('list', help='List contents of an archive.')
@@ -114,6 +119,7 @@ def setup_list_parser(subparsers):
     list_parser.set_defaults(func=handle_list)
 
 
+# Execute the logic for the 'list' command.
 def handle_list(args):
     """Handles the 'list' command."""
     lib_logging.log_info(f"Listing contents of archive: {args.archive_name}")
@@ -127,6 +133,7 @@ def handle_list(args):
         lib_logging.log_error(f"Failed to list archive contents: {e}", exc_info=True)
 
 
+# Parse command-line arguments and dispatch to handlers.
 def main():
     """Main function to parse arguments and call the appropriate handler."""
     parser = argparse.ArgumentParser(
