@@ -1,148 +1,233 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
+from __future__ import annotations
+import json, yaml, math, re, argparse, uuid
+from pathlib import Path
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Tuple
 
-"""
-Universal Chat History Converter (Version 4 - Refactored)
+def to_iso_z(ts: Optional[float]) -> Optional[str]:
+    if ts is None:
+        return None
+    try:
+        return datetime.fromtimestamp(float(ts), tz=timezone.utc).isoformat().replace("+00:00","Z")
+    except Exception:
+        return None
 
-Command-line interface for converting chat history files between various
-formats (JSON, YAML, Markdown, HTML), ensuring full metadata preservation.
-This script uses the core functions from `lib_chat_converter`.
+def compact_utc_id(ts_iso: Optional[str], prefix: str) -> str:
+    if ts_iso:
+        dt = datetime.fromisoformat(ts_iso.replace("Z","+00:00"))
+        return f"{prefix}_{dt.strftime('%Y%m%dT%H%M%SZ')}"
+    return f"{prefix}_{uuid.uuid4().hex[:12]}"
 
-Dependencies:
-    - PyYAML: pip install PyYAML
-    - markdown2: pip install markdown2
+def estimate_tokens(text: str) -> int:
+    if not text:
+        return 0
+    return max(0, math.ceil(len(text) / 4))
 
-Usage:
-    python chat_history_converter.py <input_file> [options]
-"""
+def flatten_content(content: dict) -> str:
+    if not isinstance(content, dict):
+        return ""
+    ctype = content.get("content_type")
+    if ctype == "text":
+        parts = content.get("parts") or []
+        return "\n".join([str(p) for p in parts if p is not None])
+    if ctype == "multimodal_text":
+        out = []
+        for p in content.get("parts") or []:
+            if isinstance(p, str):
+                out.append(p)
+            elif isinstance(p, dict) and "text" in p:
+                out.append(str(p["text"]))
+        return "\n".join(out)
+    return str(content) if content else ""
 
-import argparse
-import os
-import sys
+def ordered_messages_from_mapping(mapping: dict) -> List[Tuple[str, dict, dict]]:
+    root_ids = [k for k,v in mapping.items() if v.get("parent") is None]
+    if not root_ids:
+        root_ids = [list(mapping.keys())[0]]
+    root = root_ids[0]
+    order = []
+    m = mapping
+    curr = root
+    while True:
+        children = m[curr].get("children") or []
+        if not children:
+            break
+        def child_key(cid):
+            msg = m[cid].get("message") or {}
+            ct = msg.get("create_time")
+            return (0, ct) if ct is not None else (1, float("inf"))
+        children_sorted = sorted(children, key=child_key)
+        nxt = children_sorted[0]
+        order.append(nxt)
+        curr = nxt
+    result = []
+    for nid in order:
+        node = m[nid]
+        msg = node.get("message")
+        if msg:
+            result.append((nid, node, msg))
+    return result
 
-# Import the core logic from the library file
-import lib_chat_converter as converter
+def convert_export_to_history_v13(export: dict) -> Dict[str, Any]:
+    mapping = export.get("mapping") or {}
+    msgs = ordered_messages_from_mapping(mapping)
+    ts_list = [msg.get("create_time") for _,_,msg in msgs if msg.get("create_time") is not None]
+    start_iso = to_iso_z(min(ts_list)) if ts_list else None
+    end_iso = to_iso_z(max(ts_list)) if ts_list else None
 
-# --- Default CSS for HTML Output ---
-# This remains in the CLI script as it's a presentation detail
-DEFAULT_CSS = """
-/* General Body and Font Styling */
-body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    line-height: 1.6;
-    background-color: #f7f7f7;
-    color: #333;
-    margin: 0;
-    padding: 0;
-}
-/* ... (rest of CSS is unchanged) ... */
-.chat-container { max-width: 800px; margin: 20px auto; padding: 20px; background-color: #ffffff; border-radius: 12px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08); }
-h1 { text-align: center; color: #1a1a1a; font-size: 2em; margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid #eaeaea; }
-.metadata-section { background-color: #f9f9f9; border: 1px solid #e0e0e0; border-radius: 8px; margin-bottom: 25px; font-family: "Courier New", monospace; font-size: 0.85em; }
-.metadata-toggle { cursor: pointer; padding: 10px 15px; font-weight: bold; user-select: none; display: block; color: #333; }
-.metadata-toggle:hover { background-color: #f0f0f0; }
-.metadata-content { padding: 0 15px 15px 15px; border-top: 1px solid #e0e0e0; white-space: pre-wrap; max-height: 300px; overflow-y: auto; }
-.message { display: flex; margin-bottom: 20px; padding: 15px; border-radius: 10px; animation: fadeIn 0.5s ease-in-out; }
-@keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-.user { background-color: #e9f5ff; border-left: 4px solid #007bff; }
-.assistant { background-color: #f0f0f0; border-left: 4px solid #6c757d; }
-.avatar { font-weight: bold; margin-right: 15px; flex-shrink: 0; padding: 8px 12px; border-radius: 8px; color: #fff; height: fit-content; }
-.user .avatar { background-color: #007bff; }
-.assistant .avatar { background-color: #5a6268; }
-.content { flex-grow: 1; word-wrap: break-word; overflow-wrap: break-word; }
-.content p:first-child { margin-top: 0; }
-.content p:last-child { margin-bottom: 0; }
-.content pre { background-color: #2b2b2b; color: #f8f8f2; padding: 15px; border-radius: 8px; overflow-x: auto; font-family: "Fira Code", "Courier New", monospace; font-size: 0.9em; white-space: pre-wrap; }
-.content code { font-family: "Fira Code", "Courier New", monospace; }
-.content pre code { background-color: transparent; padding: 0; border-radius: 0; color: inherit; }
-.content p code, .content li code { background-color: #e0e0e0; padding: 2px 5px; border-radius: 4px; font-size: 0.85em; }
-.content blockquote { border-left: 3px solid #ccc; padding-left: 15px; margin-left: 0; color: #555; font-style: italic; }
-.content table { width: 100%; border-collapse: collapse; margin: 15px 0; }
-.content th, .content td { border: 1px solid #ddd; padding: 10px; text-align: left; }
-.content th { background-color: #f2f2f2; font-weight: bold; }
-@media (max-width: 600px) { .chat-container { margin: 10px; padding: 15px; } .message { flex-direction: column; } .avatar { margin-bottom: 10px; width: fit-content; } }
-"""
+    conversation_id = compact_utc_id(start_iso, "conv")
+    session_id = compact_utc_id(start_iso, "sess")
+    platform_conv_id = export.get("conversation_id")
+    model_slug = export.get("default_model_slug")
+
+    history_messages = []
+    for i, (nid, node, msg) in enumerate(msgs, start=1):
+        role = (msg.get("author") or {}).get("role") or "unknown"
+        text = flatten_content(msg.get("content"))
+        ts_iso = to_iso_z(msg.get("create_time"))
+        message_id = f"msg_{i:04d}"
+        meta = {
+            "estimated_tokens": max(0, (len(text) + 3)//4) if text else 0,
+            "char_count": len(text),
+            "word_count": len(re.findall(r"\S+", text)) if text else 0,
+            "source_node_id": nid,
+            "source_message_id": msg.get("id"),
+            "model": model_slug if role == "assistant" else None,
+        }
+        meta = {k:v for k,v in meta.items() if v is not None}
+        history_messages.append({
+            "message_id": message_id,
+            "message_number": i,
+            "conversation_id": conversation_id,
+            "session_id": session_id,
+            "timestamp": ts_iso or start_iso,
+            "role": role,
+            "content": text,
+            "attachments": [],
+            "citations": [],
+            "tools_used": [],
+            "metadata": meta,
+        })
+
+    total_messages = len(history_messages)
+    total_exchanges = sum(1 for m in history_messages if m["role"] in ("user","assistant"))
+
+    participants = sorted({m["role"] for m in history_messages})
+    participants_rec = [{"participant_id": f"p_{i+1}", "role": r, "name": None} for i, r in enumerate(participants)]
+
+    history = {
+        "schema_version": "1.3",
+        "metadata": {
+            "conversation_id": conversation_id,
+            "created": start_iso or datetime.now(timezone.utc).isoformat().replace("+00:00","Z"),
+            "last_updated": end_iso or (start_iso or datetime.now(timezone.utc).isoformat().replace("+00:00","Z")),
+            "version": 1,
+            "total_messages": total_messages,
+            "total_exchanges": total_exchanges,
+            "tags": [],
+            "format_version": "1.0",
+            "processing_stage": "schema_mapped",
+            "source": {
+                "platform": "chatgpt_web",
+                "platform_conversation_id": platform_conv_id,
+                "exported_with": "google_extension",
+            },
+            "title": export.get("title") or "Untitled conversation",
+            "participants": participants_rec,
+        },
+        "chat_sessions": [{
+            "session_id": session_id,
+            "started": start_iso or history_messages[0]["timestamp"],
+            "ended": end_iso or history_messages[-1]["timestamp"],
+            "platform": "chatgpt_web",
+            "model": model_slug,
+            "messages": history_messages
+        }]
+    }
+    return history
+
+def make_index_entry_strict13(history: Dict[str, Any], file_path: str) -> Dict[str, Any]:
+    meta = history["metadata"]
+    start = meta.get("created")
+    end = meta.get("last_updated") or start
+    title = meta.get("title") or "Untitled conversation"
+    participants = [p["role"] for p in (meta.get("participants") or [])]
+    total_messages = meta.get("total_messages", 0)
+    tags = meta.get("tags") or []
+
+    entry = {
+        "schema_version": "1.3",
+        "metadata": {
+            "format_version": "1.0",
+            "version": 1,
+            "processing_stage": "schema_mapped",
+            "last_updated": datetime.now(timezone.utc).isoformat().replace("+00:00","Z"),
+            "total_conversations": 1
+        },
+        "conversations": [{
+            "conversation_id": meta["conversation_id"],
+            "title": title,
+            "created": start,
+            "last_updated": end,
+            "participants": participants,
+            "message_count": total_messages,
+            "tags": tags,
+            "files": [file_path]
+        }]
+    }
+    return entry
+
+def validate_against_schema(obj: dict, schema_path: str) -> List[str]:
+    problems: List[str] = []
+    try:
+        import jsonschema  # type: ignore
+        schema = yaml.safe_load(Path(schema_path).read_text(encoding="utf-8"))
+        jsonschema.validate(instance=obj, schema=schema)
+        return problems
+    except Exception:
+        schema = yaml.safe_load(Path(schema_path).read_text(encoding="utf-8"))
+        def check_required(node_schema: dict, node_obj: Any, path: str):
+            req = node_schema.get("required", [])
+            for k in req:
+                if not (isinstance(node_obj, dict) and k in node_obj):
+                    problems.append(f"Missing required '{path}{k}'")
+            props = node_schema.get("properties", {})
+            if isinstance(node_obj, dict):
+                for key, sub in props.items():
+                    if key in node_obj and isinstance(node_obj[key], dict):
+                        check_required(sub, node_obj[key], path + f"{key}.")
+        check_required(schema, obj, path="")
+        return problems
 
 def main():
-    """Main function to parse arguments and drive the conversion."""
-    parser = argparse.ArgumentParser(
-        description="Universal Chat History Converter. Converts between JSON, YAML, MD, and HTML formats while preserving metadata.",
-        formatter_class=argparse.RawTextHelpFormatter
-    )
-    parser.add_argument("input_file", help="Path to the input chat history file.")
-    parser.add_argument("-o", "--output", help="Path for the output file. If not provided, defaults to input filename with new extension.")
-    parser.add_argument("-f", "--format", choices=['json', 'yml', 'md', 'html'], help="Output format. If not provided, it's inferred from the output file extension.")
-    parser.add_argument("-c", "--css", help="Path to a custom CSS file for HTML output.")
-    parser.add_argument("--force", action="store_true", help="Force overwrite of output file if it exists.")
+    ap = argparse.ArgumentParser()
+    ap.add_argument("input_json", help="Google extension export JSON")
+    ap.add_argument("--outdir", default=".", help="Output directory")
+    ap.add_argument("--history-schema", default="/mnt/data/chat_history_schema_v1.3.yml")
+    ap.add_argument("--index-schema", default="/mnt/data/chat_index_schema_v1.3.yml")
+    args = ap.parse_args()
 
-    args = parser.parse_args()
+    export = json.loads(Path(args.input_json).read_text(encoding="utf-8"))
+    history = convert_export_to_history_v13(export)
+    conv_id = history["metadata"]["conversation_id"]
+    outdir = Path(args.outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
 
-    if not os.path.exists(args.input_file):
-        print(f"Error: Input file not found at '{args.input_file}'", file=sys.stderr)
-        sys.exit(1)
+    history_path = outdir / f"{conv_id}_history_v1.3.yaml"
+    history_path.write_text(yaml.safe_dump(history, sort_keys=False, allow_unicode=True), encoding="utf-8")
 
-    input_ext = os.path.splitext(args.input_file)[1].lower().replace('.', '')
-    if input_ext == 'yaml': input_ext = 'yml'
+    index = make_index_entry_strict13(history, file_path=str(history_path.name))
+    index_path = outdir / f"{conv_id}_index_entry_v1.3.yaml"
+    index_path.write_text(yaml.safe_dump(index, sort_keys=False, allow_unicode=True), encoding="utf-8")
 
-    output_format = args.format
-    output_file = args.output
-    if output_file and not output_format:
-        output_format = os.path.splitext(output_file)[1].lower().replace('.', '')
-    elif not output_format:
-        output_format = 'html'
+    hist_problems = validate_against_schema(history, args.history_schema)
+    idx_problems = validate_against_schema(index, args.index_schema)
 
-    if not output_file:
-        base_name = os.path.splitext(args.input_file)[0]
-        output_file = f"{base_name}.{output_format}"
-
-    if output_format == 'yaml': output_format = 'yml'
-
-    if os.path.exists(output_file) and not args.force:
-        print(f"Error: Output file '{output_file}' already exists. Use --force to overwrite.", file=sys.stderr)
-        sys.exit(1)
-
-    parsers = {'json': converter.parse_json_chat, 'yml': converter.parse_yaml_chat, 'md': converter.parse_markdown_chat}
-    parser_func = parsers.get(input_ext)
-    if not parser_func:
-        print(f"Error: Unsupported input file type '{input_ext}'.", file=sys.stderr)
-        sys.exit(1)
-
-    print(f"Reading from '{args.input_file}' ({input_ext})...")
-    metadata, normalized_messages = parser_func(args.input_file)
-    if "error" in metadata:
-        print(f"Error: {metadata['error']}", file=sys.stderr)
-        sys.exit(1)
-
-    css_content = DEFAULT_CSS
-    if args.css:
-        try:
-            with open(args.css, 'r', encoding='utf-8') as f: css_content = f.read()
-        except Exception as e:
-            print(f"Warning: Could not read CSS file. Using default. Error: {e}", file=sys.stderr)
-
-    writers = {
-        'html': lambda m, c: converter.to_html(m, c, css_content),
-        'json': converter.to_json,
-        'yml': converter.to_yaml,
-        'md': converter.to_markdown
-    }
-    writer_func = writers.get(output_format)
-    if not writer_func:
-        print(f"Error: Unsupported output format '{output_format}'.", file=sys.stderr)
-        sys.exit(1)
-
-    print(f"Converting to '{output_file}' ({output_format})...")
-    output_content = writer_func(metadata, normalized_messages)
-
-    try:
-        with open(output_file, 'w', encoding='utf-8') as f:
-            f.write(output_content)
-        print(f"Successfully converted and saved to '{output_file}'")
-    except Exception as e:
-        print(f"Error: Could not write to output file '{output_file}'. {e}", file=sys.stderr)
-        sys.exit(1)
+    print("Wrote:", history_path)
+    print("Wrote:", index_path)
+    print("History validation:", "OK" if not hist_problems else f"Issues: {hist_problems}")
+    print("Index validation:", "OK" if not idx_problems else f"Issues: {idx_problems}")
 
 if __name__ == "__main__":
     main()
-
-

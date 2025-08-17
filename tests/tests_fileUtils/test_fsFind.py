@@ -17,7 +17,7 @@ dev_utils.log_block = lib_logging.log_block
 dev_utils.log_function = lib_logging.log_function
 dev_utils.log_out = lib_logging.log_out
 
-import file_utils.findFiles as findFiles
+import file_utils.fsFind  as findFiles
 
 
 def preload_extension_info():
