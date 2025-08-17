@@ -16,6 +16,7 @@ import re
 from datetime import datetime
 
 # Assuming yaml_helpers.py is accessible
+# Load a YAML file and handle any errors.
 def load_yaml(filepath):
     """Loads a YAML file and handles errors."""
     try:
@@ -25,6 +26,7 @@ def load_yaml(filepath):
         print(f"Error loading YAML file: {e}")
         return None
 
+# Calculate the duration between two ISO 8601 timestamps.
 def get_conversation_duration(start_str, end_str):
     """Calculates the duration between two ISO 8601 timestamps."""
     try:
@@ -35,6 +37,7 @@ def get_conversation_duration(start_str, end_str):
     except (ValueError, TypeError):
         return "N/A"
 
+# Analyze a chat history file and generate a structured summary brief.
 def generate_summary_brief(history_filepath: Path) -> str:
     """
     Analyzes a chat history file and generates a structured summary brief.

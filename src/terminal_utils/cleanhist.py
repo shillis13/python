@@ -36,6 +36,7 @@ from pathlib import Path
 from typing import Optional
 
 
+# Apply ANSI color codes to output lines.
 def colorize(line, color=""):
     colors = {
         "red": "\033[91m",
@@ -49,14 +50,8 @@ def colorize(line, color=""):
 TRIVIAL_COMMANDS = {"ls", "pwd", "clear", "exit", "cd"}
 
 
+# Parse a timestamp, ISO date, or history index into a numeric value.
 def parse_timestamp_or_index(value: str) -> Optional[int]:
-    """
-    Parses a value as either:
-    - An epoch timestamp (int)
-    - A date string: YYYY-MM-DD or YYYY-MM-DD HH:MM
-    - A history index (e.g., 5171) — treated as -5171 internally
-    Returns: int (epoch) or special marker -N for history line index N
-    """
     value = value.strip()
     try:
         return int(value) * -1  # History index
@@ -71,6 +66,7 @@ def parse_timestamp_or_index(value: str) -> Optional[int]:
         return int(dt.timestamp())
 
 
+# Filter and optionally modify a shell history file based on user criteria.
 def cleanHist(
     path: str,
     regex: Optional[str] = None,
