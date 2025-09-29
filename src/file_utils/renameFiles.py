@@ -31,6 +31,53 @@ from dev_utils.lib_argparse_registry import (
 )
 
 
+def _print_results_table(rows: list[tuple[str, str, str]]) -> None:
+    """Print renaming results using a table that mirrors f2's output."""
+
+    if not rows:
+        return
+
+    headers = ("INPUT", "OUTPUT", "STATUS")
+    widths = [len(header) for header in headers]
+
+    for row in rows:
+        for idx, value in enumerate(row):
+            widths[idx] = max(widths[idx], len(value))
+
+    border = "+" + "+".join("-" * (width + 2) for width in widths) + "+"
+
+    header_cells = [
+        f" {colorize_string(headers[idx].ljust(widths[idx]), fore_color='yellow', style='bright')} "
+        for idx in range(len(headers))
+    ]
+    header_row = "|" + "|".join(header_cells) + "|"
+
+    print(border)
+    print(header_row)
+    print(border)
+
+    for original, new, status in rows:
+        cells: list[str] = []
+        for idx, value in enumerate((original, new, status)):
+            padded = f"{value:<{widths[idx]}}"
+            if idx == 2:  # status column
+                status_lower = status.lower()
+                color = None
+                if status_lower == "ok":
+                    color = "green"
+                elif "dry" in status_lower:
+                    color = "yellow"
+                elif status_lower == "skipped":
+                    color = "cyan"
+                else:
+                    color = "red"
+                padded = colorize_string(padded, fore_color=color)
+            cells.append(f" {padded} ")
+
+        print("|" + "|".join(cells) + "|")
+
+    print(border)
+
 
 def _apply_format(fmt: str, name: str, ext: str, index: int | None) -> str:
     """Return ``fmt`` with placeholders substituted."""
@@ -94,17 +141,26 @@ def _build_new_name(path: Path, args, index: int | None) -> str:
 
 
 def _rename_internal(args) -> None:
-    files = sorted(p for p in Path.cwd().iterdir() if p.is_file())
+    files = sorted(
+        p
+        for p in Path.cwd().iterdir()
+        if p.is_file() and (args.hidden or not p.name.startswith("."))
+    )
     sequential = bool(args.format and re.search(r"\{(%[^{}]+d)\}", args.format))
     index = 1
+    results: list[tuple[str, str, str]] = []
     for path in files:
         new_name = _build_new_name(path, args, index if sequential else None)
         if new_name != path.name:
             if not args.dry_run:
                 path.rename(path.with_name(new_name))
-            print(f"{path.name} -> {new_name}")
+            status = "ok" if not args.dry_run else "DRY RUN"
+            results.append((path.name, new_name, status))
         if sequential:
             index += 1
+
+    if results:
+        _print_results_table(results)
 
 """
 Executes renaming based on provided arguments.
@@ -151,6 +207,9 @@ def build_f2_command(args):
         if not args.dry_run:
             command.append("--exec")
             log_debug("Added --exec argument to commit the undo operation")
+        if args.hidden:
+            command.append("--hidden")
+            log_debug("Include hidden files while undoing operations")
     else:
         if args.find:
             command.extend(["--find", args.find])
@@ -226,6 +285,10 @@ def build_f2_command(args):
             command.append("--recursive")
             log_debug("Search subdirs recursively")
 
+        if args.hidden:
+            command.append("--hidden")
+            log_debug("Include hidden files in renaming operation")
+
     log_info(f"Constructed command: {' '.join(command)}")
     return command
 
@@ -249,6 +312,7 @@ def print_usage():
       --no-clean                   Remove special characters and trim whitespace
       --undo                       Undo the last renaming operation
       --recursive | -R             Search all subfolders recursively
+      --hidden | -H                Include hidden files (ignored by default)
       --dry-run                    Simulate the rename actions without making any changes
       --exec | -x                  Execute the renaming operation and commit the changes
       --usage                      Show this usage information
@@ -319,6 +383,7 @@ def add_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument('--no-clean', '-nc', action='store_true', help='Remove special characters and trim leading/trailing whitespace.')
     parser.add_argument('--undo', action='store_true', help='Undo the last renaming operation.')
     parser.add_argument('--recursive', '-R', action='store_true', help='Search subfolders recursively.')
+    parser.add_argument('--hidden', '-H', action='store_true', help='Include hidden files (ignored by default).')
     parser.add_argument('--dry-run', dest='dry_run', action='store_true', default=True,
                         help='Simulate the rename actions without making any changes (default).')
     parser.add_argument('--exec', '-x', dest='dry_run', action='store_false',
