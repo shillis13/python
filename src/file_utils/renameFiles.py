@@ -254,6 +254,7 @@ def print_usage():
       --usage                      Show this usage information
       --help-f2                    Show usage and help of f2
       --help-verbose               Show more expanded and more detailed help with examples
+      --help-examples              Show help with examples only
       --help-exfil                 Show help specifically about using exfil data and options
     """
     print_colored(usage_text, fore_color='green', style='bright')
@@ -324,6 +325,7 @@ def add_args(parser: argparse.ArgumentParser) -> None:
                         help='Execute the renaming operation and commit the changes to the filesystem.')
     parser.add_argument('--help-f2', '-hf2', action='store_true', help='Show detailed help with examples.')
     parser.add_argument('--help-verbose', '-hv', action='store_true', help='Show detailed help with examples.')
+    parser.add_argument('--help-examples', '-hx', action='store_true', help='Show help with examples.')
     parser.add_argument('--help-exfil', '-he', action='store_true', help='Show detailed help with examples.')
     parser.add_argument('--usage', '-u', action='store_true', help='Show usage info.')
     parser.add_argument('--fileByFirstChar', '-fbfc', action='store_true',
@@ -349,6 +351,10 @@ def main():
 
     if args.help_verbose:
         print_usage()
+        print_help()
+        sys.exit(0)
+
+    if args.help_examples:
         print_help()
         sys.exit(0)
 
