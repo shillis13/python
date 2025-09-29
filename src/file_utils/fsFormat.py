@@ -433,7 +433,8 @@ class FileSystemFormatter:
             for col in self.columns:
                 value = item_dict.get(col, '')
                 if isinstance(value, str) and (',' in value or '"' in value):
-                    value = f'"{value.replace(""", """")}"'
+                    # value = f'"{value.replace(""", """")}"'
+                    value = '"' + value.replace('"', '""') + '"'
                 row.append(str(value))
             output.append(','.join(row))
         

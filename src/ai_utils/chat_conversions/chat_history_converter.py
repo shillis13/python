@@ -5,6 +5,9 @@ from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
+import os
+DEFAULT_DATA_DIR = Path(os.environ.get("CHAT_HISTORY_DATA_DIR", Path(__file__).parent)).parent / 'data'
+
 def to_iso_z(ts: Optional[float]) -> Optional[str]:
     if ts is None:
         return None
@@ -204,8 +207,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("input_json", help="Google extension export JSON")
     ap.add_argument("--outdir", default=".", help="Output directory")
-    ap.add_argument("--history-schema", default="/mnt/data/chat_history_schema_v1.3.yml")
-    ap.add_argument("--index-schema", default="/mnt/data/chat_index_schema_v1.3.yml")
+    ap.add_argument("--history-schema", default=str(DEFAULT_DATA_DIR / "chat_history_schema_v1.3.yml"))
+    ap.add_argument("--index-schema",  default=str(DEFAULT_DATA_DIR / "chat_index_schema_v1.3.yml"))
     args = ap.parse_args()
 
     export = json.loads(Path(args.input_json).read_text(encoding="utf-8"))

@@ -258,9 +258,10 @@ def list_available_types():
         for type_name in sorted(types.keys()):
             type_info = types[type_name]
             extensions = type_info.get('extensions', [])
-            ext_preview = ', '.join(extensions[:5])
-            if len(extensions) > 5:
-                ext_preview += f", ... ({len(extensions)} total)"
+            ext_preview = ', '.join(extensions)
+            #ext_preview = ', '.join(extensions[:5])
+            # if len(extensions) > 5:
+            #     ext_preview += f", ... ({len(extensions)} total)"
             print(f"  {type_name:15} {ext_preview}")
     else:
         print("No file type categories available.")
