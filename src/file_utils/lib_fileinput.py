@@ -22,6 +22,24 @@ Returns:
 """
 # In lib_fileinput.py
 
+def _normalize_input_path(raw_path: str) -> str:
+    """Normalize incoming path strings from stdin or files."""
+
+    cleaned = raw_path.strip().strip('"').strip("'")
+    if not cleaned:
+        return cleaned
+
+    path = Path(cleaned).expanduser()
+    try:
+        # ``strict=False`` keeps non-existent paths while resolving ``..`` and ``.``
+        path = path.resolve(strict=False)
+    except OSError:
+        # Fall back to the expanded path if resolution fails (e.g., permission errors)
+        pass
+
+    return str(path)
+
+
 def get_file_paths_from_input(args) -> Tuple[List[str], bool]:
     file_paths = []
     dry_run_detected = getattr(args, 'dry_run', False)
@@ -40,12 +58,12 @@ def get_file_paths_from_input(args) -> Tuple[List[str], bool]:
                 except:
                     pass
                 # Extract the filename after '->' for dry-run output
-                modified_filename = line.split('->')[-1].strip().strip("'\"")
-                file_paths.append(modified_filename)
+                modified_filename = line.split('->')[-1]
+                file_paths.append(_normalize_input_path(modified_filename))
                 dry_run_detected = True
             else:
                 # Handle regular piped input (non-dry-run output)
-                file_paths.append(line)
+                file_paths.append(_normalize_input_path(line))
 
     elif hasattr(args, 'directories') and args.directories:
         # MODIFIED: Was checking for 'args.files', which is a boolean flag.
@@ -86,7 +104,7 @@ Returns:
     List[str]: List of expanded file paths
 """
 def expand_path(path: Union[str, Path]) -> List[str]:
-    path_obj = Path(path)
+    path_obj = Path(path).expanduser()
     expanded_paths = []
     
     if path_obj.is_dir():
