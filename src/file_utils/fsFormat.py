@@ -433,7 +433,9 @@ class FileSystemFormatter:
             for col in self.columns:
                 value = item_dict.get(col, '')
                 if isinstance(value, str) and (',' in value or '"' in value):
-                    value = f'"{value.replace(""", """")}"'
+                    # Escape embedded quotes according to CSV rules and wrap in quotes
+                    escaped = value.replace('"', '""')
+                    value = f'"{escaped}"'
                 row.append(str(value))
             output.append(','.join(row))
         
