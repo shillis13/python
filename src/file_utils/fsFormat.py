@@ -221,9 +221,15 @@ class FileSystemFormatter:
             path = Path(path_str)
             if not path.exists():
                 continue
-            
+
             if path.is_file():
-                if self.show_files and (not fs_filter or fs_filter.should_include(path)):
+                # When fsFormat is used in pipelines the incoming paths are
+                # frequently individual files.  Previously these were ignored unless
+                # ``--files`` was provided, yielding empty tables.  Non-tree formats
+                # should surface any files that reach them through stdin or explicit
+                # paths, so honour filters but ignore the tree-centric ``show_files``
+                # toggle.
+                if not fs_filter or fs_filter.should_include(path):
                     all_items.append(FileInfo(path))
             elif path.is_dir():
                 self._collect_from_directory(path, all_items, fs_filter)

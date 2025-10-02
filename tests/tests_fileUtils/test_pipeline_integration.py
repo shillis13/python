@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 from __future__ import annotations
 
 import json
@@ -127,3 +128,28 @@ def test_rename_files_format_exec(tmp_path):
 
     renamed = sorted(p.name for p in rename_dir.glob("*.txt"))
     assert renamed == ["renamed_01.txt", "renamed_02.txt"]
+
+
+def test_fsformat_table_includes_piped_files(tmp_path):
+    file_path = tmp_path / "movie.mp4"
+    file_path.write_bytes(b"0" * 10)
+
+    env = _build_env()
+
+    format_proc = _run_module(
+        "file_utils.fsFormat",
+        "--table",
+        "--columns",
+        "name,size,path",
+        input_text=f"{file_path}\n",
+        env=env,
+    )
+
+    assert "movie.mp4" in format_proc.stdout
+    assert "No items to display." not in format_proc.stdout
+
+
+if __name__ == "__main__":
+    import pytest
+
+    raise SystemExit(pytest.main([__file__]))
