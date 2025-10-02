@@ -313,12 +313,47 @@ class TestFileSystemFilter:
     def test_matches_patterns_failure(self):
         """Test pattern matching failure."""
         fs_filter = FileSystemFilter()
-        
+
         mock_path = Mock()
         mock_path.name = "test.js"
-        
+
         result = fs_filter.matches_patterns(mock_path, ['*.py'])
         assert result is False
+
+    def test_dir_ignore_pattern_with_nested_glob(self, tmp_path):
+        """Directory ignore patterns understand nested glob expressions."""
+
+        fs_filter = FileSystemFilter()
+        ignored_dir = tmp_path / "Downloads" / "Temp"
+        ignored_dir.mkdir(parents=True)
+
+        fs_filter.add_dir_ignore_pattern('*/Temp/*')
+
+        should_descend = fs_filter.should_descend(ignored_dir, ignored_dir.parent)
+        assert should_descend is False
+
+    def test_file_ignore_pattern_with_nested_glob(self, tmp_path):
+        """File ignore patterns apply to files inside nested directories."""
+
+        fs_filter = FileSystemFilter()
+        target_file = tmp_path / "Downloads" / "Temp" / "note.txt"
+        target_file.parent.mkdir(parents=True)
+        target_file.write_text('data')
+
+        fs_filter.add_file_ignore_pattern('*/Temp/*')
+
+        should_include = fs_filter.should_include(target_file, tmp_path)
+        assert should_include is False
+
+    def test_pattern_normalization_expands_home(self, tmp_path, monkeypatch):
+        """Patterns are normalised with ``~`` expanded to the home directory."""
+
+        monkeypatch.setenv('HOME', str(tmp_path))
+        fs_filter = FileSystemFilter()
+        fs_filter.add_file_ignore_pattern('~/Downloads/*')
+
+        expected = f"{tmp_path.as_posix()}/Downloads/*"
+        assert fs_filter.file_ignore_patterns == [expected]
     
     def test_should_include_all_filters_pass(self):
         """Test should_include when all filters pass."""

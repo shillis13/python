@@ -328,7 +328,8 @@ def create_filter_from_args(args) -> Optional[FileSystemFilter]:
         args.file_pattern_filter, args.dir_pattern_filter,
         args.pattern_filter, args.pattern_ignore,
         args.file_ignore, args.dir_ignore,
-        args.ignore_filter, args.type_filter, args.extension_filter,
+        args.ignore_filter, args.filter_ignore,
+        args.type_filter, args.extension_filter,
         args.git_ignore_filter
     ]
     
@@ -380,7 +381,11 @@ def create_filter_from_args(args) -> Optional[FileSystemFilter]:
     if args.ignore_filter:
         fs_filter.add_file_ignore_pattern(args.ignore_filter)
         fs_filter.add_dir_ignore_pattern(args.ignore_filter)
-    
+
+    for pattern in getattr(args, 'filter_ignore', []):
+        fs_filter.add_file_ignore_pattern(pattern)
+        fs_filter.add_dir_ignore_pattern(pattern)
+
     for pattern in args.file_ignore:
         fs_filter.add_file_ignore_pattern(pattern)
     
@@ -453,6 +458,8 @@ def add_args(parser: argparse.ArgumentParser) -> None:
                        help='Directory patterns to ignore (can be repeated)')
     parser.add_argument('--ignore-filter', '-if', dest='ignore_filter',
                        help='Ignore pattern for both files and directories')
+    parser.add_argument('--filter-ignore', action='append', default=[],
+                       help='Alias for --ignore-filter (repeatable)')
     
     # Type and extension filters (enhanced)
     parser.add_argument('--type-filter', '-tf', dest='type_filter', action='append', default=[],
