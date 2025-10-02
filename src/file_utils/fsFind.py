@@ -54,7 +54,7 @@ class EnhancedFileFinder:
         if not self.extension_data:
             self.extension_data = get_extension_data()
     
-    def find_files(self, directories: List[str], recursive: bool = False,
+    def find_files(self, directories: List[str], recursive: bool = True,
                   file_pattern: Optional[str] = None, substrings: Optional[List[str]] = None,
                   regex: Optional[str] = None, extensions: Optional[List[str]] = None,
                   file_types: Optional[List[str]] = None, fs_filter: Optional[FileSystemFilter] = None,
@@ -148,6 +148,8 @@ class EnhancedFileFinder:
                 
                 # Recurse into directories
                 if recursive and item.is_dir() and (follow_symlinks or not item.is_symlink()):
+                    if fs_filter and not fs_filter.should_descend(item, directory):
+                        continue
                     yield from self._search_directory(
                         item, recursive, file_pattern, substrings, regex,
                         extensions, file_types, fs_filter, include_dirs, follow_symlinks
@@ -324,7 +326,8 @@ def create_filter_from_args(args) -> Optional[FileSystemFilter]:
         args.modified_after, args.modified_before,
         args.created_after, args.created_before,
         args.file_pattern_filter, args.dir_pattern_filter,
-        args.pattern_filter, args.file_ignore, args.dir_ignore,
+        args.pattern_filter, args.pattern_ignore,
+        args.file_ignore, args.dir_ignore,
         args.ignore_filter, args.type_filter, args.extension_filter,
         args.git_ignore_filter
     ]
@@ -363,7 +366,11 @@ def create_filter_from_args(args) -> Optional[FileSystemFilter]:
     if args.pattern_filter:
         fs_filter.add_file_pattern(args.pattern_filter)
         fs_filter.add_dir_pattern(args.pattern_filter)
-    
+
+    for pattern in args.pattern_ignore:
+        fs_filter.add_file_ignore_pattern(pattern)
+        fs_filter.add_dir_ignore_pattern(pattern)
+
     for pattern in args.file_pattern_filter:
         fs_filter.add_file_pattern(pattern)
     
@@ -398,8 +405,11 @@ def add_args(parser: argparse.ArgumentParser) -> None:
     # Basic search parameters
     parser.add_argument('directories', nargs='*', default=['.'],
                        help='Directories to search (default: current directory)')
-    parser.add_argument('-r', '--recursive', action='store_true',
+    parser.add_argument('-r', '--recursive', dest='recursive', action='store_true',
                        help='Search recursively in subdirectories')
+    parser.add_argument('--no-recursive', dest='recursive', action='store_false',
+                       help='Disable recursive search')
+    parser.set_defaults(recursive=True)
     parser.add_argument('--follow-symlinks', action='store_true',
                        help='Follow symbolic links during search')
     parser.add_argument('--include-dirs', action='store_true',
@@ -435,6 +445,8 @@ def add_args(parser: argparse.ArgumentParser) -> None:
                        help='Directory name patterns to include (can be repeated)')
     parser.add_argument('--pattern-filter', '-pf', dest='pattern_filter',
                        help='Pattern for both files and directories')
+    parser.add_argument('--pattern-ignore', '-pi', dest='pattern_ignore', action='append', default=[],
+                       help='Patterns to ignore for both files and directories (can be repeated)')
     parser.add_argument('--file-ignore', '-fi', action='append', default=[],
                        help='File patterns to ignore (can be repeated)')
     parser.add_argument('--dir-ignore', '-di', action='append', default=[],

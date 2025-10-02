@@ -318,7 +318,21 @@ class FileSystemFilter:
     def add_dir_ignore_pattern(self, pattern: str):
         """Add directory ignore pattern."""
         self.dir_ignore_patterns.append(pattern)
-    
+
+    def should_descend(self, path: Path, base_path: Path | None = None) -> bool:
+        """Return ``True`` if traversal should continue into ``path``."""
+
+        if not path.is_dir():
+            return True
+
+        if self.dir_ignore_patterns and self.matches_patterns(path, self.dir_ignore_patterns):
+            return False
+
+        if self.gitignore_filter and base_path and self.gitignore_filter.should_ignore(path, base_path):
+            return False
+
+        return True
+
     def add_type_filter(self, file_type: str):
         """Add file type filter."""
         self.load_extension_data()
