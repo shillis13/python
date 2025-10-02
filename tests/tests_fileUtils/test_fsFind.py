@@ -50,3 +50,9 @@ def test_verbose_help_output(capsys):
     findFiles.print_verbose_help(parser)
     out = capsys.readouterr().out
     assert 'Examples:' in out
+
+
+if __name__ == "__main__":
+    import pytest
+
+    raise SystemExit(pytest.main([__file__]))
