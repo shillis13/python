@@ -223,7 +223,12 @@ class FileSystemFormatter:
                 continue
             
             if path.is_file():
-                if self.show_files and (not fs_filter or fs_filter.should_include(path)):
+                # Always include explicit file inputs. The --files flag controls
+                # whether files discovered while walking directories are added,
+                # but when the user provides file paths directly (e.g. via
+                # stdin pipeline), they should be included regardless so table
+                # formats don't drop all rows.
+                if not fs_filter or fs_filter.should_include(path):
                     all_items.append(FileInfo(path))
             elif path.is_dir():
                 self._collect_from_directory(path, all_items, fs_filter)
