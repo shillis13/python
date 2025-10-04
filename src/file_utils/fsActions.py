@@ -30,6 +30,7 @@ from dev_utils.lib_dryrun import dry_run_decorator
 from dev_utils.lib_argparse_registry import register_arguments, parse_known_args
 from file_utils.lib_fileinput import get_file_paths_from_input
 from file_utils.fsFilters import FileSystemFilter, apply_config_to_filter
+from dev_utils.lib_outputColors import colorize_string
 
 setup_logging()
 
@@ -45,6 +46,28 @@ class FileSystemActions:
             'deleted': 0,
             'errors': 0,
             'skipped': 0
+        }
+        self.last_operation_details: Dict[str, Any] | None = None
+
+    def _set_last_operation(
+        self,
+        *,
+        action: str,
+        source: Path,
+        target: Optional[Path] = None,
+        details: Optional[str] = None,
+        success: bool,
+        message: Optional[str] = None,
+    ) -> None:
+        """Record details of the most recent filesystem action."""
+
+        self.last_operation_details = {
+            'action': action,
+            'source': str(source),
+            'target': str(target) if target is not None else '',
+            'details': details or '',
+            'status': success,
+            'message': message or '',
         }
     
     def create_target_path(self, source_path: Path, destination: Path, 
@@ -68,63 +91,110 @@ class FileSystemActions:
         try:
             # Ensure target directory exists
             target.parent.mkdir(parents=True, exist_ok=True)
-            
+            final_target = target
+            conflict_msg = ''
+
             # Handle existing target
             if target.exists():
                 if target.is_dir() and source.is_dir():
                     # Merge directories
                     self.merge_directories(source, target, dry_run)
+                    self.stats['moved'] += 1
+                    self._set_last_operation(
+                        action='MOVE',
+                        source=source,
+                        target=target,
+                        details='merge into existing directory',
+                        success=True,
+                        message='merged into existing directory',
+                    )
                     return True
                 else:
                     # File conflict - create unique name
                     counter = 1
                     base = target.stem
                     ext = target.suffix
+                    original_target = target
                     while target.exists():
                         target = target.parent / f"{base}_{counter}{ext}"
                         counter += 1
-            
+                    final_target = target
+                    conflict_msg = f"renamed from {original_target.name}"
+            else:
+                final_target = target
+
             if not dry_run:
-                shutil.move(str(source), str(target))
-            
-            log_info(f"Moved: {source} -> {target}")
+                shutil.move(str(source), str(final_target))
+
+            log_info(f"Moved: {source} -> {final_target}")
             self.stats['moved'] += 1
+            self._set_last_operation(
+                action='MOVE',
+                source=source,
+                target=final_target,
+                success=True,
+                message=conflict_msg if conflict_msg else '',
+            )
             return True
-            
+
         except Exception as e:
             log_info(f"Error moving {source}: {e}")
             self.stats['errors'] += 1
+            self._set_last_operation(
+                action='MOVE',
+                source=source,
+                target=target,
+                success=False,
+                message=str(e),
+            )
             return False
-    
+
     @dry_run_decorator()
     def copy_file(self, source: Path, target: Path, dry_run: bool = False) -> bool:
         """Copy a single file or directory."""
         try:
             # Ensure target directory exists
             target.parent.mkdir(parents=True, exist_ok=True)
-            
+            conflict_msg = ''
+
             # Handle existing target
             if target.exists():
                 counter = 1
                 base = target.stem
                 ext = target.suffix
+                original_target = target
                 while target.exists():
                     target = target.parent / f"{base}_{counter}{ext}"
                     counter += 1
-            
+                conflict_msg = f"renamed from {original_target.name}"
+
             if not dry_run:
                 if source.is_dir():
                     shutil.copytree(source, target, dirs_exist_ok=True)
                 else:
                     shutil.copy2(source, target)
-            
+
             log_info(f"Copied: {source} -> {target}")
             self.stats['copied'] += 1
+            self._set_last_operation(
+                action='COPY',
+                source=source,
+                target=target,
+                success=True,
+                message=conflict_msg if conflict_msg else '',
+            )
             return True
-            
+
         except Exception as e:
             log_info(f"Error copying {source}: {e}")
             self.stats['errors'] += 1
+            self._set_last_operation(
+                action='COPY',
+                source=source,
+                target=target,
+                success=False,
+                message=str(e),
+            )
             return False
     
     @dry_run_decorator()
@@ -136,14 +206,26 @@ class FileSystemActions:
                     shutil.rmtree(source)
                 else:
                     source.unlink()
-            
+
             log_info(f"Deleted: {source}")
             self.stats['deleted'] += 1
+            self._set_last_operation(
+                action='DELETE',
+                source=source,
+                success=True,
+                message='',
+            )
             return True
-            
+
         except Exception as e:
             log_info(f"Error deleting {source}: {e}")
             self.stats['errors'] += 1
+            self._set_last_operation(
+                action='DELETE',
+                source=source,
+                success=False,
+                message=str(e),
+            )
             return False
     
     def merge_directories(self, source: Path, target: Path, dry_run: bool = False):
@@ -182,13 +264,27 @@ class FileSystemActions:
                 # Convert octal string to integer
                 mode = int(permissions, 8)
                 path.chmod(mode)
-            
+
             log_info(f"Set permissions {permissions} on: {path}")
+            self._set_last_operation(
+                action='PERMISSIONS',
+                source=path,
+                details=f"chmod {permissions}",
+                success=True,
+                message='',
+            )
             return True
-            
+
         except Exception as e:
             log_info(f"Error setting permissions on {path}: {e}")
             self.stats['errors'] += 1
+            self._set_last_operation(
+                action='PERMISSIONS',
+                source=path,
+                details=f"chmod {permissions}",
+                success=False,
+                message=str(e),
+            )
             return False
     
     @dry_run_decorator()
@@ -210,13 +306,29 @@ class FileSystemActions:
                     mtime = stat_info.st_mtime
                 
                 os.utime(path, (atime, mtime))
-            
+
             log_info(f"Set attributes on: {path}")
+            attr_details = ", ".join(f"{k}={attributes[k]}" for k in attributes)
+            self._set_last_operation(
+                action='ATTRIBUTES',
+                source=path,
+                details=attr_details,
+                success=True,
+                message='',
+            )
             return True
-            
+
         except Exception as e:
             log_info(f"Error setting attributes on {path}: {e}")
             self.stats['errors'] += 1
+            attr_details = ", ".join(f"{k}={attributes[k]}" for k in attributes)
+            self._set_last_operation(
+                action='ATTRIBUTES',
+                source=path,
+                details=attr_details,
+                success=False,
+                message=str(e),
+            )
             return False
     
     def print_stats(self):
@@ -438,6 +550,116 @@ For examples: fsActions.py --help-examples
     print(help_text)
 
 
+def _build_status_text(status: bool, dry_run: bool, message: str) -> str:
+    """Return a formatted status string for table output."""
+
+    base = "DRY RUN" if dry_run and status else "OK" if status else "ERROR"
+    message = message.strip()
+    if message:
+        return f"{base} ({message})"
+    return base
+
+
+def _format_target(details: Dict[str, Any]) -> str:
+    """Combine target and auxiliary details for display."""
+
+    target = details.get('target', '').strip()
+    extra = details.get('details', '').strip()
+
+    if target and extra:
+        return f"{target} [{extra}]"
+    if target:
+        return target
+    if extra:
+        return extra
+    return "-"
+
+
+def _prepare_summary_entry(
+    details: Optional[Dict[str, Any]],
+    fallback_path: Path,
+    fallback_action: str,
+) -> Dict[str, Any]:
+    """Normalize an operation detail dictionary for table rendering."""
+
+    entry: Dict[str, Any] = {
+        'path': str(fallback_path),
+        'action': fallback_action,
+        'target': '',
+        'details': '',
+        'status': False,
+        'message': '',
+    }
+
+    if details:
+        entry['path'] = details.get('source', entry['path'])
+        entry['action'] = details.get('action', entry['action'])
+        entry['target'] = details.get('target', '')
+        entry['details'] = details.get('details', '')
+        entry['status'] = details.get('status', entry['status'])
+        entry['message'] = details.get('message', entry['message'])
+
+    return entry
+
+
+def _print_action_summary(rows: List[Dict[str, Any]], dry_run: bool) -> None:
+    """Render a summary table of planned filesystem actions."""
+
+    if not rows:
+        return
+
+    headers = ("PATH", "ACTION", "TARGET/DETAILS", "STATUS")
+    prepared_rows: List[tuple[str, str, str, str]] = []
+
+    for entry in rows:
+        status_text = entry.get('status_text')
+        if not status_text and 'status' in entry:
+            status_text = _build_status_text(entry['status'], dry_run, entry.get('message', ''))
+        prepared_rows.append(
+            (
+                entry.get('path', ''),
+                entry.get('action', ''),
+                entry.get('target', _format_target(entry)),
+                status_text or '',
+            )
+        )
+
+    widths = [len(header) for header in headers]
+    for row in prepared_rows:
+        for idx, value in enumerate(row):
+            widths[idx] = max(widths[idx], len(value))
+
+    border = "+" + "+".join("-" * (width + 2) for width in widths) + "+"
+    header_cells = [
+        f" {colorize_string(headers[idx].ljust(widths[idx]), fore_color='yellow', style='bright')} "
+        for idx in range(len(headers))
+    ]
+    header_row = "|" + "|".join(header_cells) + "|"
+
+    print(border)
+    print(header_row)
+    print(border)
+
+    for path, action, target, status in prepared_rows:
+        cells: List[str] = []
+        for idx, value in enumerate((path, action, target, status)):
+            padded = f"{value:<{widths[idx]}}"
+            if idx == 3:  # status column
+                status_lower = status.lower()
+                color = None
+                if "dry run" in status_lower or "ok" in status_lower:
+                    color = 'green' if 'ok' in status_lower else 'yellow'
+                elif "skip" in status_lower:
+                    color = 'cyan'
+                else:
+                    color = 'red'
+                padded = colorize_string(padded, fore_color=color)
+            cells.append(f" {padded} ")
+        print("|" + "|".join(cells) + "|")
+
+    print(border)
+
+
 def create_filter_from_args(args) -> FileSystemFilter | None:
     """Create a :class:`FileSystemFilter` from ``args`` if filters are present."""
 
@@ -593,15 +815,24 @@ def process_actions_pipeline(args):
     # Create actions handler
     actions_handler = FileSystemActions(dry_run=args.dry_run)
     
+    summary_rows: List[Dict[str, Any]] = []
+
     # Process each file/directory
     for path_str in filtered_paths:
         source_path = Path(path_str)
-        
+
         if not source_path.exists():
             log_info(f"Skipping non-existent path: {source_path}")
             actions_handler.stats['skipped'] += 1
+            summary_rows.append({
+                'path': str(source_path),
+                'action': 'SKIP',
+                'target': '-',
+                'status_text': 'SKIPPED (missing)',
+                'message': 'Path does not exist',
+            })
             continue
-        
+
         # Perform the requested action
         if args.move:
             destination = Path(args.move)
@@ -609,31 +840,69 @@ def process_actions_pipeline(args):
                 source_path, destination, args.with_dir, base_path
             )
             actions_handler.move_file(source_path, target_path, args.dry_run)
-            
+            summary_rows.append(
+                _prepare_summary_entry(
+                    actions_handler.last_operation_details,
+                    source_path,
+                    'MOVE',
+                )
+            )
+
         elif args.copy:
             destination = Path(args.copy)
             target_path = actions_handler.create_target_path(
                 source_path, destination, args.with_dir, base_path
             )
             actions_handler.copy_file(source_path, target_path, args.dry_run)
-            
+            summary_rows.append(
+                _prepare_summary_entry(
+                    actions_handler.last_operation_details,
+                    source_path,
+                    'COPY',
+                )
+            )
+
         elif args.delete:
             actions_handler.delete_file(source_path, args.dry_run)
-        
+            summary_rows.append(
+                _prepare_summary_entry(
+                    actions_handler.last_operation_details,
+                    source_path,
+                    'DELETE',
+                )
+            )
+
         # Set permissions if requested
         if args.set_permissions:
             actions_handler.set_permissions(source_path, args.set_permissions, args.dry_run)
-        
+            summary_rows.append(
+                _prepare_summary_entry(
+                    actions_handler.last_operation_details,
+                    source_path,
+                    'PERMISSIONS',
+                )
+            )
+
         # Set attributes if requested
         attributes = {}
         if args.set_atime:
             attributes['atime'] = args.set_atime
         if args.set_mtime:
             attributes['mtime'] = args.set_mtime
-        
+
         if attributes:
             actions_handler.set_attributes(source_path, attributes, args.dry_run)
-    
+            summary_rows.append(
+                _prepare_summary_entry(
+                    actions_handler.last_operation_details,
+                    source_path,
+                    'ATTRIBUTES',
+                )
+            )
+
+    # Print planned action summary
+    _print_action_summary(summary_rows, args.dry_run)
+
     # Print statistics
     actions_handler.print_stats()
     
