@@ -19,11 +19,12 @@ Examples:
 
 import argparse
 import fnmatch
+import importlib
+import importlib.util
 import logging
 import os
 import re
 import sys
-import yaml
 from pathlib import Path
 from typing import List, Set, Optional, Callable, Iterator
 
@@ -33,6 +34,32 @@ from file_utils.lib_extensions import get_extension_data
 from file_utils.fsFilters import FileSystemFilter, apply_config_to_filter
 
 setup_logging(level=logging.ERROR)
+
+
+_YAML_MODULE = None
+_YAML_CHECKED = False
+
+
+def _get_yaml_module():
+    """Return the optional PyYAML module if available."""
+    global _YAML_MODULE, _YAML_CHECKED
+
+    if _YAML_MODULE is not None:
+        return _YAML_MODULE
+
+    if _YAML_CHECKED:
+        return None
+
+    _YAML_CHECKED = True
+
+    if importlib.util.find_spec("yaml") is None:
+        log_info(
+            "PyYAML is required for --filter-file support. Install it with 'pip install PyYAML'."
+        )
+        return None
+
+    _YAML_MODULE = importlib.import_module("yaml")
+    return _YAML_MODULE
 
 
 class EnhancedFileFinder:
@@ -340,12 +367,17 @@ def create_filter_from_args(args) -> Optional[FileSystemFilter]:
     
     # Load filter configuration file if specified
     if args.filter_file:
-        try:
-            with open(args.filter_file, 'r', encoding='utf-8') as f:
-                config = yaml.safe_load(f) or {}
-            apply_config_to_filter(fs_filter, config)
-        except Exception as e:
-            log_info(f"Could not load filter file {args.filter_file}: {e}")
+        yaml_module = _get_yaml_module()
+        if yaml_module is None:
+            log_info(
+                "Ignoring --filter-file because PyYAML is not available.")
+        else:
+            try:
+                with open(args.filter_file, 'r', encoding='utf-8') as f:
+                    config = yaml_module.safe_load(f) or {}
+                apply_config_to_filter(fs_filter, config)
+            except Exception as e:
+                log_info(f"Could not load filter file {args.filter_file}: {e}")
     
     # Apply command line filter arguments
     if args.size_gt:
