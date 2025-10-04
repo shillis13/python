@@ -137,8 +137,9 @@ class FileSystemFormatter:
                  show_permissions: bool = False, use_colors: bool = True,
                  use_ascii: bool = False, sort_dirs_first: bool = True,
                  show_hidden: bool = False, max_depth: int = None,
-                 columns: List[str] = None):
-        
+                 columns: List[str] = None, sort_by: str = "name",
+                 reverse_sort: bool = False):
+
         self.format_type = format_type
         self.show_files = show_files
         self.show_size = show_size
@@ -150,6 +151,8 @@ class FileSystemFormatter:
         self.show_hidden = show_hidden
         self.max_depth = max_depth
         self.columns = columns or ['name']
+        self.sort_by = sort_by
+        self.reverse_sort = reverse_sort
         
         self.chars = TREE_CHARS['ascii' if use_ascii else 'unicode']
         
@@ -165,7 +168,7 @@ class FileSystemFormatter:
         """Apply colors to file/directory names based on type."""
         if not self.use_colors:
             return name
-        
+
         try:
             if file_info.is_symlink:
                 return colorize_string(name, fore_color="cyan")
@@ -181,7 +184,30 @@ class FileSystemFormatter:
                 return name
         except Exception:
             return name
-    
+
+    def _get_sort_value(self, file_info: FileInfo):
+        """Return the value used for sorting a file info entry."""
+        if self.sort_by == 'size':
+            return file_info.size if file_info.size is not None else 0
+        if self.sort_by == 'modified':
+            return file_info.modified.timestamp() if file_info.modified else 0
+        if self.sort_by == 'type':
+            return (file_info.type or '').lower()
+        # Default to name sorting
+        return file_info.name.lower()
+
+    def _sort_file_infos(self, items: List[FileInfo]) -> List[FileInfo]:
+        """Sort a list of FileInfo objects according to configuration."""
+        if not items:
+            return items
+
+        sorted_items = sorted(items, key=self._get_sort_value, reverse=self.reverse_sort)
+
+        if self.sort_dirs_first:
+            sorted_items = sorted(sorted_items, key=lambda item: 0 if item.is_dir else 1)
+
+        return sorted_items
+
     def get_sorted_children(self, directory: Path, fs_filter: FileSystemFilter = None) -> List[FileInfo]:
         """Get sorted list of directory children as FileInfo objects."""
         try:
@@ -201,13 +227,7 @@ class FileSystemFormatter:
                 
                 children.append(FileInfo(child))
             
-            # Sort children
-            if self.sort_dirs_first:
-                children.sort(key=lambda x: (not x.is_dir, x.name.lower()))
-            else:
-                children.sort(key=lambda x: x.name.lower())
-            
-            return children
+            return self._sort_file_infos(children)
             
         except (OSError, PermissionError) as e:
             log_debug(f"Cannot read directory {directory}: {e}")
@@ -454,6 +474,7 @@ class FileSystemFormatter:
         else:
             # For other formats, collect all items first
             items = self.collect_all_items(paths, fs_filter)
+            items = self._sort_file_infos(items)
             
             if self.format_type == "table":
                 return self.format_table(items)
@@ -824,7 +845,9 @@ def process_format_pipeline(args):
         sort_dirs_first=not args.unsorted,
         show_hidden=args.hidden,
         max_depth=args.max_depth,
-        columns=columns
+        columns=columns,
+        sort_by=args.sort_by,
+        reverse_sort=args.reverse,
     )
     
     # Create filter

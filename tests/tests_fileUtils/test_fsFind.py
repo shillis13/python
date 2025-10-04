@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import logging
 import os
 import sys
 from unittest import mock
@@ -169,6 +170,24 @@ def test_filter_file_option_loads_configuration(tmp_path):
     with mock.patch('file_utils.fsFind.FileSystemFilter') as Filter:
         fs_filter = findFiles.create_filter_from_args(args)
         assert fs_filter is Filter.return_value
+
+
+def test_filter_file_option_without_pyyaml(monkeypatch, tmp_path, caplog):
+    config_file = tmp_path / 'filters.yml'
+    config_file.write_text('pattern: example')
+    args = parse_args('--filter-file', str(config_file))
+
+    caplog.set_level(logging.INFO)
+    monkeypatch.setattr(findFiles.importlib.util, 'find_spec', lambda name: None)
+    findFiles._YAML_MODULE = None
+    findFiles._YAML_CHECKED = False
+
+    with mock.patch('file_utils.fsFind.FileSystemFilter') as Filter:
+        fs_filter = findFiles.create_filter_from_args(args)
+
+    assert fs_filter is Filter.return_value
+    assert "PyYAML is required for --filter-file support" in caplog.text
+    assert "Ignoring --filter-file because PyYAML is not available." in caplog.text
 
 
 def test_git_ignore_option_enables_git_filter(tmp_path):

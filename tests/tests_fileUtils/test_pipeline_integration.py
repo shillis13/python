@@ -250,6 +250,35 @@ def test_fsformat_table_includes_piped_files(tmp_path):
     assert "No items to display." not in format_proc.stdout
 
 
+def test_fsformat_sort_by_size_descending(tmp_path):
+    base = tmp_path / "sort_sample"
+    base.mkdir()
+    small = base / "small.bin"
+    medium = base / "medium.bin"
+    large = base / "large.bin"
+    small.write_bytes(b"0" * 10)
+    medium.write_bytes(b"0" * 50)
+    large.write_bytes(b"0" * 100)
+
+    env = _build_env()
+
+    input_text = "\n".join(str(path) for path in [small, medium, large]) + "\n"
+    format_proc = _run_module(
+        "file_utils.fsFormat",
+        "--format",
+        "json",
+        "--sort-by",
+        "size",
+        "--reverse",
+        input_text=input_text,
+        env=env,
+    )
+
+    data = json.loads(format_proc.stdout)
+    names = [entry["name"] for entry in data[:3]]
+    assert names == ["large.bin", "medium.bin", "small.bin"]
+
+
 if __name__ == "__main__":
     import pytest
 
