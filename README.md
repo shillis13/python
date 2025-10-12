@@ -34,3 +34,32 @@ Collection of reusable Python utilities, scripts, and helper modules.
 
 See [scripts/README.md](scripts/README.md) for descriptions and usage of the command-line tools in the `scripts/` directory.
 
+## Python byte-compile check
+
+Use the integrated checker to ensure every Python file in the repository can be byte-compiled:
+
+```bash
+PYTHONPATH=src python -m dev_utils.compile_check --recursive .
+```
+
+Key options:
+
+- `paths` (default `.`): files, directories, or glob patterns to inspect.
+- `-r/--recursive` and `--no-recursive`: control directory descent (recursive by default).
+- `-x/--exclude`: additional glob patterns to skip (repeatable). The checker automatically ignores common caches such as `__pycache__/`, `.venv/`, `.pytest_cache/`, and `.mypy_cache/`.
+- `-q/--quiet`: suppress lines for successful files in human-readable output.
+- `--json`: emit structured JSON with `results` (each entry includes `path`, `ok`, `error`, `line`, `column`) and a top-level `all_ok` flag.
+
+Exit code is `0` when every file compiles and `1` otherwise. From Python code you can reuse the logic via:
+
+```python
+from dev_utils import compile_check
+
+results, all_ok = compile_check.run([
+    "src",
+    "tests",
+], excludes=["tmp", "third_party"], recursive=True)
+```
+
+Each `CompileResult` entry exposes the resolved `path`, `ok` status, and optional error details (message plus best-effort line/column numbers when py_compile reports them).
+
