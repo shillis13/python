@@ -83,6 +83,28 @@ def _format_datetime(dt: Optional[datetime]) -> str:
     return dt.strftime('%Y-%m-%d %H:%M')
 
 
+_CATEGORY_NORMALIZATION: Dict[str, str] = {
+    'archive': 'archive',
+    'archives': 'archive',
+    'audio': 'audio',
+    'music': 'audio',
+    'programming': 'programming',
+    'code': 'programming',
+    'video': 'video',
+    'videos': 'video',
+    'data': 'data',
+    'database': 'data',
+    'databases': 'data',
+}
+
+
+def _normalize_category(value: str) -> str:
+    lowered = value.strip().lower()
+    if not lowered:
+        return 'other'
+    return _CATEGORY_NORMALIZATION.get(lowered, lowered)
+
+
 @lru_cache(maxsize=1)
 def _load_kind_map() -> Dict[str, str]:
     """Lazily load a mapping of file extensions to high level kinds."""
@@ -97,9 +119,9 @@ def _load_kind_map() -> Dict[str, str]:
     for ext, meta in info.items():
         if not ext or not ext.startswith('.'):
             continue
-        category = str(meta.get('category', '')).strip()
+        category = _normalize_category(str(meta.get('category', '')))
         if category:
-            kind_map[ext.lower()] = category.lower()
+            kind_map[ext.lower()] = category
     return kind_map
 
 
@@ -833,7 +855,8 @@ def add_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument('--csv', action='store_const', const='csv', dest='format',
                        help="CSV format")
     parser.add_argument('--legacy-output', action='store_true',
-                       help="Use the legacy tree-style default output")
+                       help="Use the legacy tree-style default output\n"
+                            "Example: fsFormat.py . --legacy-output --files")
     
     # Content options
     parser.add_argument('--files', '-f', action='store_true',
@@ -848,13 +871,17 @@ def add_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument('--modified', '-m', action='store_true', help="Show modification dates")
     parser.add_argument('--permissions', '-p', action='store_true', help="Show file permissions")
     parser.add_argument('--columns', '-col',
-                        help="Comma-separated list of columns for list/table/CSV formats")
+                        help="Comma-separated list of columns for list/table/CSV formats\n"
+                             "Example: --columns name,size,kind")
     parser.add_argument('--wrap', choices=['none', 'word', 'truncate'], default='truncate',
-                        help="Wrapping strategy for table cells (default: truncate)")
+                        help="Wrapping strategy for table cells (default: truncate)\n"
+                             "Example: --wrap word to enable multi-line cells")
     parser.add_argument('--col-widths',
-                        help="Column width overrides for tables, e.g. name=40,size=12")
+                        help="Column width overrides for tables\n"
+                             "Example: --col-widths name=40,size=12")
     parser.add_argument('--max-width', type=int,
-                        help="Maximum width applied to automatically sized table columns")
+                        help="Maximum width applied to automatically sized table columns\n"
+                             "Example: --max-width 60")
     
     # Tree-specific options
     parser.add_argument('--ascii', '-a', action='store_true', help="Use ASCII characters for tree")
@@ -923,6 +950,8 @@ Table Format:
   fsFormat.py . --table --files --size --modified  # Table with metadata
   fsFormat.py . --table --columns name,size,type   # Custom columns
   fsFormat.py . --table --files --sort-by size --reverse  # Sorted by size
+  fsFormat.py . --table --wrap word --max-width 50  # Wrap long cells within 50 chars
+  fsFormat.py . --table --col-widths name=20,kind=10  # Override column widths
 
 JSON/YAML/CSV Output:
   fsFormat.py . --json --files > files.json       # JSON export
@@ -948,9 +977,12 @@ Complex Examples:
   
   # Project structure without ignored files
   fsFormat.py . --git-ignore --files --format tree --max-depth 3
-  
+
   # CSV report of all images with metadata
   fsFormat.py . --type image --format csv --columns name,size,modified,path > images.csv
+
+  # Revert to the original tree printer
+  fsFormat.py . --legacy-output --tree
 """
     print(examples)
 
@@ -984,9 +1016,13 @@ DISPLAY OPTIONS:
     --modified            Show modification dates
     --permissions         Show file permissions
     --columns COLS        Comma-separated columns for list/table/CSV
+                          Example: --columns name,size,kind
     --wrap MODE           Table wrapping strategy (none, word, truncate)
-    --col-widths MAP      Column width overrides, e.g. name=40,size=12
+                          Example: --wrap word for multi-line cells
+    --col-widths MAP      Column width overrides
+                          Example: --col-widths name=40,size=12
     --max-width N         Maximum width applied to auto-sized table columns
+                          Example: --max-width 60
 
     Available columns include: name, basename, path, parent, perms, owner, group,
     size, size_bytes, modified, created, accessed, kind, type, ext, symlink
@@ -996,6 +1032,8 @@ TREE-SPECIFIC OPTIONS:
     --no-colors           Disable colored output
     --unsorted            Don't sort directories before files
     --no-summary          Don't show summary statistics
+    --legacy-output       Revert to the classic tree printer
+                          Example: fsFormat.py . --legacy-output --tree
 
 GROUPING AND SORTING:
     --group-by ATTR       Group by: type, extension, size, date

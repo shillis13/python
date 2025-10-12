@@ -90,8 +90,9 @@ def test_table_alignment_with_custom_widths(tmp_path):
 
     lines = [line for line in proc.stdout.splitlines() if "|" in line]
     assert len(lines) >= 3, proc.stdout
-    pipe_positions = {line.index('|') for line in lines}
-    assert len(pipe_positions) == 1
+    pipe_positions = {tuple(idx for idx, ch in enumerate(line) if ch == '|') for line in lines}
+    assert len(pipe_positions) == 1, pipe_positions
+    assert next(iter(pipe_positions)), pipe_positions
 
 
 def test_legacy_output_restores_tree(tmp_path):
