@@ -53,6 +53,18 @@ def test_default_listing_shows_kind_and_permissions(tmp_path):
     assert any(script_perms in line for line in lines)
 
 
+def test_data_category_is_mapped(tmp_path):
+    env = _build_env()
+
+    dataset = tmp_path / "dataset.parquet"
+    dataset.write_text("rows", encoding="utf-8")
+
+    proc = _run_fsformat(str(tmp_path), env=env)
+
+    lines = _list_output_lines(proc.stdout)
+    assert any("data" in line and "dataset.parquet" in line for line in lines), proc.stdout
+
+
 def test_columns_option_limits_output(tmp_path):
     env = _build_env()
 
@@ -88,10 +100,23 @@ def test_table_alignment_with_custom_widths(tmp_path):
         env=env,
     )
 
-    lines = [line for line in proc.stdout.splitlines() if "|" in line]
+    lines = [line for line in proc.stdout.splitlines() if "|" in line or "+" in line]
     assert len(lines) >= 3, proc.stdout
-    pipe_positions = {line.index('|') for line in lines}
-    assert len(pipe_positions) == 1
+
+    expected_boundary: int | None = None
+    for line in lines:
+        marker_index: int
+        if "|" in line:
+            marker_index = line.index("|")
+        else:
+            marker_index = line.index("+")
+
+        if expected_boundary is None:
+            expected_boundary = marker_index
+        else:
+            assert marker_index == expected_boundary, proc.stdout
+
+    assert expected_boundary is not None, proc.stdout
 
 
 def test_legacy_output_restores_tree(tmp_path):
