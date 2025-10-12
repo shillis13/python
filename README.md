@@ -34,3 +34,33 @@ Collection of reusable Python utilities, scripts, and helper modules.
 
 See [scripts/README.md](scripts/README.md) for descriptions and usage of the command-line tools in the `scripts/` directory.
 
+## Byte-Compile Check
+
+Use the byte-compile helper to catch syntax errors quickly:
+
+```bash
+./scripts/pyCompileCheck                     # checks src/ by default
+./scripts/pyCompileCheck tests -r            # include tests/ recursively
+PYTHONPATH=src python -m dev_utils.compile_check --json   # machine-readable output
+```
+
+The command exits with status code 0 when all files compile and 1 when any
+syntax error or missing path is detected. Human-readable output prints one
+line per file (`path: OK` or `path: FAIL — …`). Pass `--quiet` to suppress the
+success lines, `--recursive` (or `-r`) to descend into subdirectories, and
+`--exclude` (`-x`) to add glob patterns. Defaults skip the repository’s
+`__pycache__`, `.venv`, `tmp`, and `third_party` directories; use
+`--no-default-excludes` to override this list.
+
+From Python code you can import the checker and reuse the structured results:
+
+```python
+from dev_utils import compile_check
+
+results, all_ok = compile_check.run(["src"], recursive=True)
+if not all_ok:
+    for item in results:
+        if not item["ok"]:
+            print(item["path"], item["error"]["message"])
+```
+
