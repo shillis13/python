@@ -13,6 +13,10 @@ Examples:
     fsFormat.py .                                    # List view (default)
     fsFormat.py . --tree --files                     # Tree view
     fsFormat.py . --format table --size --modified   # Table with metadata
+    fsFormat.py . --table --columns name,kind --wrap word  # Column control
+    fsFormat.py . --table --col-widths name=32,size=12      # Fixed column widths
+    fsFormat.py . --table --max-width 50                   # Limit auto width
+    fsFormat.py . --legacy-output --files                  # Legacy tree output
     fsFormat.py . --format json --type image         # JSON output for images
     fsFormat.py . --format csv --columns name,size,date > files.csv  # CSV export
 """
@@ -833,7 +837,7 @@ def add_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument('--csv', action='store_const', const='csv', dest='format',
                        help="CSV format")
     parser.add_argument('--legacy-output', action='store_true',
-                       help="Use the legacy tree-style default output")
+                       help="Use the legacy tree-style default output. Example: fsFormat.py --legacy-output --files")
     
     # Content options
     parser.add_argument('--files', '-f', action='store_true',
@@ -848,13 +852,13 @@ def add_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument('--modified', '-m', action='store_true', help="Show modification dates")
     parser.add_argument('--permissions', '-p', action='store_true', help="Show file permissions")
     parser.add_argument('--columns', '-col',
-                        help="Comma-separated list of columns for list/table/CSV formats")
+                        help="Comma-separated list of columns for list/table/CSV formats. Example: --columns name,size,kind")
     parser.add_argument('--wrap', choices=['none', 'word', 'truncate'], default='truncate',
-                        help="Wrapping strategy for table cells (default: truncate)")
+                        help="Wrapping strategy for table cells (default: truncate). Example: --wrap word")
     parser.add_argument('--col-widths',
-                        help="Column width overrides for tables, e.g. name=40,size=12")
+                        help="Column width overrides for tables. Example: --col-widths name=40,size=12")
     parser.add_argument('--max-width', type=int,
-                        help="Maximum width applied to automatically sized table columns")
+                        help="Maximum width applied to automatically sized table columns. Example: --max-width 80")
     
     # Tree-specific options
     parser.add_argument('--ascii', '-a', action='store_true', help="Use ASCII characters for tree")
@@ -923,11 +927,17 @@ Table Format:
   fsFormat.py . --table --files --size --modified  # Table with metadata
   fsFormat.py . --table --columns name,size,type   # Custom columns
   fsFormat.py . --table --files --sort-by size --reverse  # Sorted by size
+  fsFormat.py . --table --columns name,kind --wrap word   # Word-wrap cells
+  fsFormat.py . --table --col-widths name=32,size=12       # Fixed column widths
+  fsFormat.py . --table --max-width 60                     # Limit auto column widths
 
 JSON/YAML/CSV Output:
   fsFormat.py . --json --files > files.json       # JSON export
   fsFormat.py . --yaml --type image               # YAML for images
   fsFormat.py . --csv --columns name,size,modified > files.csv  # CSV export
+
+Legacy Compatibility:
+  fsFormat.py . --legacy-output --files --max-depth 2  # Prior tree style with files
 
 Filtering Integration:
   fsFormat.py . --files --size-gt 1M --format table      # Large files in table
@@ -1025,6 +1035,7 @@ Tree Format:
     
 Table Format:
     - Customizable columns
+    - Wrapping control via --wrap and --max-width
     - Sortable by any attribute
     - Fixed-width layout
     - Grouping support
