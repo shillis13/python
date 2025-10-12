@@ -837,7 +837,7 @@ def add_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument('--csv', action='store_const', const='csv', dest='format',
                        help="CSV format")
     parser.add_argument('--legacy-output', action='store_true',
-                       help="Use the legacy tree-style default output (e.g. fsFormat.py --legacy-output)")
+                       help="Use the legacy tree-style default output. Example: fsFormat.py --legacy-output --files")
     
     # Content options
     parser.add_argument('--files', '-f', action='store_true',
@@ -852,13 +852,13 @@ def add_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument('--modified', '-m', action='store_true', help="Show modification dates")
     parser.add_argument('--permissions', '-p', action='store_true', help="Show file permissions")
     parser.add_argument('--columns', '-col',
-                        help="Comma-separated list of columns for list/table/CSV formats (e.g. --columns name,size,kind)")
+                        help="Comma-separated list of columns for list/table/CSV formats. Example: --columns name,size,kind")
     parser.add_argument('--wrap', choices=['none', 'word', 'truncate'], default='truncate',
                         help="Wrapping strategy for table cells (default: truncate). Example: --wrap word")
     parser.add_argument('--col-widths',
-                        help="Column width overrides for tables, e.g. name=40,size=12")
+                        help="Column width overrides for tables. Example: --col-widths name=40,size=12")
     parser.add_argument('--max-width', type=int,
-                        help="Maximum width applied to automatically sized table columns (e.g. --max-width 80)")
+                        help="Maximum width applied to automatically sized table columns. Example: --max-width 80")
     
     # Tree-specific options
     parser.add_argument('--ascii', '-a', action='store_true', help="Use ASCII characters for tree")
