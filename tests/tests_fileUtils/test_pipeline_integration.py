@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -248,6 +249,147 @@ def test_fsformat_table_includes_piped_files(tmp_path):
 
     assert "movie.mp4" in format_proc.stdout
     assert "No items to display." not in format_proc.stdout
+
+
+def test_fsformat_default_list_includes_kind_and_permissions(tmp_path):
+    base = tmp_path / "listing"
+    base.mkdir()
+    clip = base / "clip.mp4"
+    clip.write_bytes(b"data")
+
+    env = _build_env()
+
+    proc = _run_module(
+        "file_utils.fsFormat",
+        str(base),
+        "--no-colors",
+        env=env,
+    )
+
+    lines = [line for line in proc.stdout.splitlines() if line and not line.startswith(("✅", "ℹ️", "❌"))]
+    clip_line = next(line for line in lines if "clip.mp4" in line)
+    assert "video" in clip_line
+
+    parts = [part for part in re.split(r"\s{2,}", clip_line.strip()) if part]
+    assert len(parts) >= 5
+    perms = parts[0]
+    assert re.match(r"^[bcdlps-][rwx-]{9}$", perms)
+    assert parts[-2] == "video"
+
+
+def test_fsformat_columns_selection_order(tmp_path):
+    base = tmp_path / "columns"
+    base.mkdir()
+    sample = base / "sample.mp4"
+    sample.write_bytes(b"data")
+
+    env = _build_env()
+
+    proc = _run_module(
+        "file_utils.fsFormat",
+        str(base),
+        "--columns",
+        "name,kind,perms",
+        "--no-colors",
+        env=env,
+    )
+
+    line = next(line for line in proc.stdout.splitlines() if "sample.mp4" in line)
+    parts = [part for part in re.split(r"\s{2,}", line.strip()) if part]
+    assert parts[0] == "sample.mp4"
+    assert parts[1] == "video"
+    assert re.match(r"^[bcdlps-][rwx-]{9}$", parts[2])
+
+
+def test_fsformat_kind_mapping_various_extensions(tmp_path):
+    base = tmp_path / "kinds"
+    base.mkdir()
+    files = {
+        "movie.mp4": "video",
+        "track.wav": "audio",
+        "script.py": "programming",
+        "data.csv": "text",
+        "archive.zip": "archives",
+    }
+    for name in files:
+        (base / name).write_text("x", encoding="utf-8")
+
+    env = _build_env()
+
+    proc = _run_module(
+        "file_utils.fsFormat",
+        str(base),
+        "--columns",
+        "name,kind",
+        "--no-colors",
+        env=env,
+    )
+
+    seen: dict[str, str] = {}
+    for line in proc.stdout.splitlines():
+        for name in files:
+            if name in line:
+                parts = [part for part in re.split(r"\s{2,}", line.strip()) if part]
+                assert len(parts) >= 2
+                seen[name] = parts[1]
+    assert seen == files
+
+
+def test_fsformat_table_alignment_and_truncation(tmp_path):
+    base = tmp_path / "table_alignment"
+    base.mkdir()
+    long_name = base / "very_long_filename_example.mp4"
+    long_name.write_text("x", encoding="utf-8")
+    short_name = base / "track.wav"
+    short_name.write_text("x", encoding="utf-8")
+
+    env = _build_env()
+
+    proc = _run_module(
+        "file_utils.fsFormat",
+        str(base),
+        "--table",
+        "--columns",
+        "name,kind",
+        "--col-widths",
+        "name=10",
+        "--wrap",
+        "truncate",
+        "--no-colors",
+        env=env,
+    )
+
+    output_lines = [line for line in proc.stdout.splitlines() if line]
+    assert output_lines
+    header = output_lines[0]
+    data_lines = [line for line in output_lines[2:] if line.strip()]
+
+    kind_start = header.index("Kind")
+
+    truncated_line = next(line for line in data_lines if "very_long" in line)
+    assert "…" in truncated_line
+    assert truncated_line[kind_start:].strip().startswith("video")
+
+    track_line = next(line for line in data_lines if "track.wav" in line)
+    assert track_line[kind_start:].strip().startswith("audio")
+
+
+def test_fsformat_legacy_output_tree(tmp_path):
+    base = tmp_path / "legacy"
+    child = base / "child"
+    child.mkdir(parents=True)
+
+    env = _build_env()
+
+    proc = _run_module(
+        "file_utils.fsFormat",
+        str(base),
+        "--legacy-output",
+        "--no-colors",
+        env=env,
+    )
+
+    assert "├" in proc.stdout or "└" in proc.stdout
 
 
 def test_fsformat_sort_by_size_descending(tmp_path):
