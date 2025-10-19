@@ -8,6 +8,18 @@ import sys
 from pathlib import Path
 
 
+def _collect_output_paths(output: str) -> list[Path]:
+    paths: list[Path] = []
+    for raw_line in output.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith(("✅", "ℹ️", "❌")):
+            continue
+        if line.startswith("~"):  # Resolve display paths like "~/project/file"
+            line = str(Path.home() / Path(line[2:]))
+        paths.append(Path(line).resolve())
+    return paths
+
+
 def _build_env(home: Path | None = None) -> dict[str, str]:
     env = os.environ.copy()
     project_root = Path(__file__).resolve().parents[2]
@@ -109,6 +121,95 @@ def test_find_filter_actions_delete_dry_run(tmp_path):
     assert target.exists()
 
 
+def test_fsfind_recurses_by_default(tmp_path):
+    base = tmp_path / "auto_recursive"
+    nested = base / "nested"
+    nested.mkdir(parents=True)
+    target = nested / "video.mov"
+    target.write_text("fake", encoding="utf-8")
+
+    env = _build_env()
+
+    proc = _run_module("file_utils.fsFind", str(base), env=env)
+    paths = _collect_output_paths(proc.stdout)
+
+    assert target.resolve() in paths
+
+
+def test_fsfind_no_recursive_flag(tmp_path):
+    base = tmp_path / "no_recursive"
+    nested = base / "nested"
+    nested.mkdir(parents=True)
+    target = nested / "video.mov"
+    target.write_text("fake", encoding="utf-8")
+
+    env = _build_env()
+
+    proc = _run_module("file_utils.fsFind", str(base), "--no-recursive", env=env)
+    paths = _collect_output_paths(proc.stdout)
+
+    assert target.resolve() not in paths
+
+
+def test_fsfind_ignore_patterns(tmp_path):
+    base = tmp_path / "ignore_patterns"
+    temp_dir = base / "Temp"
+    pics_dir = base / "pics"
+    temp_dir.mkdir(parents=True)
+    pics_dir.mkdir()
+    skipped = temp_dir / "skip.mov"
+    kept = pics_dir / "keep.mov"
+    skipped.write_text("skip", encoding="utf-8")
+    kept.write_text("keep", encoding="utf-8")
+
+    env = _build_env()
+
+    # pattern-ignore should prune the Temp directory while leaving others intact
+    pattern_proc = _run_module(
+        "file_utils.fsFind",
+        str(base),
+        "--pattern-ignore",
+        "*/Temp/*",
+        "--file-pattern",
+        "*.mov",
+        env=env,
+    )
+    pattern_paths = _collect_output_paths(pattern_proc.stdout)
+
+    assert kept.resolve() in pattern_paths
+    assert skipped.resolve() not in pattern_paths
+
+    # dir-ignore should also exclude the Temp directory from traversal
+    dir_proc = _run_module(
+        "file_utils.fsFind",
+        str(base),
+        "--dir-ignore",
+        "Temp",
+        "--file-pattern",
+        "*.mov",
+        env=env,
+    )
+    dir_paths = _collect_output_paths(dir_proc.stdout)
+
+    assert kept.resolve() in dir_paths
+    assert skipped.resolve() not in dir_paths
+
+    # file-ignore should filter the matching file while keeping other results
+    file_proc = _run_module(
+        "file_utils.fsFind",
+        str(base),
+        "--file-ignore",
+        "skip.*",
+        "--file-pattern",
+        "*.mov",
+        env=env,
+    )
+    file_paths = _collect_output_paths(file_proc.stdout)
+
+    assert kept.resolve() in file_paths
+    assert skipped.resolve() not in file_paths
+
+
 def test_rename_files_format_exec(tmp_path):
     rename_dir = tmp_path / "rename"
     rename_dir.mkdir()
@@ -128,3 +229,57 @@ def test_rename_files_format_exec(tmp_path):
 
     renamed = sorted(p.name for p in rename_dir.glob("*.txt"))
     assert renamed == ["renamed_01.txt", "renamed_02.txt"]
+
+
+def test_fsformat_table_includes_piped_files(tmp_path):
+    file_path = tmp_path / "movie.mp4"
+    file_path.write_bytes(b"0" * 10)
+
+    env = _build_env()
+
+    format_proc = _run_module(
+        "file_utils.fsFormat",
+        "--table",
+        "--columns",
+        "name,size,path",
+        input_text=f"{file_path}\n",
+        env=env,
+    )
+
+    assert "movie.mp4" in format_proc.stdout
+    assert "No items to display." not in format_proc.stdout
+
+
+def test_fsformat_sort_by_size_descending(tmp_path):
+    base = tmp_path / "sort_sample"
+    base.mkdir()
+    small = base / "small.bin"
+    medium = base / "medium.bin"
+    large = base / "large.bin"
+    small.write_bytes(b"0" * 10)
+    medium.write_bytes(b"0" * 50)
+    large.write_bytes(b"0" * 100)
+
+    env = _build_env()
+
+    input_text = "\n".join(str(path) for path in [small, medium, large]) + "\n"
+    format_proc = _run_module(
+        "file_utils.fsFormat",
+        "--format",
+        "json",
+        "--sort-by",
+        "size",
+        "--reverse",
+        input_text=input_text,
+        env=env,
+    )
+
+    data = json.loads(format_proc.stdout)
+    names = [entry["name"] for entry in data[:3]]
+    assert names == ["large.bin", "medium.bin", "small.bin"]
+
+
+if __name__ == "__main__":
+    import pytest
+
+    raise SystemExit(pytest.main([__file__]))

@@ -41,6 +41,9 @@ extension,category,name,description
 .7z,Archives,7Z,7Z file used in archives applications
 .bz2,Archives,BZ2,BZ2 file used in archives applications
 .xz,Archives,XZ,XZ file used in archives applications
+.parquet,Data,PARQUET,Columnar Parquet data file
+.feather,Data,FEATHER,Feather data interchange file
+.jsonl,Data,JSONL,JSON Lines data file
 .py,Programming,PY,PY file used in programming applications
 .js,Programming,JS,JS file used in programming applications
 .java,Programming,JAVA,JAVA file used in programming applications

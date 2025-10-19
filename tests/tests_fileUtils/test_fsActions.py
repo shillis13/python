@@ -361,6 +361,7 @@ class TestFilterIntegration:
         mock_args.file_ignore = []
         mock_args.dir_ignore = []
         mock_args.ignore_filter = None
+        mock_args.filter_ignore = []
         mock_args.type_filter = []
         mock_args.extension_filter = []
         mock_args.git_ignore_filter = False
@@ -385,6 +386,7 @@ class TestFilterIntegration:
         mock_args.file_ignore = []
         mock_args.dir_ignore = []
         mock_args.ignore_filter = None
+        mock_args.filter_ignore = []
         mock_args.type_filter = ['image']
         mock_args.extension_filter = []
         mock_args.git_ignore_filter = False
@@ -414,7 +416,7 @@ class TestFilterIntegration:
             setattr(mock_args, attr, None if 'filter' in attr else None)
         
         for attr in ['file_pattern_filter', 'dir_pattern_filter', 'file_ignore',
-                     'dir_ignore', 'type_filter', 'extension_filter']:
+                     'dir_ignore', 'type_filter', 'extension_filter', 'filter_ignore']:
             setattr(mock_args, attr, [])
         
         mock_args.git_ignore_filter = False

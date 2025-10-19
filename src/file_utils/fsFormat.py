@@ -2,7 +2,7 @@
 """
 fsFormat.py - Multi-Format File System Display
 
-Displays file system structures in various formats: tree, table, JSON, YAML, CSV.
+Displays file system structures in various formats: list, tree, table, JSON, YAML, CSV.
 Renamed from treePrint.py with expanded formatting capabilities.
 
 Usage:
@@ -10,8 +10,13 @@ Usage:
     find . -name "*.py" | fsFormat.py --format json --files
 
 Examples:
-    fsFormat.py . --tree --files                     # Tree view (default)
+    fsFormat.py .                                    # List view (default)
+    fsFormat.py . --tree --files                     # Tree view
     fsFormat.py . --format table --size --modified   # Table with metadata
+    fsFormat.py . --table --columns name,kind --wrap word  # Column control
+    fsFormat.py . --table --col-widths name=32,size=12      # Fixed column widths
+    fsFormat.py . --table --max-width 50                   # Limit auto width
+    fsFormat.py . --legacy-output --files                  # Legacy tree output
     fsFormat.py . --format json --type image         # JSON output for images
     fsFormat.py . --format csv --columns name,size,date > files.csv  # CSV export
 """
@@ -22,16 +27,20 @@ import json
 import logging
 import os
 import sys
+import textwrap
 import yaml
+from dataclasses import dataclass
 from datetime import datetime
+from functools import lru_cache
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set
 
 from dev_utils.lib_argparse_registry import register_arguments, parse_known_args
 from dev_utils.lib_logging import setup_logging, log_debug
 from dev_utils.lib_outputColors import colorize_string
 from file_utils.lib_fileinput import get_file_paths_from_input
 from file_utils.fsFilters import FileSystemFilter, apply_config_to_filter
+from file_utils.lib_extensions import ExtensionInfo
 
 setup_logging(level=logging.ERROR)
 
@@ -52,6 +61,75 @@ TREE_CHARS = {
 }
 
 
+@dataclass(frozen=True)
+class ColumnSpec:
+    """Definition of a selectable metadata column."""
+
+    key: str
+    header: str
+    getter: Callable[[Dict[str, Any]], str]
+    align: str = 'left'
+    default_width: Optional[int] = None
+
+
+DEFAULT_LIST_COLUMNS: Sequence[str] = (
+    'perms',
+    'size',
+    'modified',
+    'kind',
+    'name',
+)
+
+
+def _format_datetime(dt: Optional[datetime]) -> str:
+    if not dt:
+        return ''
+    return dt.strftime('%Y-%m-%d %H:%M')
+
+
+@lru_cache(maxsize=1)
+def _load_kind_map() -> Dict[str, str]:
+    """Lazily load a mapping of file extensions to high level kinds."""
+
+    data_dir = Path(__file__).resolve().parents[2] / 'data'
+    csv_path = data_dir / 'extensions.csv'
+    if not csv_path.is_file():
+        return {}
+
+    info = ExtensionInfo(csv_path)
+    kind_map: Dict[str, str] = {}
+    for ext, meta in info.items():
+        if not ext or not ext.startswith('.'):
+            continue
+        category = str(meta.get('category', '')).strip()
+        if category:
+            kind_map[ext.lower()] = category.lower()
+    return kind_map
+
+
+def _determine_kind(path: Path, is_dir: bool, is_symlink: bool) -> str:
+    if is_symlink:
+        return 'symlink'
+    if is_dir:
+        return 'directory'
+
+    suffixes = path.suffixes
+    if suffixes:
+        kind_map = _load_kind_map()
+        lowered = [s.lower() for s in suffixes]
+        # Check multi-part extensions first
+        for length in range(len(lowered), 0, -1):
+            candidate = ''.join(lowered[-length:])
+            if not candidate.startswith('.'):
+                candidate = '.' + candidate
+            if candidate in kind_map:
+                return kind_map[candidate]
+        for suffix in lowered:
+            if suffix in kind_map:
+                return kind_map[suffix]
+    return 'other'
+
+
 class FileInfo:
     """Container for file/directory information."""
     
@@ -61,7 +139,9 @@ class FileInfo:
         self.is_dir = path.is_dir()
         self.is_file = path.is_file()
         self.is_symlink = path.is_symlink()
-        
+        self.extension = ''.join(path.suffixes).lstrip('.').lower()
+        self.symlink_target: Optional[str] = None
+
         # Initialize with safe defaults
         self.size = 0
         self.modified = None
@@ -71,7 +151,8 @@ class FileInfo:
         self.owner = "unknown"
         self.group = "unknown"
         self.type = "directory" if self.is_dir else "file"
-        
+        self.kind = _determine_kind(self.path, self.is_dir, self.is_symlink)
+
         # Try to get file stats
         try:
             stat_info = path.stat()
@@ -93,10 +174,16 @@ class FileInfo:
                 self.group = grp.getgrgid(stat_info.st_gid).gr_name
             except (ImportError, KeyError):
                 pass
-                
+
         except (OSError, PermissionError):
             pass  # Keep defaults
-    
+
+        if self.is_symlink:
+            try:
+                self.symlink_target = str(path.readlink())
+            except (OSError, PermissionError):
+                self.symlink_target = "[broken link]"
+
     def format_size(self) -> str:
         """Format file size in human-readable format."""
         if self.is_dir:
@@ -125,22 +212,272 @@ class FileInfo:
             'accessed': self.accessed.isoformat() if self.accessed else None,
             'permissions': self.permissions,
             'owner': self.owner,
-            'group': self.group
+            'group': self.group,
+            'kind': self.kind,
+            'symlink_target': self.symlink_target,
         }
 
 
+AVAILABLE_COLUMN_ORDER: Sequence[str] = (
+    'perms',
+    'owner',
+    'group',
+    'size',
+    'size_bytes',
+    'modified',
+    'created',
+    'accessed',
+    'kind',
+    'type',
+    'ext',
+    'symlink',
+    'parent',
+    'path',
+    'name',
+)
+
+
+def _row_from_file_info(file_info: FileInfo, *, colorizer: Optional[Callable[[str, FileInfo], str]] = None) -> Dict[str, Any]:
+    display_name = file_info.name
+    if file_info.symlink_target:
+        display_name = f"{display_name} -> {file_info.symlink_target}"
+
+    if colorizer:
+        try:
+            display_name = colorizer(display_name, file_info)
+        except Exception:
+            pass
+
+    size_human = file_info.format_size().strip()
+    size_bytes = str(file_info.size if file_info.size is not None else 0)
+
+    return {
+        'name': file_info.name,
+        'display_name': display_name,
+        'basename': file_info.name,
+        'path': str(file_info.path),
+        'parent': str(file_info.path.parent),
+        'size': size_human,
+        'size_bytes': size_bytes,
+        'modified': _format_datetime(file_info.modified),
+        'modified_iso': file_info.modified.isoformat() if file_info.modified else '',
+        'created': _format_datetime(file_info.created),
+        'created_iso': file_info.created.isoformat() if file_info.created else '',
+        'accessed': _format_datetime(file_info.accessed),
+        'perms': file_info.permissions,
+        'owner': file_info.owner,
+        'group': file_info.group,
+        'type': 'symlink' if file_info.is_symlink else ('dir' if file_info.is_dir else 'file'),
+        'kind': file_info.kind,
+        'ext': file_info.extension,
+        'symlink': file_info.symlink_target or '',
+    }
+
+
+AVAILABLE_COLUMNS: Dict[str, ColumnSpec] = {
+    'name': ColumnSpec('name', 'Name', lambda row: row['display_name'], 'left'),
+    'basename': ColumnSpec('basename', 'Basename', lambda row: row['basename'], 'left'),
+    'path': ColumnSpec('path', 'Path', lambda row: row['path'], 'left'),
+    'parent': ColumnSpec('parent', 'Parent', lambda row: row['parent'], 'left'),
+    'perms': ColumnSpec('perms', 'Perms', lambda row: row['perms'], 'left', 10),
+    'owner': ColumnSpec('owner', 'Owner', lambda row: row['owner'], 'left', 8),
+    'group': ColumnSpec('group', 'Group', lambda row: row['group'], 'left', 8),
+    'size': ColumnSpec('size', 'Size', lambda row: row['size'], 'right', 6),
+    'size_bytes': ColumnSpec('size_bytes', 'Bytes', lambda row: row['size_bytes'], 'right', 6),
+    'modified': ColumnSpec('modified', 'Modified', lambda row: row['modified'], 'left', 16),
+    'modified_iso': ColumnSpec('modified_iso', 'Modified ISO', lambda row: row['modified_iso'], 'left', 19),
+    'created': ColumnSpec('created', 'Created', lambda row: row['created'], 'left', 16),
+    'created_iso': ColumnSpec('created_iso', 'Created ISO', lambda row: row['created_iso'], 'left', 19),
+    'accessed': ColumnSpec('accessed', 'Accessed', lambda row: row['accessed'], 'left', 16),
+    'kind': ColumnSpec('kind', 'Kind', lambda row: row['kind'], 'left', 8),
+    'type': ColumnSpec('type', 'Type', lambda row: row['type'], 'left', 6),
+    'ext': ColumnSpec('ext', 'Ext', lambda row: row['ext'], 'left', 5),
+    'symlink': ColumnSpec('symlink', 'Symlink', lambda row: row['symlink'], 'left', 20),
+}
+
+
+COLUMN_ALIASES: Dict[str, str] = {
+    'permissions': 'perms',
+    'permission': 'perms',
+    'mode': 'perms',
+    'mtime': 'modified',
+    'ctime': 'created',
+    'atime': 'accessed',
+    'size_bytes': 'size_bytes',
+    'bytes': 'size_bytes',
+    'size_hr': 'size',
+    'size_human': 'size',
+    'filename': 'basename',
+    'name_plain': 'basename',
+    'extension': 'ext',
+}
+
+
+def resolve_columns(requested: Optional[Sequence[str]], default: Sequence[str] = DEFAULT_LIST_COLUMNS) -> List[ColumnSpec]:
+    if requested is None or len(requested) == 0:
+        requested = list(default)
+
+    resolved: List[ColumnSpec] = []
+    seen: Set[str] = set()
+
+    def _resolve_name(name: str) -> str:
+        key = name.strip().lower()
+        if key == 'all':
+            return 'all'
+        return COLUMN_ALIASES.get(key, key)
+
+    names = [_resolve_name(name) for name in requested if name]
+
+    if any(name == 'all' for name in names):
+        names = list(AVAILABLE_COLUMN_ORDER)
+
+    for name in names:
+        if name == 'all':
+            continue
+        if name not in AVAILABLE_COLUMNS:
+            raise ValueError(
+                f"Unknown column '{name}'. Available columns: {', '.join(sorted(AVAILABLE_COLUMNS.keys()))}"
+            )
+        if name in seen:
+            continue
+        seen.add(name)
+        resolved.append(AVAILABLE_COLUMNS[name])
+
+    if not resolved:
+        resolved.append(AVAILABLE_COLUMNS['name'])
+
+    return resolved
+
+
+def collect_file_rows(
+    items: Sequence[FileInfo], *, colorizer: Optional[Callable[[str, FileInfo], str]] = None
+) -> List[Dict[str, Any]]:
+    return [_row_from_file_info(item, colorizer=colorizer) for item in items]
+
+
+def render_list(rows: Sequence[Dict[str, Any]], columns: Sequence[ColumnSpec]) -> str:
+    if not rows:
+        return ''
+
+    last_index = len(columns) - 1
+    widths: Dict[str, int] = {}
+    for idx, column in enumerate(columns):
+        if idx == last_index:
+            continue
+        values = [str(column.getter(row) or '') for row in rows]
+        max_width = max([len(value) for value in values] + [column.default_width or 0])
+        widths[column.key] = max_width
+
+    lines: List[str] = []
+    for row in rows:
+        parts: List[str] = []
+        for idx, column in enumerate(columns):
+            value = str(column.getter(row) or '')
+            if idx == last_index:
+                parts.append(value)
+            else:
+                width = widths.get(column.key, len(value))
+                if column.align == 'right':
+                    parts.append(value.rjust(width))
+                else:
+                    parts.append(value.ljust(width))
+        lines.append('  '.join(parts))
+    return '\n'.join(lines)
+
+
+def _split_cell(value: str, width: int, wrap_mode: str) -> List[str]:
+    if wrap_mode == 'none' or width <= 0:
+        return [value]
+    if wrap_mode == 'truncate':
+        return [value[:width]]
+    if wrap_mode == 'word':
+        wrapped = textwrap.wrap(value, width=width, break_long_words=False, drop_whitespace=False)
+        return wrapped or ['']
+    raise ValueError(f"Unknown wrap mode: {wrap_mode}")
+
+
+def _align_cell(value: str, width: int, align: str) -> str:
+    if width <= 0:
+        return value
+    if align == 'right':
+        return value.rjust(width)
+    return value.ljust(width)
+
+
+def render_table(
+    rows: Sequence[Dict[str, Any]],
+    columns: Sequence[ColumnSpec],
+    *,
+    wrap_mode: str = 'truncate',
+    column_widths: Optional[Dict[str, int]] = None,
+    max_width: Optional[int] = None,
+) -> str:
+    if not rows:
+        return 'No items to display.'
+
+    if wrap_mode not in {'none', 'word', 'truncate'}:
+        raise ValueError("wrap_mode must be one of 'none', 'word', or 'truncate'")
+
+    column_widths = column_widths or {}
+    computed_widths: Dict[str, int] = {}
+
+    for column in columns:
+        values = [str(column.getter(row) or '') for row in rows]
+        base_width = max([len(column.header)] + [len(value) for value in values])
+        if column.default_width:
+            base_width = max(base_width, column.default_width)
+        if column.key in column_widths:
+            width = max(column_widths[column.key], 0)
+        else:
+            width = base_width
+        if max_width is not None:
+            width = min(width, max_width)
+        computed_widths[column.key] = width
+
+    header_parts = []
+    separator_parts = []
+    for column in columns:
+        width = computed_widths[column.key]
+        header_parts.append(_align_cell(column.header, width, column.align))
+        separator_parts.append('-' * max(width, 1))
+
+    lines = [' | '.join(header_parts), '-+-'.join(separator_parts)]
+
+    for row in rows:
+        cell_lines = []
+        for column in columns:
+            value = str(column.getter(row) or '')
+            width = computed_widths[column.key]
+            cell_lines.append(_split_cell(value, width, wrap_mode))
+
+        height = max(len(cell) for cell in cell_lines)
+        for line_index in range(height):
+            parts = []
+            for column, cell in zip(columns, cell_lines):
+                width = computed_widths[column.key]
+                value = cell[line_index] if line_index < len(cell) else ''
+                if wrap_mode == 'truncate' and width > 0:
+                    value = value[:width]
+                parts.append(_align_cell(value, width, column.align))
+            lines.append(' | '.join(parts))
+
+    return '\n'.join(lines)
+
 class FileSystemFormatter:
     """Handles multiple output formats for file system data."""
-    
-    def __init__(self, format_type: str = "tree", show_files: bool = False,
+
+    def __init__(self, format_type: str = "list", show_files: bool = False,
                  show_size: bool = False, show_modified: bool = False,
                  show_permissions: bool = False, use_colors: bool = True,
                  use_ascii: bool = False, sort_dirs_first: bool = True,
                  show_hidden: bool = False, max_depth: int = None,
-                 columns: List[str] = None):
-        
+                 columns: Optional[List[str]] = None, sort_by: str = "name",
+                 reverse_sort: bool = False, wrap_mode: str = 'truncate',
+                 column_widths: Optional[Dict[str, int]] = None,
+                 max_width: Optional[int] = None):
+
         self.format_type = format_type
-        self.show_files = show_files
+        self.show_files = show_files or format_type != 'tree'
         self.show_size = show_size
         self.show_modified = show_modified
         self.show_permissions = show_permissions
@@ -149,8 +486,13 @@ class FileSystemFormatter:
         self.sort_dirs_first = sort_dirs_first
         self.show_hidden = show_hidden
         self.max_depth = max_depth
-        self.columns = columns or ['name']
-        
+        self.columns = columns
+        self.sort_by = sort_by
+        self.reverse_sort = reverse_sort
+        self.wrap_mode = wrap_mode
+        self.column_widths = column_widths or {}
+        self.max_width = max_width
+
         self.chars = TREE_CHARS['ascii' if use_ascii else 'unicode']
         
         # Statistics
@@ -165,7 +507,7 @@ class FileSystemFormatter:
         """Apply colors to file/directory names based on type."""
         if not self.use_colors:
             return name
-        
+
         try:
             if file_info.is_symlink:
                 return colorize_string(name, fore_color="cyan")
@@ -181,7 +523,32 @@ class FileSystemFormatter:
                 return name
         except Exception:
             return name
-    
+
+    def _get_sort_value(self, file_info: FileInfo):
+        """Return the value used for sorting a file info entry."""
+        if self.sort_by == 'size':
+            return file_info.size if file_info.size is not None else 0
+        if self.sort_by == 'modified':
+            return file_info.modified.timestamp() if file_info.modified else 0
+        if self.sort_by == 'type':
+            return (file_info.type or '').lower()
+        if self.sort_by == 'kind':
+            return (file_info.kind or '').lower()
+        # Default to name sorting
+        return file_info.name.lower()
+
+    def _sort_file_infos(self, items: List[FileInfo]) -> List[FileInfo]:
+        """Sort a list of FileInfo objects according to configuration."""
+        if not items:
+            return items
+
+        sorted_items = sorted(items, key=self._get_sort_value, reverse=self.reverse_sort)
+
+        if self.sort_dirs_first:
+            sorted_items = sorted(sorted_items, key=lambda item: 0 if item.is_dir else 1)
+
+        return sorted_items
+
     def get_sorted_children(self, directory: Path, fs_filter: FileSystemFilter = None) -> List[FileInfo]:
         """Get sorted list of directory children as FileInfo objects."""
         try:
@@ -201,13 +568,7 @@ class FileSystemFormatter:
                 
                 children.append(FileInfo(child))
             
-            # Sort children
-            if self.sort_dirs_first:
-                children.sort(key=lambda x: (not x.is_dir, x.name.lower()))
-            else:
-                children.sort(key=lambda x: x.name.lower())
-            
-            return children
+            return self._sort_file_infos(children)
             
         except (OSError, PermissionError) as e:
             log_debug(f"Cannot read directory {directory}: {e}")
@@ -221,13 +582,14 @@ class FileSystemFormatter:
             path = Path(path_str)
             if not path.exists():
                 continue
-            
+
             if path.is_file():
-                # Always include explicit file inputs. The --files flag controls
-                # whether files discovered while walking directories are added,
-                # but when the user provides file paths directly (e.g. via
-                # stdin pipeline), they should be included regardless so table
-                # formats don't drop all rows.
+                # When fsFormat is used in pipelines the incoming paths are
+                # frequently individual files.  Previously these were ignored unless
+                # ``--files`` was provided, yielding empty tables.  Non-tree formats
+                # should surface any files that reach them through stdin or explicit
+                # paths, so honour filters but ignore the tree-centric ``show_files``
+                # toggle.
                 if not fs_filter or fs_filter.should_include(path):
                     all_items.append(FileInfo(path))
             elif path.is_dir():
@@ -343,65 +705,28 @@ class FileSystemFormatter:
             return f" [{' '.join(info_parts)}]"
         return ""
     
-    def format_table(self, items: List[FileInfo]) -> str:
-        """Format as ASCII table."""
+    def format_list(self, items: List[FileInfo]) -> str:
         if not items:
-            return "No items to display."
-        
-        # Define available columns
-        column_formats = {
-            'name': ('Name', lambda x: x.name, '<', 20),
-            'type': ('Type', lambda x: 'DIR' if x.is_dir else 'FILE', '<', 6),
-            'size': ('Size', lambda x: x.format_size() if x.is_file else '', '>', 8),
-            'modified': ('Modified', lambda x: x.modified.strftime('%Y-%m-%d %H:%M') if x.modified else '', '<', 16),
-            'created': ('Created', lambda x: x.created.strftime('%Y-%m-%d %H:%M') if x.created else '', '<', 16),
-            'permissions': ('Perms', lambda x: x.permissions, '<', 10),
-            'owner': ('Owner', lambda x: x.owner, '<', 10),
-            'path': ('Path', lambda x: str(x.path), '<', 30)
-        }
-        
-        # Filter columns to those requested and available
-        active_columns = []
-        for col in self.columns:
-            if col in column_formats:
-                active_columns.append((col, column_formats[col]))
-        
-        if not active_columns:
-            active_columns = [('name', column_formats['name'])]
-        
-        # Calculate column widths
-        for col_name, (header, formatter, align, default_width) in active_columns:
-            max_width = max(len(header), max(len(formatter(item)) for item in items))
-            column_formats[col_name] = (header, formatter, align, max(default_width, max_width))
-        
-        # Build table
-        lines = []
-        
-        # Header
-        header_parts = []
-        separator_parts = []
-        for col_name, (header, _, align, width) in active_columns:
-            if align == '<':
-                header_parts.append(f"{header:<{width}}")
-            else:
-                header_parts.append(f"{header:>{width}}")
-            separator_parts.append('-' * width)
-        
-        lines.append(' | '.join(header_parts))
-        lines.append('-+-'.join(separator_parts))
-        
-        # Data rows
-        for item in items:
-            row_parts = []
-            for col_name, (_, formatter, align, width) in active_columns:
-                value = formatter(item)
-                if align == '<':
-                    row_parts.append(f"{value:<{width}}")
-                else:
-                    row_parts.append(f"{value:>{width}}")
-            lines.append(' | '.join(row_parts))
-        
-        return '\n'.join(lines)
+            return 'No items to display.'
+        column_specs = resolve_columns(self.columns, default=DEFAULT_LIST_COLUMNS)
+        colorizer = None
+        if self.use_colors and column_specs and column_specs[-1].key == 'name':
+            colorizer = self.colorize_item
+        rows = collect_file_rows(items, colorizer=colorizer)
+        return render_list(rows, column_specs)
+
+    def format_table(self, items: List[FileInfo]) -> str:
+        if not items:
+            return 'No items to display.'
+        column_specs = resolve_columns(self.columns, default=DEFAULT_LIST_COLUMNS)
+        rows = collect_file_rows(items, colorizer=None)
+        return render_table(
+            rows,
+            column_specs,
+            wrap_mode=self.wrap_mode,
+            column_widths=self.column_widths,
+            max_width=self.max_width,
+        )
     
     def format_json(self, items: List[FileInfo], compact: bool = False) -> str:
         """Format as JSON."""
@@ -421,29 +746,22 @@ class FileSystemFormatter:
         """Format as CSV."""
         if not items:
             return ""
-        
-        # Use columns or default set
-        if 'name' not in self.columns:
-            self.columns = ['name'] + self.columns
-        
-        output = []
-        
-        # CSV header
-        output.append(','.join(self.columns))
-        
-        # CSV data
-        for item in items:
-            row = []
-            item_dict = item.to_dict()
-            for col in self.columns:
-                value = item_dict.get(col, '')
-                if isinstance(value, str) and (',' in value or '"' in value):
-                    # Escape embedded quotes according to CSV rules and wrap in quotes
-                    escaped = value.replace('"', '""')
-                    value = f'"{escaped}"'
-                row.append(str(value))
-            output.append(','.join(row))
-        
+
+        column_specs = resolve_columns(self.columns, default=DEFAULT_LIST_COLUMNS)
+        rows = collect_file_rows(items, colorizer=None)
+
+        header = [spec.key for spec in column_specs]
+        output = [','.join(header)]
+
+        for row in rows:
+            values = []
+            for spec in column_specs:
+                value = str(spec.getter(row) or '')
+                if '"' in value or ',' in value:
+                    value = '"' + value.replace('"', '""') + '"'
+                values.append(value)
+            output.append(','.join(values))
+
         return '\n'.join(output)
     
     def format_items(self, paths: List[str], fs_filter: FileSystemFilter = None) -> str:
@@ -453,7 +771,10 @@ class FileSystemFormatter:
         else:
             # For other formats, collect all items first
             items = self.collect_all_items(paths, fs_filter)
-            
+            items = self._sort_file_infos(items)
+
+            if self.format_type == "list":
+                return self.format_list(items)
             if self.format_type == "table":
                 return self.format_table(items)
             elif self.format_type == "json":
@@ -500,10 +821,13 @@ def add_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument('--from-file', '-ff', help="Read paths from file")
     
     # Format options
-    parser.add_argument('--format', '-fmt', choices=['tree', 'table', 'json', 'json-compact', 'yaml', 'csv'],
-                       default='tree', help="Output format (default: tree)")
+    parser.add_argument('--format', '-fmt',
+                       choices=['list', 'tree', 'table', 'json', 'json-compact', 'yaml', 'csv'],
+                       default='list', help="Output format (default: list)")
+    parser.add_argument('--list', action='store_const', const='list', dest='format',
+                       help="ls-style listing format (default)")
     parser.add_argument('--tree', action='store_const', const='tree', dest='format',
-                       help="Tree format (default)")
+                       help="Tree format")
     parser.add_argument('--table', action='store_const', const='table', dest='format',
                        help="ASCII table format")
     parser.add_argument('--json', action='store_const', const='json', dest='format',
@@ -512,6 +836,8 @@ def add_args(parser: argparse.ArgumentParser) -> None:
                        help="YAML format")
     parser.add_argument('--csv', action='store_const', const='csv', dest='format',
                        help="CSV format")
+    parser.add_argument('--legacy-output', action='store_true',
+                       help="Use the legacy tree-style default output. Example: fsFormat.py --legacy-output --files")
     
     # Content options
     parser.add_argument('--files', '-f', action='store_true',
@@ -525,7 +851,14 @@ def add_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument('--size', '-s', action='store_true', help="Show file sizes")
     parser.add_argument('--modified', '-m', action='store_true', help="Show modification dates")
     parser.add_argument('--permissions', '-p', action='store_true', help="Show file permissions")
-    parser.add_argument('--columns', '-col', help="Comma-separated list of columns for table/CSV formats")
+    parser.add_argument('--columns', '-col',
+                        help="Comma-separated list of columns for list/table/CSV formats. Example: --columns name,size,kind")
+    parser.add_argument('--wrap', choices=['none', 'word', 'truncate'], default='truncate',
+                        help="Wrapping strategy for table cells (default: truncate). Example: --wrap word")
+    parser.add_argument('--col-widths',
+                        help="Column width overrides for tables. Example: --col-widths name=40,size=12")
+    parser.add_argument('--max-width', type=int,
+                        help="Maximum width applied to automatically sized table columns. Example: --max-width 80")
     
     # Tree-specific options
     parser.add_argument('--ascii', '-a', action='store_true', help="Use ASCII characters for tree")
@@ -536,7 +869,7 @@ def add_args(parser: argparse.ArgumentParser) -> None:
     # Grouping and sorting
     parser.add_argument('--group-by', choices=['type', 'extension', 'size', 'date'],
                        help="Group items by specified attribute")
-    parser.add_argument('--sort-by', choices=['name', 'size', 'modified', 'type'],
+    parser.add_argument('--sort-by', choices=['name', 'size', 'modified', 'type', 'kind'],
                        default='name', help="Sort items by specified attribute")
     parser.add_argument('--reverse', '-r', action='store_true', help="Reverse sort order")
     
@@ -581,20 +914,30 @@ def show_examples():
     examples = """
 Usage Examples for fsFormat.py:
 
-Tree Format (Default):
-  fsFormat.py .                                # Basic directory tree
-  fsFormat.py . --files --tree                # Tree with files
-  fsFormat.py . --ascii --no-colors           # ASCII tree, no colors
+List Format (Default):
+  fsFormat.py .                                # Basic ls-style listing
+  fsFormat.py . --columns name,kind,perms      # Custom list columns
+
+Tree Format:
+  fsFormat.py . --tree                         # Directory tree
+  fsFormat.py . --files --tree                 # Tree with files
+  fsFormat.py . --ascii --no-colors            # ASCII tree, no colors
 
 Table Format:
   fsFormat.py . --table --files --size --modified  # Table with metadata
   fsFormat.py . --table --columns name,size,type   # Custom columns
   fsFormat.py . --table --files --sort-by size --reverse  # Sorted by size
+  fsFormat.py . --table --columns name,kind --wrap word   # Word-wrap cells
+  fsFormat.py . --table --col-widths name=32,size=12       # Fixed column widths
+  fsFormat.py . --table --max-width 60                     # Limit auto column widths
 
 JSON/YAML/CSV Output:
   fsFormat.py . --json --files > files.json       # JSON export
   fsFormat.py . --yaml --type image               # YAML for images
   fsFormat.py . --csv --columns name,size,modified > files.csv  # CSV export
+
+Legacy Compatibility:
+  fsFormat.py . --legacy-output --files --max-depth 2  # Prior tree style with files
 
 Filtering Integration:
   fsFormat.py . --files --size-gt 1M --format table      # Large files in table
@@ -629,16 +972,17 @@ fsFormat.py - Multi-Format File System Display
 
 OVERVIEW:
     Display file system structures in multiple formats with filtering,
-    grouping, and sorting capabilities. Supports tree, table, JSON, YAML, and CSV outputs.
+    grouping, and sorting capabilities. Supports list, tree, table, JSON, YAML, and CSV outputs.
 
 OUTPUT FORMATS:
-    --format tree         Hierarchical tree structure (default)
+    --format list         ls-style listing (default)
+    --format tree         Hierarchical tree structure
     --format table        ASCII table with customizable columns
     --format json         JSON format for programmatic use
     --format yaml         YAML format for configuration files
     --format csv          CSV format for spreadsheet import
-    
-    Shortcuts: --tree, --table, --json, --yaml, --csv
+
+    Shortcuts: --list, --tree, --table, --json, --yaml, --csv
 
 CONTENT CONTROL:
     --files               Include files (default: directories only for tree)
@@ -649,9 +993,13 @@ DISPLAY OPTIONS:
     --size                Show file sizes
     --modified            Show modification dates
     --permissions         Show file permissions
-    --columns COLS        Comma-separated columns for table/CSV
-    
-    Available columns: name, type, size, modified, created, permissions, owner, path
+    --columns COLS        Comma-separated columns for list/table/CSV
+    --wrap MODE           Table wrapping strategy (none, word, truncate)
+    --col-widths MAP      Column width overrides, e.g. name=40,size=12
+    --max-width N         Maximum width applied to auto-sized table columns
+
+    Available columns include: name, basename, path, parent, perms, owner, group,
+    size, size_bytes, modified, created, accessed, kind, type, ext, symlink
 
 TREE-SPECIFIC OPTIONS:
     --ascii               Use ASCII characters instead of Unicode
@@ -687,6 +1035,7 @@ Tree Format:
     
 Table Format:
     - Customizable columns
+    - Wrapping control via --wrap and --max-width
     - Sortable by any attribute
     - Fixed-width layout
     - Grouping support
@@ -798,22 +1147,52 @@ def process_format_pipeline(args):
             print(f"  - {path}", file=sys.stderr)
         return
     
-    # Parse columns if specified
-    columns = ['name']  # Default
+    # Parse requested columns
+    columns: Optional[List[str]] = None
     if args.columns:
-        columns = [col.strip() for col in args.columns.split(',')]
-    
-    # Auto-add columns based on display options
-    if args.size and 'size' not in columns:
-        columns.append('size')
-    if args.modified and 'modified' not in columns:
-        columns.append('modified')
-    if args.permissions and 'permissions' not in columns:
-        columns.append('permissions')
-    
+        columns = [col.strip() for col in args.columns.split(',') if col.strip()]
+
+    def _ensure_column(name: str) -> None:
+        nonlocal columns
+        if columns is None:
+            columns = list(DEFAULT_LIST_COLUMNS)
+        canonical_existing = {
+            COLUMN_ALIASES.get(col.strip().lower(), col.strip().lower())
+            for col in columns if col
+        }
+        canonical_name = COLUMN_ALIASES.get(name.strip().lower(), name.strip().lower())
+        if canonical_name not in canonical_existing:
+            columns.append(name)
+
+    if args.size:
+        _ensure_column('size')
+    if args.modified:
+        _ensure_column('modified')
+    if args.permissions:
+        _ensure_column('perms')
+
+    column_widths: Dict[str, int] = {}
+    if args.col_widths:
+        for entry in args.col_widths.split(','):
+            if not entry.strip():
+                continue
+            if '=' not in entry:
+                raise ValueError(f"Invalid column width specification '{entry}'. Expected name=value")
+            name, raw_value = entry.split('=', 1)
+            key = COLUMN_ALIASES.get(name.strip().lower(), name.strip().lower())
+            if key not in AVAILABLE_COLUMNS:
+                raise ValueError(f"Unknown column '{name}' in --col-widths")
+            try:
+                column_widths[key] = max(int(raw_value), 0)
+            except ValueError as exc:
+                raise ValueError(f"Column width for '{name}' must be an integer") from exc
+
+    selected_format = 'tree' if args.legacy_output else args.format
+    args.format = selected_format
+
     # Create formatter
     formatter = FileSystemFormatter(
-        format_type=args.format,
+        format_type=selected_format,
         show_files=args.files,
         show_size=args.size,
         show_modified=args.modified,
@@ -823,7 +1202,12 @@ def process_format_pipeline(args):
         sort_dirs_first=not args.unsorted,
         show_hidden=args.hidden,
         max_depth=args.max_depth,
-        columns=columns
+        columns=columns,
+        sort_by=args.sort_by,
+        reverse_sort=args.reverse,
+        wrap_mode=args.wrap,
+        column_widths=column_widths,
+        max_width=args.max_width,
     )
     
     # Create filter

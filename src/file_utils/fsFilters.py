@@ -305,20 +305,55 @@ class FileSystemFilter:
     
     def add_file_pattern(self, pattern: str):
         """Add file name pattern."""
-        self.file_patterns.append(pattern)
+        self.file_patterns.append(self._normalize_pattern(pattern))
     
     def add_dir_pattern(self, pattern: str):
         """Add directory name pattern."""
-        self.dir_patterns.append(pattern)
+        self.dir_patterns.append(self._normalize_pattern(pattern))
     
     def add_file_ignore_pattern(self, pattern: str):
         """Add file ignore pattern."""
-        self.file_ignore_patterns.append(pattern)
+        self.file_ignore_patterns.append(self._normalize_pattern(pattern))
     
     def add_dir_ignore_pattern(self, pattern: str):
         """Add directory ignore pattern."""
-        self.dir_ignore_patterns.append(pattern)
-    
+        self.dir_ignore_patterns.append(self._normalize_pattern(pattern))
+
+    @staticmethod
+    def _normalize_pattern(pattern: str) -> str:
+        """Return a normalised representation of ``pattern`` for matching."""
+
+        if pattern is None:
+            return pattern
+
+        expanded = os.path.expanduser(pattern)
+        # ``fnmatch`` operates on forward slashes.  ``Path.as_posix`` cannot
+        # be used directly on arbitrary strings, so we normalise manually.
+        normalized = expanded.replace("\\", "/")
+        if os.sep != "/":
+            normalized = normalized.replace(os.sep, "/")
+
+        # Collapse duplicate slashes to make patterns such as ``*/Temp/*`` work
+        # regardless of the input style.
+        while "//" in normalized:
+            normalized = normalized.replace("//", "/")
+
+        return normalized
+
+    def should_descend(self, path: Path, base_path: Path | None = None) -> bool:
+        """Return ``True`` if traversal should continue into ``path``."""
+
+        if not path.is_dir():
+            return True
+
+        if self.dir_ignore_patterns and self.matches_patterns(path, self.dir_ignore_patterns):
+            return False
+
+        if self.gitignore_filter and base_path and self.gitignore_filter.should_ignore(path, base_path):
+            return False
+
+        return True
+
     def add_type_filter(self, file_type: str):
         """Add file type filter."""
         self.load_extension_data()
@@ -353,11 +388,45 @@ class FileSystemFilter:
             return True
         
         name = path.name
+        path_str = str(path)
+        posix_path = path_str.replace("\\", "/")
+        candidates = {name, path_str, posix_path}
+
+        # ``fnmatch`` treats trailing separators literally, so include variants
+        # with and without a trailing slash for directory paths.
+        try:
+            if path.is_dir():
+                if not path_str.endswith(os.sep):
+                    candidates.add(path_str + os.sep)
+                if not posix_path.endswith('/'):
+                    candidates.add(posix_path + '/')
+        except OSError:
+            # Some tests provide mocked Path objects which may raise when
+            # ``is_dir`` is called.  In those cases we simply fall back to the
+            # name based checks above.
+            pass
+
+        # Provide a ``~`` based variant when the path resides in the user's
+        # home directory.  This mirrors the output shown to the user when
+        # results are formatted.
+        try:
+            home_dir = Path.home().resolve()
+            resolved = path.expanduser().resolve()
+            if str(resolved).startswith(str(home_dir)):
+                relative = resolved.relative_to(home_dir).as_posix()
+                home_variant = f"~/{relative}" if relative else "~"
+                candidates.add(home_variant)
+                if resolved.is_dir():
+                    candidates.add(home_variant.rstrip('/') + '/')
+        except Exception:
+            pass
+
         for pattern in patterns:
-            if (
-                fnmatch.fnmatch(name, pattern)
-                or fnmatch.fnmatch(str(path), pattern)
-                or name == pattern
+            normalized_pattern = self._normalize_pattern(pattern)
+            if any(
+                fnmatch.fnmatch(candidate, normalized_pattern)
+                or candidate == normalized_pattern
+                for candidate in candidates
             ):
                 return True
         return False
