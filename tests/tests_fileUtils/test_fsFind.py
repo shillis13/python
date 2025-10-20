@@ -7,6 +7,8 @@ import sys
 from pathlib import Path
 from unittest import mock
 
+import pytest
+
 # Ensure src is on sys.path
 sys.path.insert(0, os.path.abspath('src'))
 sys.path.insert(0, os.path.abspath('src/file_utils'))
@@ -74,6 +76,22 @@ def test_depth_arguments_parse():
     args = parse_args('--max-depth', '2', '--min-depth', '1')
     assert args.max_depth == 2
     assert args.min_depth == 1
+
+
+def test_negative_depth_is_rejected():
+    with pytest.raises(SystemExit):
+        parse_args('--min-depth', '-1')
+
+    with pytest.raises(SystemExit):
+        parse_args('--max-depth', '-4')
+
+
+def test_min_depth_cannot_exceed_max_depth():
+    with pytest.raises(SystemExit):
+        parse_args('--min-depth', '3', '--max-depth', '1')
+
+    with pytest.raises(SystemExit):
+        parse_args('--max-depth', '1', '--min-depth', '3')
 
 
 def test_follow_symlinks_and_include_dirs_options():
@@ -222,6 +240,43 @@ def test_min_max_depth_limits_results(tmp_path):
     assert 'top.txt' not in min_depth_results
     assert 'mid.txt' in min_depth_results
     assert 'deep.txt' in min_depth_results
+
+
+def test_depth_filters_do_not_count_skipped_entries(tmp_path):
+    root = tmp_path
+    (root / 'top.txt').write_text('top')
+    level1 = root / 'level1'
+    level1.mkdir()
+    (level1 / 'mid.txt').write_text('mid')
+
+    finder = findFiles.EnhancedFileFinder()
+
+    results = sorted(Path(p).name for p in finder.find_files(
+        [str(root)], recursive=True, min_depth=2
+    ))
+
+    assert results == ['mid.txt']
+    assert finder.stats['files_found'] == 1
+
+
+def test_following_symlinks_honours_max_depth(tmp_path):
+    root = tmp_path
+    target = root / 'real'
+    target.mkdir()
+    (target / 'inner.txt').write_text('content')
+
+    symlink_dir = root / 'link'
+    symlink_dir.symlink_to(target, target_is_directory=True)
+
+    finder = findFiles.EnhancedFileFinder()
+
+    results = sorted(Path(p).name for p in finder.find_files(
+        [str(root)], recursive=True, include_dirs=True,
+        follow_symlinks=True, max_depth=1
+    ))
+
+    assert 'link' in results
+    assert 'inner.txt' not in results
 
 
 def test_git_ignore_option_enables_git_filter(tmp_path):

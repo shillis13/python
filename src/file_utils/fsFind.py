@@ -136,6 +136,22 @@ class EnhancedFileFinder:
                 0, min_depth=min_depth, max_depth=max_depth
             )
 
+    def _should_emit(self, item: Path, include_dirs: bool) -> bool:
+        """Update statistics and determine if a matched item should be emitted."""
+
+        if item.is_dir():
+            if include_dirs:
+                self.stats['directories_found'] += 1
+                return True
+            return False
+
+        if item.is_symlink():
+            self.stats['symlinks_found'] += 1
+        else:
+            self.stats['files_found'] += 1
+
+        return True
+
     def _search_directory(self, directory: Path, recursive: bool, file_pattern: Optional[str],
                          substrings: List[str], regex: Optional[str], extensions: List[str],
                          file_types: List[str], fs_filter: Optional[FileSystemFilter],
@@ -149,19 +165,7 @@ class EnhancedFileFinder:
                 # Skip broken symlinks
                 if item.is_symlink() and not item.exists():
                     continue
-                
-                # Handle symlinks
-                if item.is_symlink() and not follow_symlinks:
-                    if self._matches_criteria(item, file_pattern, substrings, regex, 
-                                            extensions, file_types, fs_filter):
-                        if include_dirs or not item.is_dir():
-                            yield str(item)
-                            if item.is_dir():
-                                self.stats['directories_found'] += 1
-                            else:
-                                self.stats['symlinks_found'] += 1
-                    continue
-                
+
                 current_depth = depth + 1
 
                 if max_depth is not None and current_depth > max_depth:
@@ -174,17 +178,8 @@ class EnhancedFileFinder:
                     if min_depth is not None:
                         meets_min_depth = current_depth >= max(min_depth, 0)
 
-                    if meets_min_depth:
-                        if item.is_dir():
-                            if include_dirs:
-                                yield str(item)
-                                self.stats['directories_found'] += 1
-                        else:
-                            yield str(item)
-                            if item.is_symlink():
-                                self.stats['symlinks_found'] += 1
-                            else:
-                                self.stats['files_found'] += 1
+                    if meets_min_depth and self._should_emit(item, include_dirs):
+                        yield str(item)
 
                 # Recurse into directories
                 if (
@@ -457,6 +452,32 @@ def create_filter_from_args(args) -> Optional[FileSystemFilter]:
     return fs_filter
 
 
+def _non_negative_int(value: str) -> int:
+    """argparse type ensuring depth values stay non-negative."""
+
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise argparse.ArgumentTypeError("Depth values must be integers") from exc
+
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("Depth values must be >= 0")
+
+    return parsed
+
+
+class _DepthAction(argparse.Action):
+    """Ensure --min-depth and --max-depth remain consistent."""
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        setattr(namespace, self.dest, values)
+
+        if (namespace.min_depth is not None and
+                namespace.max_depth is not None and
+                namespace.min_depth > namespace.max_depth):
+            parser.error("--min-depth cannot be greater than --max-depth")
+
+
 def add_args(parser: argparse.ArgumentParser) -> None:
     """Register command line arguments for this module."""
     # Basic search parameters
@@ -467,9 +488,9 @@ def add_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument('--no-recursive', dest='recursive', action='store_false',
                        help='Disable recursive search')
     parser.set_defaults(recursive=True)
-    parser.add_argument('--max-depth', type=int, metavar='N',
+    parser.add_argument('--max-depth', type=_non_negative_int, action=_DepthAction, metavar='N',
                         help='Limit search to N levels below the starting directories')
-    parser.add_argument('--min-depth', type=int, metavar='N',
+    parser.add_argument('--min-depth', type=_non_negative_int, action=_DepthAction, metavar='N',
                         help='Only return results at depth N or greater (0 = starting directory)')
     parser.add_argument('--follow-symlinks', action='store_true',
                        help='Follow symbolic links during search')
