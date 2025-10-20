@@ -4,6 +4,7 @@ import argparse
 import logging
 import os
 import sys
+from pathlib import Path
 from unittest import mock
 
 # Ensure src is on sys.path
@@ -67,6 +68,12 @@ def test_verbose_help_output(capsys):
 def test_recursive_options_toggle():
     assert parse_args('--no-recursive').recursive is False
     assert parse_args('--recursive').recursive is True
+
+
+def test_depth_arguments_parse():
+    args = parse_args('--max-depth', '2', '--min-depth', '1')
+    assert args.max_depth == 2
+    assert args.min_depth == 1
 
 
 def test_follow_symlinks_and_include_dirs_options():
@@ -188,6 +195,33 @@ def test_filter_file_option_without_pyyaml(monkeypatch, tmp_path, caplog):
     assert fs_filter is Filter.return_value
     assert "PyYAML is required for --filter-file support" in caplog.text
     assert "Ignoring --filter-file because PyYAML is not available." in caplog.text
+
+
+def test_min_max_depth_limits_results(tmp_path):
+    root = tmp_path
+    (root / 'top.txt').write_text('top')
+    level1 = root / 'level1'
+    level1.mkdir()
+    (level1 / 'mid.txt').write_text('mid')
+    level2 = level1 / 'level2'
+    level2.mkdir()
+    (level2 / 'deep.txt').write_text('deep')
+
+    finder = findFiles.EnhancedFileFinder()
+
+    max_depth_results = sorted(Path(p).name for p in finder.find_files(
+        [str(root)], recursive=True, max_depth=1
+    ))
+    assert 'top.txt' in max_depth_results
+    assert 'mid.txt' not in max_depth_results
+    assert 'deep.txt' not in max_depth_results
+
+    min_depth_results = sorted(Path(p).name for p in finder.find_files(
+        [str(root)], recursive=True, min_depth=2
+    ))
+    assert 'top.txt' not in min_depth_results
+    assert 'mid.txt' in min_depth_results
+    assert 'deep.txt' in min_depth_results
 
 
 def test_git_ignore_option_enables_git_filter(tmp_path):
