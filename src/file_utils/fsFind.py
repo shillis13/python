@@ -489,9 +489,13 @@ def add_args(parser: argparse.ArgumentParser) -> None:
                        help='Disable recursive search')
     parser.set_defaults(recursive=True)
     parser.add_argument('--max-depth', type=_non_negative_int, action=_DepthAction, metavar='N',
-                        help='Limit search to N levels below the starting directories')
+                        help=('Limit search to N levels below the starting directories. '
+                              'Entries at depth N are included, but traversal stops before '
+                              'descending further.'))
     parser.add_argument('--min-depth', type=_non_negative_int, action=_DepthAction, metavar='N',
-                        help='Only return results at depth N or greater (0 = starting directory)')
+                        help=('Only return results at depth N or greater. Depth 0 corresponds '
+                              'to the immediate children of the starting directories; the '
+                              'starting directories themselves are never emitted.'))
     parser.add_argument('--follow-symlinks', action='store_true',
                        help='Follow symbolic links during search')
     parser.add_argument('--include-dirs', action='store_true',
@@ -580,8 +584,8 @@ Usage Examples for fsFind.py:
 Basic File Finding:
   fsFind.py                                 # Find all items in current directory
   fsFind.py . --recursive                  # Recursive search
-  fsFind.py . --max-depth 2                # Limit search depth
-  fsFind.py . --min-depth 1                # Skip top-level entries
+  fsFind.py . --max-depth 2                # Include depth-2 entries, skip deeper levels
+  fsFind.py . --min-depth 1                # Depth 0 = immediate children of the start dirs
   fsFind.py /project --include-dirs         # Include directories in results
   fsFind.py . "*.py" --recursive           # Find Python files recursively
 
@@ -647,8 +651,11 @@ BASIC SEARCH OPTIONS:
     -r, --recursive       Search subdirectories recursively
     --include-dirs        Include directories in results (default: files only)
     --follow-symlinks     Follow symbolic links during traversal
-    --max-depth N         Limit search to N levels below the starting points
-    --min-depth N         Only return results at depth N or deeper (0 = start)
+    --max-depth N         Limit search to N levels below the starting points (depth N is included)
+    --min-depth N         Only return results at depth N or deeper (depth 0 = children of the start dirs)
+
+    Depth semantics: the starting directories themselves are not emitted; depth 0 refers to their
+    immediate children.
 
 LEGACY PATTERN MATCHING:
     pattern               Glob pattern (e.g., "*.py", "*test*")
