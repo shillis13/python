@@ -1,6 +1,14 @@
 # lib_doc_converter.py
-import markdown2
-import conversion_utils as utils
+"""Library helpers for document conversion routines."""
+
+from __future__ import annotations
+
+try:  # pragma: no cover - allow package relative imports when installed
+    from . import conversion_utils as utils
+    from .markdown_adapter import MarkdownAdapter
+except ImportError:  # pragma: no cover - fallback for script execution
+    import conversion_utils as utils
+    from markdown_adapter import MarkdownAdapter
 import yaml
 
 """
@@ -92,8 +100,7 @@ def to_html_document(metadata, content, css_content, include_toc=True):
             final_html_content += f'<h2 style="text-align: center;">Assessment Version: {doc_title}</h2>'
 
         if isinstance(doc, str): # Handle Markdown content
-            # (Logic for markdown remains the same)
-            markdowner = markdown2.Markdown(extras=["toc", "tables", "fenced-code-blocks", "strike"])
+            markdowner = MarkdownAdapter(extras=["toc", "tables", "fenced-code-blocks", "strike"])
             html_part = markdowner.convert(doc)
             final_html_content += f'<div class="content">{html_part}</div>'
         elif isinstance(doc, dict): # Handle structured data

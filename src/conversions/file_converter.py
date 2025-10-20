@@ -1,20 +1,22 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""
-Universal File Converter (Version 6 - Unified Interface)
-A single command-line tool to convert chat histories and general documents.
-It automatically detects the file type and calls the appropriate conversion logic.
-"""
+"""Universal File Converter with automatic dispatch between converters."""
+
+from __future__ import annotations
 
 import argparse
 import os
-import sys
 import re
+import sys
+from textwrap import dedent
 
-# Import the callable functions from the specialized scripts
-from chat_history_converter import run_chat_conversion
-from doc_converter import run_doc_conversion
+try:  # pragma: no cover - allow package relative imports when installed
+    from .chat_history_converter import run_chat_conversion
+    from .doc_converter import run_doc_conversion
+except ImportError:  # pragma: no cover - fallback for script execution
+    from chat_history_converter import run_chat_conversion
+    from doc_converter import run_doc_conversion
 
 
 """
@@ -41,14 +43,43 @@ def is_chat_file(file_path):
 """
 The main dispatcher function.
 """
-def main():
+HELP_EXAMPLES = dedent(
+    """
+    Examples:
+      Convert a chat transcript to HTML:
+        file_converter.py transcript.md --format html --output transcript.html
+
+      Convert a policy document to JSON and overwrite any existing file:
+        file_converter.py policy.yml -f json -o policy.json --force
+
+      Inspect chat statistics without writing a file:
+        file_converter.py transcript.md --analyze
+    """
+)
+
+HELP_VERBOSE = dedent(
+    """
+    Verbose help:
+      * The converter inspects the input file for typical ``role: message``
+        patterns.  If they are present the chat converter is used, otherwise the
+        document converter is invoked.
+      * Use ``--format`` to choose the destination format.  When omitted the
+        extension of ``--output`` (if provided) or ``html`` is used.
+      * ``--force`` allows overwriting an existing output file.
+      * ``--no-toc`` is forwarded to the document converter to disable table of
+        contents generation in HTML documents.
+    """
+)
+
+
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="A unified tool to convert chat histories and documents.",
         formatter_class=argparse.RawTextHelpFormatter,
-        add_help=False
+        add_help=False,
     )
     # --- Universal Arguments ---
-    parser.add_argument("input_file", help="Path to the input file.")
+    parser.add_argument("input_file", nargs="?", help="Path to the input file.")
     parser.add_argument("-o", "--output", help="Path for the output file.")
     parser.add_argument("-f", "--format", choices=['json', 'yml', 'md', 'html'], help="Output format.")
     parser.add_argument("--force", action="store_true", help="Force overwrite of output file.")
@@ -63,8 +94,26 @@ def main():
 
     # --- Help ---
     parser.add_argument("-h", "--help", "-?", "--Help", action="help", help="Show this help message and exit.")
+    parser.add_argument("--help-examples", action="store_true", help="Show detailed usage examples and exit.")
+    parser.add_argument("--help-verbose", action="store_true", help="Show extended documentation and exit.")
 
+    return parser
+
+
+def main():
+    parser = build_parser()
     args = parser.parse_args()
+
+    if getattr(args, "help_examples", False):
+        print(HELP_EXAMPLES)
+        sys.exit(0)
+
+    if getattr(args, "help_verbose", False):
+        print(HELP_VERBOSE)
+        sys.exit(0)
+
+    if not getattr(args, "input_file", None):
+        parser.error("the following arguments are required: input_file")
 
     if not os.path.exists(args.input_file):
         print(f"Error: Input file not found at '{args.input_file}'", file=sys.stderr)

@@ -1,16 +1,25 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+"""General-Purpose Document Converter.
+
+The script can be invoked directly or its :func:`run_doc_conversion` helper can
+be imported by other modules.  Rich CLI help is available via ``--help``,
+``--help-examples`` and ``--help-verbose``.
 """
-General-Purpose Document Converter (Version 5.1 - Refactored for Library Use)
-Provides the core execution logic for converting monolithic documents.
-This script is intended to be called by a master dispatcher.
-"""
+from __future__ import annotations
+
 import argparse
 import os
 import sys
-import lib_doc_converter as converter
-import conversion_utils as utils
+from textwrap import dedent
+
+try:  # pragma: no cover - allow package relative imports when installed
+    from . import conversion_utils as utils
+    from . import lib_doc_converter as converter
+except ImportError:  # pragma: no cover - fallback for script execution
+    import conversion_utils as utils
+    import lib_doc_converter as converter
 
 # Default CSS for HTML Output
 DEFAULT_CSS = """
@@ -69,13 +78,71 @@ def run_doc_conversion(args):
 """
 Main entry point for running this script directly.
 """
+HELP_EXAMPLES = dedent(
+    """
+    Examples:
+      Convert Markdown to HTML with a table of contents:
+        doc_converter.py README.md --format html --output README.html
+
+      Convert YAML to Markdown while keeping the inferred title:
+        doc_converter.py notes.yml -f md -o notes.md
+
+      Export a JSON document to YAML:
+        doc_converter.py payload.json -f yml -o payload.yml
+    """
+)
+
+HELP_VERBOSE = dedent(
+    """
+    Verbose help:
+      * Supported input formats: Markdown (.md), JSON (.json) and YAML (.yml/.yaml).
+      * The converter automatically infers an output file name when ``--output``
+        is omitted by replacing the extension with the chosen ``--format``.
+      * When ``--format html`` is selected a responsive standalone HTML document
+        is generated.  The ``--no-toc`` flag suppresses table-of-contents output.
+      * When ``--format md`` is used the raw markdown body is written.
+      * ``--format json`` or ``--format yml`` serialises both metadata and content
+        in the requested structured format for downstream processing.
+    """
+)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Standalone Document Converter.",
+        formatter_class=argparse.RawTextHelpFormatter,
+    )
+    parser.add_argument("input_file", nargs="?", help="Path to the document to convert.")
+    parser.add_argument("-o", "--output", help="Destination path for the converted file.")
+    parser.add_argument("-f", "--format", choices=["html", "md", "json", "yml"], help="Desired output format.")
+    parser.add_argument("--no-toc", action="store_true", help="Disable table-of-contents generation for HTML output.")
+    parser.add_argument(
+        "--help-examples",
+        action="store_true",
+        help="Show detailed usage examples and exit.",
+    )
+    parser.add_argument(
+        "--help-verbose",
+        action="store_true",
+        help="Show extended documentation about supported workflows and exit.",
+    )
+    return parser
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Standalone Document Converter.")
-    parser.add_argument("input_file")
-    parser.add_argument("-o", "--output")
-    parser.add_argument("-f", "--format")
-    parser.add_argument("--no-toc", action="store_true")
+    parser = build_parser()
     args = parser.parse_args()
+
+    if getattr(args, "help_examples", False):
+        print(HELP_EXAMPLES)
+        sys.exit(0)
+
+    if getattr(args, "help_verbose", False):
+        print(HELP_VERBOSE)
+        sys.exit(0)
+
+    if not getattr(args, "input_file", None):
+        parser.error("the following arguments are required: input_file")
 
     # Simple defaulting for standalone mode
     if not args.format and args.output:

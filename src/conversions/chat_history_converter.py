@@ -1,17 +1,25 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+"""Specialised Chat History Converter.
+
+Provides ``run_chat_conversion`` for reuse and exposes a rich command line
+interface with ``--help``, ``--help-examples`` and ``--help-verbose`` output.
 """
-Specialized Chat History Converter (Version 5.1 - Refactored for Library Use)
-Provides the core execution logic for converting structured chat history files.
-This script is intended to be called by a master dispatcher.
-"""
+
+from __future__ import annotations
 
 import argparse
 import os
 import sys
-import lib_chat_converter as converter
-import conversion_utils as utils
+from textwrap import dedent
+
+try:  # pragma: no cover - allow package relative imports when installed
+    from . import conversion_utils as utils
+    from . import lib_chat_converter as converter
+except ImportError:  # pragma: no cover - fallback for script execution
+    import conversion_utils as utils
+    import lib_chat_converter as converter
 
 # Default CSS for HTML Output
 DEFAULT_CSS = """
@@ -96,13 +104,73 @@ def run_chat_conversion(args):
 """
 Main entry point for running this script directly.
 """
+HELP_EXAMPLES = dedent(
+    """
+    Examples:
+      Convert a chat Markdown log to HTML:
+        chat_history_converter.py transcript.md --format html --output transcript.html
+
+      Export chat YAML to JSON for further processing:
+        chat_history_converter.py chat.yml -f json -o chat.json
+
+      Quickly inspect message statistics:
+        chat_history_converter.py transcript.md --analyze
+    """
+)
+
+HELP_VERBOSE = dedent(
+    """
+    Verbose help:
+      * Supported input formats: Markdown (.md), JSON (.json) and YAML (.yml/.yaml).
+      * ``--format`` controls the destination type (md, html, json or yml).
+      * When ``--analyze`` is provided the converter prints summary statistics
+        instead of writing an output file.
+      * Metadata from YAML front matter is preserved in structured outputs.
+    """
+)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Standalone Chat History Converter.",
+        formatter_class=argparse.RawTextHelpFormatter,
+    )
+    parser.add_argument("input_file", nargs="?", help="Path to the chat transcript.")
+    parser.add_argument("-o", "--output", help="Destination path for the converted file.")
+    parser.add_argument(
+        "-f",
+        "--format",
+        choices=["html", "md", "json", "yml"],
+        help="Desired output format.",
+    )
+    parser.add_argument("--analyze", action="store_true", help="Print chat statistics instead of converting.")
+    parser.add_argument(
+        "--help-examples",
+        action="store_true",
+        help="Show detailed usage examples and exit.",
+    )
+    parser.add_argument(
+        "--help-verbose",
+        action="store_true",
+        help="Show extended documentation and exit.",
+    )
+    return parser
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Standalone Chat History Converter.")
-    parser.add_argument("input_file")
-    parser.add_argument("-o", "--output")
-    parser.add_argument("-f", "--format")
-    parser.add_argument("--analyze", action="store_true")
+    parser = build_parser()
     args = parser.parse_args()
+
+    if getattr(args, "help_examples", False):
+        print(HELP_EXAMPLES)
+        sys.exit(0)
+
+    if getattr(args, "help_verbose", False):
+        print(HELP_VERBOSE)
+        sys.exit(0)
+
+    if not getattr(args, "input_file", None):
+        parser.error("the following arguments are required: input_file")
 
     # Simple defaulting for standalone mode
     if not args.format and args.output:

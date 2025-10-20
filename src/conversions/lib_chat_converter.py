@@ -1,8 +1,16 @@
 # lib_chat_converter.py
+"""Library helpers for chat history conversion routines."""
+
+from __future__ import annotations
+
 import re
-import markdown2
-from datetime import datetime
-import conversion_utils as utils
+
+try:  # pragma: no cover - allow package relative imports when installed
+    from . import conversion_utils as utils
+    from .markdown_adapter import MarkdownAdapter
+except ImportError:  # pragma: no cover - fallback for script execution
+    import conversion_utils as utils
+    from markdown_adapter import MarkdownAdapter
 
 """
 Parses a Markdown file formatted for chat logs, expecting 'role: content'
@@ -84,7 +92,7 @@ Returns:
 """
 def to_html_chat(metadata, messages, css_content):
     title = metadata.get('title', 'Chat History')
-    markdowner = markdown2.Markdown(extras=["tables", "fenced-code-blocks", "strike"])
+    markdowner = MarkdownAdapter(extras=["tables", "fenced-code-blocks", "strike"])
 
     message_html_parts = []
     for msg in messages:
