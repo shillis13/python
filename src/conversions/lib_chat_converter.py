@@ -1,8 +1,19 @@
 # lib_chat_converter.py
+from __future__ import annotations
+
 import re
-import markdown2
 from datetime import datetime
-import conversion_utils as utils
+
+try:  # pragma: no cover - executed during normal operation
+    from . import conversion_utils as utils
+except ImportError:  # pragma: no cover - fallback for running as script
+    import os
+    import sys
+
+    CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+    if CURRENT_DIR not in sys.path:
+        sys.path.insert(0, CURRENT_DIR)
+    import conversion_utils as utils  # type: ignore
 
 """
 Parses a Markdown file formatted for chat logs, expecting 'role: content'
@@ -84,7 +95,9 @@ Returns:
 """
 def to_html_chat(metadata, messages, css_content):
     title = metadata.get('title', 'Chat History')
-    markdowner = markdown2.Markdown(extras=["tables", "fenced-code-blocks", "strike"])
+    markdowner = utils.get_markdown_converter(
+        extras=["tables", "fenced-code-blocks", "strike"]
+    )
 
     message_html_parts = []
     for msg in messages:

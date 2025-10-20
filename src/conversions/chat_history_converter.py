@@ -1,17 +1,23 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""
-Specialized Chat History Converter (Version 5.1 - Refactored for Library Use)
-Provides the core execution logic for converting structured chat history files.
-This script is intended to be called by a master dispatcher.
-"""
+"""Command line entry point for converting structured chat histories."""
+
+from __future__ import annotations
 
 import argparse
 import os
 import sys
-import lib_chat_converter as converter
-import conversion_utils as utils
+
+try:  # pragma: no cover - executed when used as a module
+    from . import conversion_utils as utils
+    from . import lib_chat_converter as converter
+except ImportError:  # pragma: no cover - fallback when executed directly
+    CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+    if CURRENT_DIR not in sys.path:
+        sys.path.insert(0, CURRENT_DIR)
+    import conversion_utils as utils  # type: ignore
+    import lib_chat_converter as converter  # type: ignore
 
 # Default CSS for HTML Output
 DEFAULT_CSS = """
@@ -93,18 +99,89 @@ def run_chat_conversion(args):
         print(f"Successfully converted chat to '{args.output}'")
 
 
+EXAMPLES_TEXT = """Examples:
+  python -m conversions.chat_history_converter conversation.md
+  python -m conversions.chat_history_converter chat.json -f html
+  python -m conversions.chat_history_converter chat.yml -f json -o output.json
+  python -m conversions.chat_history_converter conversation.md --analyze
 """
-Main entry point for running this script directly.
-"""
-def main():
-    parser = argparse.ArgumentParser(description="Standalone Chat History Converter.")
-    parser.add_argument("input_file")
-    parser.add_argument("-o", "--output")
-    parser.add_argument("-f", "--format")
-    parser.add_argument("--analyze", action="store_true")
-    args = parser.parse_args()
 
-    # Simple defaulting for standalone mode
+
+VERBOSE_TEXT = """Detailed option reference:
+  input_file           Path to a chat export in Markdown, JSON or YAML format.
+  -o, --output         Destination file. Defaults to <input>.<format>.
+  -f, --format         Output format: html, md, json or yml. Defaults to html.
+  --analyze            Skip conversion and print summary statistics.
+  --help-examples      Display real-world command examples.
+  --help-verbose       Display this extended description.
+  -h, --help           Display the standard argument help screen.
+"""
+
+
+def create_parser() -> argparse.ArgumentParser:
+    """Build and return the argument parser for the CLI."""
+
+    parser = argparse.ArgumentParser(
+        description="Standalone Chat History Converter.",
+        formatter_class=argparse.RawTextHelpFormatter,
+        add_help=False,
+    )
+    parser.add_argument(
+        "input_file",
+        help="Chat history file (Markdown, JSON or YAML).",
+    )
+    parser.add_argument(
+        "-o",
+        "--output",
+        help="Path to the converted file. Defaults to the input name + format.",
+    )
+    parser.add_argument(
+        "-f",
+        "--format",
+        choices=["html", "md", "json", "yml"],
+        help="Desired output format (html/md/json/yml).",
+    )
+    parser.add_argument(
+        "--analyze",
+        action="store_true",
+        help="Analyze the chat instead of producing a new file.",
+    )
+    parser.add_argument(
+        "--help-examples",
+        action="store_true",
+        help="Show usage examples and exit.",
+    )
+    parser.add_argument(
+        "--help-verbose",
+        action="store_true",
+        help="Show an extended description of each option and exit.",
+    )
+    parser.add_argument(
+        "-h",
+        "--help",
+        "-?",
+        "--Help",
+        action="help",
+        help="Show this help message and exit.",
+    )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Parse command line arguments and run the conversion."""
+
+    argv = list(sys.argv[1:] if argv is None else argv)
+
+    if "--help-examples" in argv:
+        print(EXAMPLES_TEXT.strip())
+        return 0
+    if "--help-verbose" in argv:
+        print(VERBOSE_TEXT.strip())
+        return 0
+
+    parser = create_parser()
+    args = parser.parse_args(argv)
+
     if not args.format and args.output:
         args.format = os.path.splitext(args.output)[1].lower().replace('.', '')
     elif not args.format:
@@ -115,8 +192,9 @@ def main():
         args.output = f"{base_name}.{args.format}"
 
     run_chat_conversion(args)
+    return 0
 
 
-if __name__ == "__main__":
-    main()
+if __name__ == "__main__":  # pragma: no cover - manual execution hook
+    raise SystemExit(main())
 

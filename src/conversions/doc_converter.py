@@ -1,16 +1,23 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""
-General-Purpose Document Converter (Version 5.1 - Refactored for Library Use)
-Provides the core execution logic for converting monolithic documents.
-This script is intended to be called by a master dispatcher.
-"""
+"""Command line entry point for converting Markdown, JSON or YAML documents."""
+
+from __future__ import annotations
+
 import argparse
 import os
 import sys
-import lib_doc_converter as converter
-import conversion_utils as utils
+
+try:  # pragma: no cover - executed during normal operation
+    from . import conversion_utils as utils
+    from . import lib_doc_converter as converter
+except ImportError:  # pragma: no cover - fallback when executed directly
+    CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+    if CURRENT_DIR not in sys.path:
+        sys.path.insert(0, CURRENT_DIR)
+    import conversion_utils as utils  # type: ignore
+    import lib_doc_converter as converter  # type: ignore
 
 # Default CSS for HTML Output
 DEFAULT_CSS = """
@@ -66,18 +73,89 @@ def run_doc_conversion(args):
     else:
         print(f"Successfully converted document to '{args.output}'")
 
+EXAMPLES_TEXT = """Examples:
+  python -m conversions.doc_converter notes.md
+  python -m conversions.doc_converter report.yml -f html
+  python -m conversions.doc_converter assessment.json -f md -o notes.md
+  python -m conversions.doc_converter outline.md --no-toc
 """
-Main entry point for running this script directly.
-"""
-def main():
-    parser = argparse.ArgumentParser(description="Standalone Document Converter.")
-    parser.add_argument("input_file")
-    parser.add_argument("-o", "--output")
-    parser.add_argument("-f", "--format")
-    parser.add_argument("--no-toc", action="store_true")
-    args = parser.parse_args()
 
-    # Simple defaulting for standalone mode
+
+VERBOSE_TEXT = """Detailed option reference:
+  input_file           Path to a Markdown, JSON or YAML file.
+  -o, --output         Destination file. Defaults to <input>.<format>.
+  -f, --format         Output format: html, md, json or yml. Defaults to html.
+  --no-toc             Skip Table of Contents generation for Markdown sources.
+  --help-examples      Display real-world command examples.
+  --help-verbose       Display this extended description.
+  -h, --help           Display the standard argument help screen.
+"""
+
+
+def create_parser() -> argparse.ArgumentParser:
+    """Build and return the argument parser for the document converter."""
+
+    parser = argparse.ArgumentParser(
+        description="Standalone Document Converter.",
+        formatter_class=argparse.RawTextHelpFormatter,
+        add_help=False,
+    )
+    parser.add_argument(
+        "input_file",
+        help="Document to convert (Markdown, JSON or YAML).",
+    )
+    parser.add_argument(
+        "-o",
+        "--output",
+        help="Path to the converted file. Defaults to the input name + format.",
+    )
+    parser.add_argument(
+        "-f",
+        "--format",
+        choices=["html", "md", "json", "yml"],
+        help="Desired output format (html/md/json/yml).",
+    )
+    parser.add_argument(
+        "--no-toc",
+        action="store_true",
+        help="Disable automatic Table of Contents generation for HTML output.",
+    )
+    parser.add_argument(
+        "--help-examples",
+        action="store_true",
+        help="Show usage examples and exit.",
+    )
+    parser.add_argument(
+        "--help-verbose",
+        action="store_true",
+        help="Show an extended description of each option and exit.",
+    )
+    parser.add_argument(
+        "-h",
+        "--help",
+        "-?",
+        "--Help",
+        action="help",
+        help="Show this help message and exit.",
+    )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Parse command line arguments and run the conversion."""
+
+    argv = list(sys.argv[1:] if argv is None else argv)
+
+    if "--help-examples" in argv:
+        print(EXAMPLES_TEXT.strip())
+        return 0
+    if "--help-verbose" in argv:
+        print(VERBOSE_TEXT.strip())
+        return 0
+
+    parser = create_parser()
+    args = parser.parse_args(argv)
+
     if not args.format and args.output:
         args.format = os.path.splitext(args.output)[1].lower().replace('.', '')
     elif not args.format:
@@ -88,7 +166,9 @@ def main():
         args.output = f"{base_name}.{args.format}"
 
     run_doc_conversion(args)
+    return 0
 
-if __name__ == "__main__":
-    main()
+
+if __name__ == "__main__":  # pragma: no cover - manual execution hook
+    raise SystemExit(main())
 
