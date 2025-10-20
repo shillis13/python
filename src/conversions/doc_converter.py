@@ -9,8 +9,55 @@ This script is intended to be called by a master dispatcher.
 import argparse
 import os
 import sys
-import lib_doc_converter as converter
-import conversion_utils as utils
+
+try:  # pragma: no cover - import error path exercised via tests
+    from . import lib_doc_converter as converter
+    from . import conversion_utils as utils
+except ImportError:  # pragma: no cover - fallback for script execution
+    import lib_doc_converter as converter  # type: ignore
+    import conversion_utils as utils  # type: ignore
+
+DOC_EXAMPLES = """
+  Convert Markdown to HTML while building a table of contents:
+    doc_converter.py notes.md --format html --output notes.html
+
+  Transform YAML into Markdown and overwrite the output:
+    doc_converter.py summary.yml --format md --output summary.md
+
+  Convert JSON to YAML without generating a table of contents:
+    doc_converter.py report.json --format yml --no-toc
+"""
+
+DOC_VERBOSE = """
+The document converter accepts Markdown, JSON, and YAML sources. YAML streams
+can represent multiple documents; the converter renders each sequentially in a
+single HTML page separated by horizontal rules. When ``--no-toc`` is omitted a
+table of contents is generated for Markdown inputs that include headings.
+"""
+
+
+def build_parser():
+    parser = argparse.ArgumentParser(
+        description="Standalone Document Converter.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        add_help=False,
+    )
+    parser.add_argument("input_file", help="Path to the document to convert.")
+    parser.add_argument("-o", "--output", help="Path for the converted output.")
+    parser.add_argument(
+        "-f",
+        "--format",
+        choices=["html", "md", "json", "yml"],
+        help="Output format (defaults to HTML when omitted).",
+    )
+    parser.add_argument(
+        "--no-toc",
+        action="store_true",
+        help="Skip table of contents generation when producing HTML.",
+    )
+    parser.add_argument("-h", "--help", action="help", help="Show help and exit.")
+    utils.add_extended_help(parser, DOC_EXAMPLES, DOC_VERBOSE)
+    return parser
 
 # Default CSS for HTML Output
 DEFAULT_CSS = """
@@ -70,11 +117,7 @@ def run_doc_conversion(args):
 Main entry point for running this script directly.
 """
 def main():
-    parser = argparse.ArgumentParser(description="Standalone Document Converter.")
-    parser.add_argument("input_file")
-    parser.add_argument("-o", "--output")
-    parser.add_argument("-f", "--format")
-    parser.add_argument("--no-toc", action="store_true")
+    parser = build_parser()
     args = parser.parse_args()
 
     # Simple defaulting for standalone mode

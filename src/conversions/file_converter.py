@@ -9,12 +9,63 @@ It automatically detects the file type and calls the appropriate conversion logi
 
 import argparse
 import os
-import sys
 import re
+import sys
 
-# Import the callable functions from the specialized scripts
-from chat_history_converter import run_chat_conversion
-from doc_converter import run_doc_conversion
+try:  # pragma: no cover - import error path exercised via tests
+    from .chat_history_converter import run_chat_conversion
+    from .doc_converter import run_doc_conversion
+    from . import conversion_utils as utils
+except ImportError:  # pragma: no cover - fallback for script execution
+    from chat_history_converter import run_chat_conversion  # type: ignore
+    from doc_converter import run_doc_conversion  # type: ignore
+    import conversion_utils as utils  # type: ignore
+
+FILE_EXAMPLES = """
+  Convert a chat transcript to Markdown, overwriting the default output:
+    file_converter.py transcript.md --format md --output transcript_converted.md
+
+  Convert a YAML document to HTML and force overwrite:
+    file_converter.py reference.yml --format html --force
+
+  Analyze a chat file without writing output:
+    file_converter.py archive.json --analyze
+"""
+
+FILE_VERBOSE = """
+The file converter inspects the input to determine whether to route the
+operation through the chat or document pipeline. Chat detection uses simple
+role markers (``user:``, ``assistant:``, ``system:``). Any document that does
+not match those heuristics is passed to the document converter, allowing the
+tool to support Markdown, JSON, and YAML across both workflows.
+"""
+
+
+def build_parser():
+    parser = argparse.ArgumentParser(
+        description="A unified tool to convert chat histories and documents.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        add_help=False,
+    )
+    parser.add_argument("input_file", help="Path to the input file.")
+    parser.add_argument("-o", "--output", help="Path for the output file.")
+    parser.add_argument(
+        "-f",
+        "--format",
+        choices=["json", "yml", "md", "html"],
+        help="Output format (defaults to HTML when omitted).",
+    )
+    parser.add_argument("--force", action="store_true", help="Force overwrite of the output file if it exists.")
+
+    chat_group = parser.add_argument_group("Chat-Specific Options")
+    chat_group.add_argument("--analyze", action="store_true", help="Display chat statistics instead of converting.")
+
+    doc_group = parser.add_argument_group("Document-Specific Options")
+    doc_group.add_argument("--no-toc", action="store_true", help="Disable Table of Contents in HTML output.")
+
+    parser.add_argument("-h", "--help", "-?", "--Help", action="help", help="Show this help message and exit.")
+    utils.add_extended_help(parser, FILE_EXAMPLES, FILE_VERBOSE)
+    return parser
 
 
 """
@@ -42,28 +93,7 @@ def is_chat_file(file_path):
 The main dispatcher function.
 """
 def main():
-    parser = argparse.ArgumentParser(
-        description="A unified tool to convert chat histories and documents.",
-        formatter_class=argparse.RawTextHelpFormatter,
-        add_help=False
-    )
-    # --- Universal Arguments ---
-    parser.add_argument("input_file", help="Path to the input file.")
-    parser.add_argument("-o", "--output", help="Path for the output file.")
-    parser.add_argument("-f", "--format", choices=['json', 'yml', 'md', 'html'], help="Output format.")
-    parser.add_argument("--force", action="store_true", help="Force overwrite of output file.")
-
-    # --- Chat-Specific Arguments ---
-    chat_group = parser.add_argument_group('Chat-Specific Options')
-    chat_group.add_argument("--analyze", action="store_true", help="Display chat statistics instead of converting.")
-
-    # --- Document-Specific Arguments ---
-    doc_group = parser.add_argument_group('Document-Specific Options')
-    doc_group.add_argument("--no-toc", action="store_true", help="Disable Table of Contents in HTML output.")
-
-    # --- Help ---
-    parser.add_argument("-h", "--help", "-?", "--Help", action="help", help="Show this help message and exit.")
-
+    parser = build_parser()
     args = parser.parse_args()
 
     if not os.path.exists(args.input_file):

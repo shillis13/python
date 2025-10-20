@@ -1,7 +1,16 @@
 # conversion_utils.py
+import argparse
 import json
-import yaml
 import os
+from html import escape
+from typing import Iterable, Optional
+
+import yaml
+
+try:  # pragma: no cover - import error path exercised via fallback class
+    import markdown2 as _markdown2
+except ModuleNotFoundError:  # pragma: no cover - handled explicitly in tests
+    _markdown2 = None
 
 
 """
@@ -104,4 +113,81 @@ def load_yaml_from_string(content):
 """
 def to_yaml_string(data):
     return yaml.dump(data, sort_keys=False)
+
+
+class _BasicMarkdownConverter:
+    """A tiny, dependency-free Markdown converter used as a fallback.
+
+    The goal of this converter is not to be feature complete; it simply provides
+    sensible HTML output when the optional ``markdown2`` dependency is missing.
+    It supports paragraph separation and basic line breaks so that downstream
+    converters can continue to operate in minimal environments.
+    """
+
+    def __init__(self, extras: Optional[Iterable[str]] = None):
+        self.extras = list(extras or [])
+
+    def convert(self, text: str) -> str:
+        paragraphs = []
+        for block in text.split("\n\n"):
+            clean_block = escape(block.strip())
+            if not clean_block:
+                continue
+            paragraphs.append(clean_block.replace("\n", "<br />\n"))
+        if not paragraphs:
+            return ""
+        return "".join(f"<p>{paragraph}</p>" for paragraph in paragraphs)
+
+
+def get_markdown_converter(extras: Optional[Iterable[str]] = None):
+    """Return a Markdown converter, gracefully degrading without ``markdown2``.
+
+    Args:
+        extras: Optional iterable of ``markdown2`` extras. The fallback
+            implementation silently ignores these values.
+
+    Returns:
+        An object exposing a ``convert`` method. When ``markdown2`` is available
+        the real implementation is returned, otherwise a small built-in fallback
+        is provided so that conversions remain functional.
+    """
+
+    if _markdown2 is not None:
+        return _markdown2.Markdown(extras=list(extras or []))
+    return _BasicMarkdownConverter(extras)
+
+
+def add_extended_help(parser: argparse.ArgumentParser, examples_text: str, verbose_text: str):
+    """Augment ``parser`` with ``--help-examples`` and ``--help-verbose``.
+
+    The additional flags print the default help text plus extra documentation
+    before exiting. This keeps the converters self-documenting while avoiding
+    duplication of help formatting logic in every script.
+    """
+
+    class _HelpExamplesAction(argparse.Action):
+        def __call__(self, parser, namespace, values, option_string=None):  # pragma: no cover - thin wrapper
+            parser.print_help()
+            print(f"\nExamples:\n{examples_text.strip()}\n")
+            parser.exit(0)
+
+    class _HelpVerboseAction(argparse.Action):
+        def __call__(self, parser, namespace, values, option_string=None):  # pragma: no cover - thin wrapper
+            parser.print_help()
+            print(f"\nAdditional Details:\n{verbose_text.strip()}\n")
+            parser.exit(0)
+
+    parser.add_argument(
+        "--help-examples",
+        action=_HelpExamplesAction,
+        nargs=0,
+        help="Show the standard help text followed by detailed usage examples and exit.",
+    )
+    parser.add_argument(
+        "--help-verbose",
+        action=_HelpVerboseAction,
+        nargs=0,
+        help="Show the standard help text followed by an in-depth feature overview and exit.",
+    )
+    return parser
 
