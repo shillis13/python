@@ -85,7 +85,8 @@ class EnhancedFileFinder:
                   file_pattern: Optional[str] = None, substrings: Optional[List[str]] = None,
                   regex: Optional[str] = None, extensions: Optional[List[str]] = None,
                   file_types: Optional[List[str]] = None, fs_filter: Optional[FileSystemFilter] = None,
-                  include_dirs: bool = False, follow_symlinks: bool = False) -> Iterator[str]:
+                  include_dirs: bool = False, follow_symlinks: bool = False,
+                  min_depth: Optional[int] = None, max_depth: Optional[int] = None) -> Iterator[str]:
         """
         Enhanced file finder with filtering capabilities.
         
@@ -131,13 +132,31 @@ class EnhancedFileFinder:
             
             yield from self._search_directory(
                 dir_path, recursive, file_pattern, substrings, regex,
-                extensions, file_types, fs_filter, include_dirs, follow_symlinks
+                extensions, file_types, fs_filter, include_dirs, follow_symlinks,
+                0, min_depth=min_depth, max_depth=max_depth
             )
-    
+
+    def _should_emit(self, item: Path, include_dirs: bool) -> bool:
+        """Update statistics and determine if a matched item should be emitted."""
+
+        if item.is_dir():
+            if include_dirs:
+                self.stats['directories_found'] += 1
+                return True
+            return False
+
+        if item.is_symlink():
+            self.stats['symlinks_found'] += 1
+        else:
+            self.stats['files_found'] += 1
+
+        return True
+
     def _search_directory(self, directory: Path, recursive: bool, file_pattern: Optional[str],
                          substrings: List[str], regex: Optional[str], extensions: List[str],
                          file_types: List[str], fs_filter: Optional[FileSystemFilter],
-                         include_dirs: bool, follow_symlinks: bool) -> Iterator[str]:
+                         include_dirs: bool, follow_symlinks: bool, depth: int,
+                         *, min_depth: Optional[int] = None, max_depth: Optional[int] = None) -> Iterator[str]:
         """Search a single directory."""
         try:
             self.stats['directories_searched'] += 1
@@ -146,40 +165,36 @@ class EnhancedFileFinder:
                 # Skip broken symlinks
                 if item.is_symlink() and not item.exists():
                     continue
-                
-                # Handle symlinks
-                if item.is_symlink() and not follow_symlinks:
-                    if self._matches_criteria(item, file_pattern, substrings, regex, 
-                                            extensions, file_types, fs_filter):
-                        if include_dirs or not item.is_dir():
-                            yield str(item)
-                            if item.is_dir():
-                                self.stats['directories_found'] += 1
-                            else:
-                                self.stats['symlinks_found'] += 1
+
+                current_depth = depth + 1
+
+                if max_depth is not None and current_depth > max_depth:
                     continue
-                
-                # Check if item matches criteria
+
+                # Check if item matches criteria and depth constraints
                 if self._matches_criteria(item, file_pattern, substrings, regex,
                                         extensions, file_types, fs_filter):
-                    if item.is_dir():
-                        if include_dirs:
-                            yield str(item)
-                            self.stats['directories_found'] += 1
-                    else:
+                    meets_min_depth = True
+                    if min_depth is not None:
+                        meets_min_depth = current_depth >= max(min_depth, 0)
+
+                    if meets_min_depth and self._should_emit(item, include_dirs):
                         yield str(item)
-                        if item.is_symlink():
-                            self.stats['symlinks_found'] += 1
-                        else:
-                            self.stats['files_found'] += 1
-                
+
                 # Recurse into directories
-                if recursive and item.is_dir() and (follow_symlinks or not item.is_symlink()):
+                if (
+                    recursive
+                    and item.is_dir()
+                    and (follow_symlinks or not item.is_symlink())
+                ):
+                    if max_depth is not None and current_depth >= max_depth:
+                        continue
                     if fs_filter and not fs_filter.should_descend(item, directory):
                         continue
                     yield from self._search_directory(
                         item, recursive, file_pattern, substrings, regex,
-                        extensions, file_types, fs_filter, include_dirs, follow_symlinks
+                        extensions, file_types, fs_filter, include_dirs, follow_symlinks,
+                        current_depth, min_depth=min_depth, max_depth=max_depth
                     )
                     
         except PermissionError:
@@ -437,6 +452,32 @@ def create_filter_from_args(args) -> Optional[FileSystemFilter]:
     return fs_filter
 
 
+def _non_negative_int(value: str) -> int:
+    """argparse type ensuring depth values stay non-negative."""
+
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise argparse.ArgumentTypeError("Depth values must be integers") from exc
+
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("Depth values must be >= 0")
+
+    return parsed
+
+
+class _DepthAction(argparse.Action):
+    """Ensure --min-depth and --max-depth remain consistent."""
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        setattr(namespace, self.dest, values)
+
+        if (namespace.min_depth is not None and
+                namespace.max_depth is not None and
+                namespace.min_depth > namespace.max_depth):
+            parser.error("--min-depth cannot be greater than --max-depth")
+
+
 def add_args(parser: argparse.ArgumentParser) -> None:
     """Register command line arguments for this module."""
     # Basic search parameters
@@ -447,6 +488,14 @@ def add_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument('--no-recursive', dest='recursive', action='store_false',
                        help='Disable recursive search')
     parser.set_defaults(recursive=True)
+    parser.add_argument('--max-depth', type=_non_negative_int, action=_DepthAction, metavar='N',
+                        help=('Limit search to N levels below the starting directories. '
+                              'Entries at depth N are included, but traversal stops before '
+                              'descending further.'))
+    parser.add_argument('--min-depth', type=_non_negative_int, action=_DepthAction, metavar='N',
+                        help=('Only return results at depth N or greater. Depth 0 corresponds '
+                              'to the immediate children of the starting directories; the '
+                              'starting directories themselves are never emitted.'))
     parser.add_argument('--follow-symlinks', action='store_true',
                        help='Follow symbolic links during search')
     parser.add_argument('--include-dirs', action='store_true',
@@ -535,6 +584,8 @@ Usage Examples for fsFind.py:
 Basic File Finding:
   fsFind.py                                 # Find all items in current directory
   fsFind.py . --recursive                  # Recursive search
+  fsFind.py . --max-depth 2                # Include depth-2 entries, skip deeper levels
+  fsFind.py . --min-depth 1                # Depth 0 = immediate children of the start dirs
   fsFind.py /project --include-dirs         # Include directories in results
   fsFind.py . "*.py" --recursive           # Find Python files recursively
 
@@ -600,6 +651,11 @@ BASIC SEARCH OPTIONS:
     -r, --recursive       Search subdirectories recursively
     --include-dirs        Include directories in results (default: files only)
     --follow-symlinks     Follow symbolic links during traversal
+    --max-depth N         Limit search to N levels below the starting points (depth N is included)
+    --min-depth N         Only return results at depth N or deeper (depth 0 = children of the start dirs)
+
+    Depth semantics: the starting directories themselves are not emitted; depth 0 refers to their
+    immediate children.
 
 LEGACY PATTERN MATCHING:
     pattern               Glob pattern (e.g., "*.py", "*test*")
@@ -790,6 +846,8 @@ def process_find_pipeline(args):
                 fs_filter=fs_filter,
                 include_dirs=args.include_dirs,
                 follow_symlinks=args.follow_symlinks,
+                min_depth=args.min_depth,
+                max_depth=args.max_depth,
             )
         )
 
@@ -836,6 +894,7 @@ def main():
         print("  fsFind.py . --recursive        # Recursive search")
         print("  fsFind.py . '*.py' -r          # Find Python files recursively")
         print("  fsFind.py . --type image -r    # Find image files recursively")
+        print("  fsFind.py . --max-depth 2      # Limit how deep to search")
         print("\nFor help:")
         print("  fsFind.py --help               # Standard help")
         print("  fsFind.py --help-examples      # Usage examples")

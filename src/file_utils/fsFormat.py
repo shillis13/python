@@ -237,7 +237,13 @@ AVAILABLE_COLUMN_ORDER: Sequence[str] = (
 )
 
 
-def _row_from_file_info(file_info: FileInfo, *, colorizer: Optional[Callable[[str, FileInfo], str]] = None) -> Dict[str, Any]:
+def _row_from_file_info(
+    file_info: FileInfo,
+    *,
+    colorizer: Optional[Callable[[str, FileInfo], str]] = None,
+    path_formatter: Optional[Callable[[Path], str]] = None,
+    parent_formatter: Optional[Callable[[Path], str]] = None,
+) -> Dict[str, Any]:
     display_name = file_info.name
     if file_info.symlink_target:
         display_name = f"{display_name} -> {file_info.symlink_target}"
@@ -251,12 +257,18 @@ def _row_from_file_info(file_info: FileInfo, *, colorizer: Optional[Callable[[st
     size_human = file_info.format_size().strip()
     size_bytes = str(file_info.size if file_info.size is not None else 0)
 
+    path_value = path_formatter(file_info.path) if path_formatter else str(file_info.path)
+    parent_value = (
+        parent_formatter(file_info.path.parent)
+        if parent_formatter else str(file_info.path.parent)
+    )
+
     return {
         'name': file_info.name,
         'display_name': display_name,
         'basename': file_info.name,
-        'path': str(file_info.path),
-        'parent': str(file_info.path.parent),
+        'path': path_value,
+        'parent': parent_value,
         'size': size_human,
         'size_bytes': size_bytes,
         'modified': _format_datetime(file_info.modified),
@@ -350,9 +362,20 @@ def resolve_columns(requested: Optional[Sequence[str]], default: Sequence[str] =
 
 
 def collect_file_rows(
-    items: Sequence[FileInfo], *, colorizer: Optional[Callable[[str, FileInfo], str]] = None
+    items: Sequence[FileInfo], *,
+    colorizer: Optional[Callable[[str, FileInfo], str]] = None,
+    path_formatter: Optional[Callable[[Path], str]] = None,
+    parent_formatter: Optional[Callable[[Path], str]] = None,
 ) -> List[Dict[str, Any]]:
-    return [_row_from_file_info(item, colorizer=colorizer) for item in items]
+    return [
+        _row_from_file_info(
+            item,
+            colorizer=colorizer,
+            path_formatter=path_formatter,
+            parent_formatter=parent_formatter,
+        )
+        for item in items
+    ]
 
 
 def render_list(rows: Sequence[Dict[str, Any]], columns: Sequence[ColumnSpec]) -> str:
@@ -385,11 +408,33 @@ def render_list(rows: Sequence[Dict[str, Any]], columns: Sequence[ColumnSpec]) -
     return '\n'.join(lines)
 
 
-def _split_cell(value: str, width: int, wrap_mode: str) -> List[str]:
+ELLIPSIS = '…'
+
+
+def _trim_cell_value(value: str, width: int, mode: str) -> str:
+    if width <= 0 or len(value) <= width:
+        return value
+    if width == 1:
+        return ELLIPSIS
+    if mode == 'left':
+        return ELLIPSIS + value[-(width - 1):]
+    if mode == 'center':
+        left = (width - 1) // 2
+        right = width - 1 - left
+        right_segment = value[-right:] if right > 0 else ''
+        return f"{value[:left]}{ELLIPSIS}{right_segment}"
+    # Default to trimming on the right
+    return value[:width - 1] + ELLIPSIS
+
+
+def _split_cell(value: str, width: int, wrap_mode: str, *,
+                trim_long_values: bool = True, trim_mode: str = 'right') -> List[str]:
     if wrap_mode == 'none' or width <= 0:
         return [value]
     if wrap_mode == 'truncate':
-        return [value[:width]]
+        if trim_long_values:
+            return [_trim_cell_value(value, width, trim_mode)]
+        return [value]
     if wrap_mode == 'word':
         wrapped = textwrap.wrap(value, width=width, break_long_words=False, drop_whitespace=False)
         return wrapped or ['']
@@ -411,12 +456,17 @@ def render_table(
     wrap_mode: str = 'truncate',
     column_widths: Optional[Dict[str, int]] = None,
     max_width: Optional[int] = None,
+    default_width: Optional[int] = None,
+    trim_long_values: bool = True,
+    trim_mode: str = 'right',
 ) -> str:
     if not rows:
         return 'No items to display.'
 
     if wrap_mode not in {'none', 'word', 'truncate'}:
         raise ValueError("wrap_mode must be one of 'none', 'word', or 'truncate'")
+    if trim_mode not in {'left', 'right', 'center'}:
+        raise ValueError("trim_mode must be 'left', 'right', or 'center'")
 
     column_widths = column_widths or {}
     computed_widths: Dict[str, int] = {}
@@ -428,6 +478,8 @@ def render_table(
             base_width = max(base_width, column.default_width)
         if column.key in column_widths:
             width = max(column_widths[column.key], 0)
+        elif default_width is not None:
+            width = max(default_width, 0)
         else:
             width = base_width
         if max_width is not None:
@@ -438,7 +490,10 @@ def render_table(
     separator_parts = []
     for column in columns:
         width = computed_widths[column.key]
-        header_parts.append(_align_cell(column.header, width, column.align))
+        header_value = column.header
+        if trim_long_values and width > 0 and len(header_value) > width:
+            header_value = _trim_cell_value(header_value, width, trim_mode)
+        header_parts.append(_align_cell(header_value, width, column.align))
         separator_parts.append('-' * max(width, 1))
 
     lines = [' | '.join(header_parts), '-+-'.join(separator_parts)]
@@ -448,7 +503,15 @@ def render_table(
         for column in columns:
             value = str(column.getter(row) or '')
             width = computed_widths[column.key]
-            cell_lines.append(_split_cell(value, width, wrap_mode))
+            cell_lines.append(
+                _split_cell(
+                    value,
+                    width,
+                    wrap_mode,
+                    trim_long_values=trim_long_values,
+                    trim_mode=trim_mode,
+                )
+            )
 
         height = max(len(cell) for cell in cell_lines)
         for line_index in range(height):
@@ -456,8 +519,8 @@ def render_table(
             for column, cell in zip(columns, cell_lines):
                 width = computed_widths[column.key]
                 value = cell[line_index] if line_index < len(cell) else ''
-                if wrap_mode == 'truncate' and width > 0:
-                    value = value[:width]
+                if wrap_mode == 'truncate' and trim_long_values and width > 0:
+                    value = _trim_cell_value(value, width, trim_mode)
                 parts.append(_align_cell(value, width, column.align))
             lines.append(' | '.join(parts))
 
@@ -474,7 +537,13 @@ class FileSystemFormatter:
                  columns: Optional[List[str]] = None, sort_by: str = "name",
                  reverse_sort: bool = False, wrap_mode: str = 'truncate',
                  column_widths: Optional[Dict[str, int]] = None,
-                 max_width: Optional[int] = None):
+                 max_width: Optional[int] = None,
+                 path_style: str = 'relative',
+                 path_base: Optional[Path] = None,
+                 default_relative_base: Optional[Path] = None,
+                 cell_width: Optional[int] = None,
+                 trim_long_values: bool = True,
+                 trim_mode: str = 'right'):
 
         self.format_type = format_type
         self.show_files = show_files or format_type != 'tree'
@@ -492,9 +561,23 @@ class FileSystemFormatter:
         self.wrap_mode = wrap_mode
         self.column_widths = column_widths or {}
         self.max_width = max_width
+        if path_style not in {'relative', 'absolute', 'relative-start', 'relative-home'}:
+            raise ValueError("path_style must be one of 'relative', 'absolute', 'relative-start', or 'relative-home'")
+        if trim_mode not in {'left', 'right', 'center'}:
+            raise ValueError("trim_mode must be 'left', 'right', or 'center'")
+        self.path_style = path_style
+        self.path_base = self._prepare_base(path_base)
+        default_base_prepared = self._prepare_base(default_relative_base)
+        if default_base_prepared is None:
+            default_base_prepared = self._prepare_base(Path.cwd())
+        self.default_relative_base = default_base_prepared
+        self.home_path = self._prepare_base(Path.home())
+        self.cell_width = None if cell_width is None else max(int(cell_width), 0)
+        self.trim_long_values = trim_long_values
+        self.trim_mode = trim_mode
 
         self.chars = TREE_CHARS['ascii' if use_ascii else 'unicode']
-        
+
         # Statistics
         self.stats = {
             'dirs': 0,
@@ -502,7 +585,84 @@ class FileSystemFormatter:
             'symlinks': 0,
             'total_size': 0
         }
-    
+
+    def _prepare_base(self, value: Optional[Path]) -> Optional[Path]:
+        if value is None:
+            return None
+        try:
+            path = Path(value)
+        except TypeError:
+            return None
+        try:
+            path = path.expanduser()
+        except Exception:
+            pass
+        try:
+            return path.resolve(strict=False)
+        except TypeError:
+            try:
+                return path.resolve()
+            except Exception:
+                return path
+        except Exception:
+            try:
+                return path.resolve()
+            except Exception:
+                return path
+
+    def _safe_resolve(self, path: Path) -> Path:
+        try:
+            return path.resolve(strict=False)
+        except TypeError:
+            try:
+                return path.resolve()
+            except Exception:
+                return path
+        except Exception:
+            try:
+                return path.resolve()
+            except Exception:
+                return path
+
+    def _format_relative(self, path: Path, base: Optional[Path], *, allow_relpath: bool = False) -> Optional[str]:
+        if base is None:
+            return None
+        try:
+            relative = path.relative_to(base)
+            text = str(relative)
+            return text if text else '.'
+        except ValueError:
+            if allow_relpath:
+                try:
+                    rel_text = os.path.relpath(str(path), str(base))
+                    return rel_text
+                except ValueError:
+                    return None
+        return None
+
+    def format_path(self, path: Path) -> str:
+        absolute = self._safe_resolve(path)
+        style = self.path_style
+        if style == 'absolute':
+            return str(absolute)
+        if style == 'relative-home':
+            home_relative = self._format_relative(absolute, self.home_path, allow_relpath=False)
+            if home_relative is not None:
+                if home_relative in {'', '.'}:
+                    return '~'
+                return f"~/{home_relative}"
+            style = 'relative'
+        if style == 'relative-start':
+            base = self.path_base or self.default_relative_base
+            relative = self._format_relative(absolute, base, allow_relpath=True)
+            if relative is not None:
+                return relative
+            style = 'relative'
+        relative_default = self._format_relative(absolute, self.default_relative_base, allow_relpath=True)
+        if relative_default is not None:
+            return relative_default
+        return str(absolute)
+
     def colorize_item(self, name: str, file_info: FileInfo) -> str:
         """Apply colors to file/directory names based on type."""
         if not self.use_colors:
@@ -712,34 +872,57 @@ class FileSystemFormatter:
         colorizer = None
         if self.use_colors and column_specs and column_specs[-1].key == 'name':
             colorizer = self.colorize_item
-        rows = collect_file_rows(items, colorizer=colorizer)
+        rows = collect_file_rows(
+            items,
+            colorizer=colorizer,
+            path_formatter=self.format_path,
+            parent_formatter=self.format_path,
+        )
         return render_list(rows, column_specs)
 
     def format_table(self, items: List[FileInfo]) -> str:
         if not items:
             return 'No items to display.'
         column_specs = resolve_columns(self.columns, default=DEFAULT_LIST_COLUMNS)
-        rows = collect_file_rows(items, colorizer=None)
+        rows = collect_file_rows(
+            items,
+            colorizer=None,
+            path_formatter=self.format_path,
+            parent_formatter=self.format_path,
+        )
         return render_table(
             rows,
             column_specs,
             wrap_mode=self.wrap_mode,
             column_widths=self.column_widths,
             max_width=self.max_width,
+            default_width=self.cell_width,
+            trim_long_values=self.trim_long_values,
+            trim_mode=self.trim_mode,
         )
     
     def format_json(self, items: List[FileInfo], compact: bool = False) -> str:
         """Format as JSON."""
-        data = [item.to_dict() for item in items]
-        
+        data: List[Dict[str, Any]] = []
+        for item in items:
+            info = item.to_dict()
+            info['path'] = self.format_path(item.path)
+            info['parent'] = self.format_path(item.path.parent)
+            data.append(info)
+
         if compact:
             return json.dumps(data, separators=(',', ':'))
         else:
             return json.dumps(data, indent=2, default=str)
-    
+
     def format_yaml(self, items: List[FileInfo]) -> str:
         """Format as YAML."""
-        data = [item.to_dict() for item in items]
+        data: List[Dict[str, Any]] = []
+        for item in items:
+            info = item.to_dict()
+            info['path'] = self.format_path(item.path)
+            info['parent'] = self.format_path(item.path.parent)
+            data.append(info)
         return yaml.dump(data, default_flow_style=False, sort_keys=False)
     
     def format_csv(self, items: List[FileInfo]) -> str:
@@ -748,7 +931,12 @@ class FileSystemFormatter:
             return ""
 
         column_specs = resolve_columns(self.columns, default=DEFAULT_LIST_COLUMNS)
-        rows = collect_file_rows(items, colorizer=None)
+        rows = collect_file_rows(
+            items,
+            colorizer=None,
+            path_formatter=self.format_path,
+            parent_formatter=self.format_path,
+        )
 
         header = [spec.key for spec in column_specs]
         output = [','.join(header)]
@@ -819,6 +1007,12 @@ def add_args(parser: argparse.ArgumentParser) -> None:
     # Paths and input
     parser.add_argument('paths', nargs='*', help="Paths to format (default: current directory)")
     parser.add_argument('--from-file', '-ff', help="Read paths from file")
+    parser.add_argument('--path-style',
+                        choices=['relative', 'absolute', 'relative-start', 'relative-home'],
+                        default='relative',
+                        help="How to display file paths (default: relative)")
+    parser.add_argument('--path-base',
+                        help="Base directory to use when --path-style=relative-start")
     
     # Format options
     parser.add_argument('--format', '-fmt',
@@ -859,6 +1053,15 @@ def add_args(parser: argparse.ArgumentParser) -> None:
                         help="Column width overrides for tables. Example: --col-widths name=40,size=12")
     parser.add_argument('--max-width', type=int,
                         help="Maximum width applied to automatically sized table columns. Example: --max-width 80")
+    parser.add_argument('--cell-width', type=int, metavar='N',
+                        help="Default width to apply to table columns when unspecified")
+    parser.add_argument('--trim-long-values', dest='trim_long_values', action='store_true',
+                        help="Trim values that exceed the column width (default)")
+    parser.add_argument('--no-trim-long-values', dest='trim_long_values', action='store_false',
+                        help="Allow values to overflow column widths without trimming")
+    parser.add_argument('--trim-mode', choices=['left', 'right', 'center'], default='right',
+                        help="When trimming, remove characters from the left, right, or center (default: right)")
+    parser.set_defaults(trim_long_values=True)
     
     # Tree-specific options
     parser.add_argument('--ascii', '-a', action='store_true', help="Use ASCII characters for tree")
@@ -930,6 +1133,8 @@ Table Format:
   fsFormat.py . --table --columns name,kind --wrap word   # Word-wrap cells
   fsFormat.py . --table --col-widths name=32,size=12       # Fixed column widths
   fsFormat.py . --table --max-width 60                     # Limit auto column widths
+  fsFormat.py . --table --columns name,path --path-style absolute  # Show absolute paths
+  fsFormat.py . --table --cell-width 18 --trim-mode center         # Trim wide values in the middle
 
 JSON/YAML/CSV Output:
   fsFormat.py . --json --files > files.json       # JSON export
@@ -947,6 +1152,7 @@ Filtering Integration:
 Pipeline Usage:
   find . -name "*.py" | fsFormat.py --format table --size        # Table from find
   fsFilters.py . --type image | fsFormat.py --format json     # JSON for filtered images
+  fsFormat.py ~ --table --path-style relative-home            # Show paths relative to home
 
 Grouping and Sorting:
   fsFormat.py . --files --group-by type --format table          # Group by file type
@@ -988,7 +1194,7 @@ CONTENT CONTROL:
     --files               Include files (default: directories only for tree)
     --max-depth N         Limit tree/recursion depth
     --hidden              Show hidden files and directories
-    
+
 DISPLAY OPTIONS:
     --size                Show file sizes
     --modified            Show modification dates
@@ -997,9 +1203,17 @@ DISPLAY OPTIONS:
     --wrap MODE           Table wrapping strategy (none, word, truncate)
     --col-widths MAP      Column width overrides, e.g. name=40,size=12
     --max-width N         Maximum width applied to auto-sized table columns
+    --cell-width N        Default width to apply to table columns when unspecified
+    --trim-long-values    Trim values longer than the column width (default)
+    --no-trim-long-values Allow long values to overflow column widths
+    --trim-mode MODE      Trim from the left, right, or center when shortening values
 
     Available columns include: name, basename, path, parent, perms, owner, group,
     size, size_bytes, modified, created, accessed, kind, type, ext, symlink
+
+PATH DISPLAY:
+    --path-style STYLE    Choose relative, absolute, relative-start, or relative-home paths
+    --path-base DIR       Base directory when using --path-style=relative-start
 
 TREE-SPECIFIC OPTIONS:
     --ascii               Use ASCII characters instead of Unicode
@@ -1036,6 +1250,7 @@ Tree Format:
 Table Format:
     - Customizable columns
     - Wrapping control via --wrap and --max-width
+    - Default widths via --cell-width with trimming controls (--trim-long-values, --trim-mode)
     - Sortable by any attribute
     - Fixed-width layout
     - Grouping support
@@ -1190,6 +1405,37 @@ def process_format_pipeline(args):
     selected_format = 'tree' if args.legacy_output else args.format
     args.format = selected_format
 
+    explicit_base: Optional[Path] = None
+    if args.path_base:
+        explicit_base = Path(args.path_base).expanduser()
+        try:
+            explicit_base = explicit_base.resolve(strict=False)
+        except Exception:
+            pass
+        if explicit_base.is_file():
+            explicit_base = explicit_base.parent
+
+    default_relative_base: Optional[Path] = None
+    if input_paths:
+        resolved_candidates: List[Path] = []
+        for raw_path in input_paths:
+            candidate = Path(raw_path).expanduser()
+            try:
+                resolved_candidate = candidate.resolve(strict=False)
+            except Exception:
+                resolved_candidate = candidate
+            if resolved_candidate.is_file():
+                resolved_candidates.append(resolved_candidate.parent)
+            else:
+                resolved_candidates.append(resolved_candidate)
+
+        if resolved_candidates:
+            try:
+                common = os.path.commonpath([str(path) for path in resolved_candidates])
+                default_relative_base = Path(common)
+            except ValueError:
+                default_relative_base = resolved_candidates[0]
+
     # Create formatter
     formatter = FileSystemFormatter(
         format_type=selected_format,
@@ -1208,6 +1454,12 @@ def process_format_pipeline(args):
         wrap_mode=args.wrap,
         column_widths=column_widths,
         max_width=args.max_width,
+        path_style=args.path_style,
+        path_base=explicit_base,
+        default_relative_base=default_relative_base,
+        cell_width=args.cell_width,
+        trim_long_values=args.trim_long_values,
+        trim_mode=args.trim_mode,
     )
     
     # Create filter

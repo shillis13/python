@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import stat
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -25,7 +27,12 @@ def _build_env() -> dict[str, str]:
     return env
 
 
-def _run_fsformat(*args: str, env: dict[str, str] | None = None, check: bool = True) -> subprocess.CompletedProcess[str]:
+def _run_fsformat(
+    *args: str,
+    env: dict[str, str] | None = None,
+    check: bool = True,
+    cwd: Path | str | None = None,
+) -> subprocess.CompletedProcess[str]:
     cmd = [sys.executable, "-m", "file_utils.fsFormat", *args]
     return subprocess.run(
         cmd,
@@ -33,11 +40,19 @@ def _run_fsformat(*args: str, env: dict[str, str] | None = None, check: bool = T
         capture_output=True,
         env=env,
         check=check,
+        cwd=cwd,
     )
 
 
 def _list_output_lines(output: str) -> list[str]:
     return [line for line in output.splitlines() if line and not line.startswith("No items")]  # pragma: no cover - helper
+
+
+def _table_rows(output: str) -> list[str]:
+    lines = [line for line in output.splitlines() if line.strip()]
+    if len(lines) <= 2:
+        return []
+    return lines[2:]
 
 
 def test_default_listing_shows_kind_and_permissions(tmp_path):
@@ -173,3 +188,143 @@ def test_invalid_column_reports_error(tmp_path):
     result = _run_fsformat(str(tmp_path), "--columns", "unknown", env=env, check=False)
     assert "Unknown column" in result.stderr
     assert "✅" not in result.stderr
+
+
+def test_path_style_relative_by_default(tmp_path):
+    env = _build_env()
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    target = nested / "example.txt"
+    target.write_text("data", encoding="utf-8")
+
+    proc = _run_fsformat(str(tmp_path), "--table", "--columns", "path", env=env)
+    rows = _table_rows(proc.stdout)
+
+    assert rows, proc.stdout
+    row = next(r for r in rows if "example.txt" in r)
+    assert "nested" in row and "example.txt" in row
+    assert str(tmp_path) not in row
+
+
+def test_path_style_absolute(tmp_path):
+    env = _build_env()
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    target = nested / "absolute.txt"
+    target.write_text("data", encoding="utf-8")
+
+    proc = _run_fsformat(
+        str(tmp_path),
+        "--table",
+        "--columns",
+        "path",
+        "--path-style",
+        "absolute",
+        env=env,
+    )
+    rows = _table_rows(proc.stdout)
+    assert rows, proc.stdout
+    row = next(r for r in rows if "absolute.txt" in r)
+    assert str(target) in row
+
+
+def test_path_style_relative_home(tmp_path):
+    env = _build_env()
+    home_root = Path.home() / f"fsformat_home_{uuid.uuid4().hex}"
+    home_dir = home_root / "workspace"
+    home_dir.mkdir(parents=True)
+    file_path = home_dir / "homefile.txt"
+    file_path.write_text("hello", encoding="utf-8")
+
+    try:
+        proc = _run_fsformat(
+            str(home_dir),
+            "--table",
+            "--columns",
+            "path",
+            "--path-style",
+            "relative-home",
+            env=env,
+        )
+    finally:
+        shutil.rmtree(home_root, ignore_errors=True)
+
+    rows = _table_rows(proc.stdout)
+    assert rows, proc.stdout
+    row = next(r for r in rows if "homefile.txt" in r).strip()
+    assert row.startswith("~")
+    assert row.endswith("homefile.txt")
+
+
+def test_path_style_relative_start_with_base(tmp_path):
+    env = _build_env()
+    project = tmp_path / "project"
+    nested = project / "pkg"
+    nested.mkdir(parents=True)
+    module = nested / "module.py"
+    module.write_text("print('hi')\n", encoding="utf-8")
+
+    proc = _run_fsformat(
+        str(project),
+        "--table",
+        "--columns",
+        "path",
+        "--path-style",
+        "relative-start",
+        "--path-base",
+        str(nested),
+        env=env,
+    )
+
+    rows = _table_rows(proc.stdout)
+    assert rows, proc.stdout
+    row = next(r for r in rows if "module.py" in r)
+    assert row.strip().endswith("module.py")
+    assert "pkg/" not in row
+
+
+def test_table_cell_width_and_trim_options(tmp_path):
+    env = _build_env()
+    long_name = tmp_path / "longfilenameexample.txt"
+    long_name.write_text("content", encoding="utf-8")
+
+    proc = _run_fsformat(
+        str(tmp_path),
+        "--table",
+        "--columns",
+        "name",
+        "--cell-width",
+        "8",
+        "--trim-mode",
+        "center",
+        env=env,
+    )
+
+    rows = _table_rows(proc.stdout)
+    assert rows, proc.stdout
+    row = rows[-1]
+    assert "…" in row
+    assert row.count("…") == 1
+    assert "txt" in row and row.strip().startswith("lon")
+
+
+def test_table_no_trim_allows_long_values(tmp_path):
+    env = _build_env()
+    long_name = tmp_path / "untrimmed_value.txt"
+    long_name.write_text("data", encoding="utf-8")
+
+    proc = _run_fsformat(
+        str(tmp_path),
+        "--table",
+        "--columns",
+        "name",
+        "--cell-width",
+        "5",
+        "--no-trim-long-values",
+        env=env,
+    )
+
+    rows = _table_rows(proc.stdout)
+    assert rows, proc.stdout
+    row = next(r for r in rows if "untrimmed_value.txt" in r)
+    assert "untrimmed_value.txt" in row
