@@ -1,7 +1,12 @@
 # lib_doc_converter.py
-import markdown2
-import conversion_utils as utils
 import yaml
+
+try:  # pragma: no cover - import shim
+    from . import conversion_utils as utils  # type: ignore
+    from .markdown_adapters import create_markdowner  # type: ignore
+except ImportError:  # pragma: no cover - script execution path
+    import conversion_utils as utils  # type: ignore
+    from markdown_adapters import create_markdowner  # type: ignore
 
 """
 * Recursively converts a Python object (from YAML/JSON) into an HTML string
@@ -93,7 +98,7 @@ def to_html_document(metadata, content, css_content, include_toc=True):
 
         if isinstance(doc, str): # Handle Markdown content
             # (Logic for markdown remains the same)
-            markdowner = markdown2.Markdown(extras=["toc", "tables", "fenced-code-blocks", "strike"])
+            markdowner = create_markdowner(["toc", "tables", "fenced-code-blocks", "strike"])
             html_part = markdowner.convert(doc)
             final_html_content += f'<div class="content">{html_part}</div>'
         elif isinstance(doc, dict): # Handle structured data

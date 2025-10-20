@@ -9,8 +9,14 @@ This script is intended to be called by a master dispatcher.
 import argparse
 import os
 import sys
-import lib_doc_converter as converter
-import conversion_utils as utils
+import textwrap
+
+try:  # pragma: no cover - import shim
+    from . import lib_doc_converter as converter  # type: ignore
+    from . import conversion_utils as utils  # type: ignore
+except ImportError:  # pragma: no cover - script execution path
+    import lib_doc_converter as converter  # type: ignore
+    import conversion_utils as utils  # type: ignore
 
 # Default CSS for HTML Output
 DEFAULT_CSS = """
@@ -69,13 +75,86 @@ def run_doc_conversion(args):
 """
 Main entry point for running this script directly.
 """
-def main():
-    parser = argparse.ArgumentParser(description="Standalone Document Converter.")
-    parser.add_argument("input_file")
-    parser.add_argument("-o", "--output")
-    parser.add_argument("-f", "--format")
-    parser.add_argument("--no-toc", action="store_true")
-    args = parser.parse_args()
+HELP_EXAMPLES = textwrap.dedent(
+    """
+    doc_converter.py handbook.md --format html
+    doc_converter.py assessment.yml --no-toc -f html
+    doc_converter.py notes.json -o notes.md -f md
+    """
+)
+
+HELP_VERBOSE = textwrap.dedent(
+    """
+    The document converter normalises a single document file into a variety of
+    export formats.  Markdown files are passed through unchanged, JSON and YAML
+    inputs may contain ``metadata`` and ``content`` keys, and HTML output will
+    render Markdown or structured data depending on the input type.
+
+    Output defaults mirror the chat converter: the format is inferred from the
+    ``--output`` file extension when available and otherwise defaults to HTML.
+    When the ``--no-toc`` flag is not supplied, Markdown input receives an
+    automatically generated table of contents when supported by the Markdown
+    backend.
+    """
+)
+
+
+def _register_help_actions(parser: argparse.ArgumentParser) -> None:
+    class _ExamplesAction(argparse.Action):
+        def __call__(self, parser, namespace, values, option_string=None):
+            parser.print_help()
+            print("\nExamples:\n" + HELP_EXAMPLES)
+            parser.exit()
+
+    class _VerboseAction(argparse.Action):
+        def __call__(self, parser, namespace, values, option_string=None):
+            parser.print_help()
+            print("\nDetailed information:\n" + HELP_VERBOSE)
+            parser.exit()
+
+    parser.add_argument(
+        "--help-examples",
+        action=_ExamplesAction,
+        nargs=0,
+        help="Show example invocations and exit.",
+    )
+    parser.add_argument(
+        "--help-verbose",
+        action=_VerboseAction,
+        nargs=0,
+        help="Show detailed usage notes and exit.",
+    )
+
+
+def create_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Standalone Document Converter.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("input_file", help="Path to the document to convert.")
+    parser.add_argument(
+        "-o",
+        "--output",
+        help="Destination path for the converted document. Defaults to <input>.<format>.",
+    )
+    parser.add_argument(
+        "-f",
+        "--format",
+        choices=["html", "md", "json", "yml"],
+        help="Output format for the conversion.",
+    )
+    parser.add_argument(
+        "--no-toc",
+        action="store_true",
+        help="Disable the automatic table of contents in HTML output.",
+    )
+    _register_help_actions(parser)
+    return parser
+
+
+def main(argv=None):
+    parser = create_parser()
+    args = parser.parse_args(argv)
 
     # Simple defaulting for standalone mode
     if not args.format and args.output:
