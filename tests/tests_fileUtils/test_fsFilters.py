@@ -6,6 +6,7 @@ Tests the core filtering system including size, date, pattern, type, and git fil
 Covers unit tests, integration tests, edge cases, and error handling.
 """
 
+import argparse
 import os
 import pytest
 import tempfile
@@ -16,11 +17,12 @@ from unittest.mock import Mock, patch, mock_open, MagicMock
 
 # Import the modules under test
 import sys
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "src")))
 
 from file_utils.fsFilters import (
     SizeFilter, DateFilter, GitIgnoreFilter, FileSystemFilter,
-    apply_config_to_filter, process_filters_pipeline, load_config_file
+    _determine_base_paths, add_args, apply_config_to_filter,
+    process_filters_pipeline, load_config_file
 )
 
 
@@ -193,7 +195,15 @@ class TestDateFilter:
 
 class TestGitIgnoreFilter:
     """Test suite for GitIgnoreFilter class."""
-    
+
+    def test_ignore_argument_accepts_multiple_values(self):
+        """Command line --ignore option accepts repeated values."""
+        parser = argparse.ArgumentParser()
+        add_args(parser)
+        args = parser.parse_args(['--ignore', '*.tmp', '--ignore', '*.log'])
+
+        assert args.ignore == ['*.tmp', '*.log']
+
     def test_init_with_empty_paths(self):
         """Test initializing with empty search paths."""
         git_filter = GitIgnoreFilter([])
@@ -573,10 +583,36 @@ class TestIntegrationScenarios:
         
         base_paths = [Path(self.temp_dir)]
         result = fs_filter.filter_paths(self.test_files, base_paths)
-        
+
         # Should exclude Python files
         py_files = [f for f in result if f.endswith('.py')]
         assert len(py_files) == 0
+
+    def test_gitignore_filters_common_patterns(self):
+        """fsFilters honours .gitignore rules such as .DS_Store and directories."""
+        gitignore_path = Path(self.temp_dir) / '.gitignore'
+        gitignore_path.write_text('.DS_Store\nlegacy/\n')
+
+        ds_store = Path(self.temp_dir) / '.DS_Store'
+        ds_store.write_text('ignore me')
+
+        legacy_dir = Path(self.temp_dir) / 'legacy'
+        legacy_dir.mkdir(exist_ok=True)
+        legacy_file = legacy_dir / 'hidden.txt'
+        legacy_file.write_text('ignore me too')
+
+        keep_file = Path(self.temp_dir) / 'keep.txt'
+        keep_file.write_text('keep me')
+
+        fs_filter = FileSystemFilter()
+        fs_filter.enable_gitignore([Path(self.temp_dir)])
+
+        paths = [str(ds_store), str(legacy_file), str(keep_file)]
+        result = fs_filter.filter_paths(paths, [Path(self.temp_dir)])
+
+        assert str(ds_store) not in result
+        assert str(legacy_file) not in result
+        assert str(keep_file) in result
 
 
 class TestErrorHandling:
@@ -612,9 +648,36 @@ class TestErrorHandling:
         """Test config loading with YAML parsing error."""
         with patch('builtins.open', mock_open(read_data='invalid: yaml: content: [')):
             result = load_config_file('invalid.yml')
-            
+
         assert result == {}
         mock_log.assert_called()
+
+
+class TestBasePathResolution:
+    """Tests for determining base directories used by fsFilters."""
+
+    def test_determine_base_paths_prefers_directories(self, tmp_path):
+        """File inputs fall back to their parent directories."""
+        file_path = tmp_path / 'example.txt'
+        file_path.write_text('data')
+
+        base_paths = _determine_base_paths([str(file_path)])
+
+        assert base_paths == [tmp_path.resolve()]
+
+    def test_determine_base_paths_removes_duplicates(self, tmp_path):
+        """Duplicate paths are collapsed while preserving order."""
+        first = tmp_path / 'one'
+        second = tmp_path / 'sub' / 'two'
+        second.parent.mkdir(parents=True, exist_ok=True)
+        first.write_text('1')
+        second.write_text('2')
+
+        inputs = [str(first), str(second), str(second.parent), str(first)]
+        base_paths = _determine_base_paths(inputs)
+
+        expected = [tmp_path.resolve(), second.parent.resolve()]
+        assert base_paths == expected
 
 
 class TestEdgeCases:

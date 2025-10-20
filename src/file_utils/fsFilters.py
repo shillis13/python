@@ -637,10 +637,10 @@ def add_args(parser: argparse.ArgumentParser) -> None:
     # Pattern filters
     parser.add_argument('--file-pattern', '-fp', action='append', default=[], help="File name patterns to include")
     parser.add_argument('--dir-pattern', '-dp', action='append', default=[], help="Directory name patterns to include")
-    parser.add_argument('--pattern', '-p', help="Pattern for both files and directories")
+    parser.add_argument('--pattern', '-p', action='append', default=[], help="Pattern for both files and directories")
     parser.add_argument('--file-ignore', '-fi', action='append', default=[], help="File patterns to ignore")
     parser.add_argument('--dir-ignore', '-di', action='append', default=[], help="Directory patterns to ignore")
-    parser.add_argument('--ignore', '-i', help="Ignore pattern for both files and directories")
+    parser.add_argument('--ignore', '-i', action='append', default=[], help="Ignore pattern for both files and directories")
     
     # Type and extension filters
     parser.add_argument('--type', '-t', action='append', default=[], help="File types to include (e.g., image, video)")
@@ -817,6 +817,46 @@ For basic examples: fsFilters.py --help-examples
     print(help_text)
 
 
+def _determine_base_paths(input_paths: List[str]) -> List[Path]:
+    """Return a list of base directories for ``input_paths``.
+
+    ``FileSystemFilter`` relies on a collection of base directories when
+    applying git-ignore rules and relative path calculations.  When paths are
+    piped in from commands such as ``find`` the list often consists solely of
+    files which breaks ``Path.relative_to`` checks used internally by the
+    filters.  This helper normalises the input so that each entry corresponds to
+    a directory (falling back to the parent directory for files) while
+    preserving order and removing duplicates.
+    """
+
+    seen: Set[str] = set()
+    base_paths: List[Path] = []
+
+    for raw_path in input_paths:
+        candidate = Path(raw_path)
+        if not candidate.exists():
+            continue
+
+        base_dir = candidate if candidate.is_dir() else candidate.parent
+
+        try:
+            resolved = base_dir.resolve()
+        except (OSError, RuntimeError):
+            resolved = base_dir
+
+        key = str(resolved)
+        if key in seen:
+            continue
+
+        seen.add(key)
+        base_paths.append(resolved)
+
+    if not base_paths:
+        base_paths.append(Path.cwd())
+
+    return base_paths
+
+
 def process_filters_pipeline(args):
     """Main pipeline processing function."""
     # Show help if requested
@@ -872,9 +912,9 @@ def process_filters_pipeline(args):
         fs_filter.add_date_filter('before', args.created_before, 'created')
     
     # Pattern handling
-    if args.pattern:
-        fs_filter.add_file_pattern(args.pattern)
-        fs_filter.add_dir_pattern(args.pattern)
+    for pattern in args.pattern:
+        fs_filter.add_file_pattern(pattern)
+        fs_filter.add_dir_pattern(pattern)
     
     for pattern in args.file_pattern:
         fs_filter.add_file_pattern(pattern)
@@ -882,9 +922,9 @@ def process_filters_pipeline(args):
     for pattern in args.dir_pattern:
         fs_filter.add_dir_pattern(pattern)
     
-    if args.ignore:
-        fs_filter.add_file_ignore_pattern(args.ignore)
-        fs_filter.add_dir_ignore_pattern(args.ignore)
+    for pattern in args.ignore:
+        fs_filter.add_file_ignore_pattern(pattern)
+        fs_filter.add_dir_ignore_pattern(pattern)
     
     for pattern in args.file_ignore:
         fs_filter.add_file_ignore_pattern(pattern)
@@ -901,9 +941,9 @@ def process_filters_pipeline(args):
     
     # Git ignore
     if args.git_ignore:
-        base_paths = [Path(p) for p in input_paths if Path(p).exists()]
+        base_paths = _determine_base_paths(input_paths)
         fs_filter.enable_gitignore(base_paths)
-    
+
     if args.ignore_file:
         fs_filter.load_ignore_file(args.ignore_file)
     
@@ -916,7 +956,7 @@ def process_filters_pipeline(args):
         fs_filter.show_empty = True
     
     # Process filtering
-    base_paths = [Path(p) for p in input_paths if Path(p).exists()]
+    base_paths = _determine_base_paths(input_paths)
     filtered_paths = fs_filter.filter_paths(input_paths, base_paths)
     
     if args.dry_run:
