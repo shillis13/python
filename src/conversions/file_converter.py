@@ -9,12 +9,53 @@ It automatically detects the file type and calls the appropriate conversion logi
 
 import argparse
 import os
-import sys
 import re
+import sys
+import textwrap
+
+from typing import Optional, Tuple
 
 # Import the callable functions from the specialized scripts
-from chat_history_converter import run_chat_conversion
-from doc_converter import run_doc_conversion
+from chat_history_converter import ChatConversionError, run_chat_conversion
+from doc_converter import DocumentConversionError, run_doc_conversion
+
+
+SUPPORTED_FORMATS = {"json", "yml", "md", "html"}
+
+
+def _normalize_format(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+
+    normalized = value.lower().lstrip(".")
+    if normalized == "yaml":
+        normalized = "yml"
+
+    return normalized
+
+
+def _resolve_format_and_output(args) -> Tuple[str, str]:
+    requested_format = _normalize_format(getattr(args, "format", None))
+    output_path = getattr(args, "output", None)
+
+    if output_path and not requested_format:
+        requested_format = _normalize_format(os.path.splitext(output_path)[1])
+
+    if not requested_format:
+        requested_format = "html"
+
+    if requested_format not in SUPPORTED_FORMATS:
+        raise ValueError(
+            "Unsupported output format '{0}'. Supported formats: {1}.".format(
+                requested_format, ", ".join(sorted(SUPPORTED_FORMATS))
+            )
+        )
+
+    if not output_path:
+        base_name = os.path.splitext(args.input_file)[0]
+        output_path = f"{base_name}.{requested_format}"
+
+    return requested_format, output_path
 
 
 """
@@ -49,18 +90,42 @@ The main dispatcher function.
 
 def main():
     parser = argparse.ArgumentParser(
-        description="A unified tool to convert chat histories and documents.",
-        formatter_class=argparse.RawTextHelpFormatter,
+        description="Convert chat histories and long-form documents with one command.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """
+            Examples:
+              python file_converter.py transcript.json --format html
+              python file_converter.py meeting.md --analyze
+              python file_converter.py notes.md --no-toc -o build/notes.html
+            """
+        ),
         add_help=False,
     )
+
     # --- Universal Arguments ---
-    parser.add_argument("input_file", help="Path to the input file.")
-    parser.add_argument("-o", "--output", help="Path for the output file.")
+    parser.add_argument("input_file", help="Path to the input file to convert.")
     parser.add_argument(
-        "-f", "--format", choices=["json", "yml", "md", "html"], help="Output format."
+        "-o", "--output", help="Destination file. Defaults to <input>.<format>."
     )
     parser.add_argument(
-        "--force", action="store_true", help="Force overwrite of output file."
+        "-f",
+        "--format",
+        help="Output format: html, md, json, or yml. Defaults based on output or html.",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite the output file if it already exists.",
+    )
+    parser.add_argument(
+        "--input-type",
+        choices=["auto", "chat", "document"],
+        default="auto",
+        help=(
+            "Override automatic detection. Choose 'chat' or 'document',"
+            " or leave as 'auto' to inspect the file."
+        ),
     )
 
     # --- Chat-Specific Arguments ---
@@ -68,7 +133,7 @@ def main():
     chat_group.add_argument(
         "--analyze",
         action="store_true",
-        help="Display chat statistics instead of converting.",
+        help="Display chat statistics without writing a converted file.",
     )
 
     # --- Document-Specific Arguments ---
@@ -76,7 +141,7 @@ def main():
     doc_group.add_argument(
         "--no-toc",
         action="store_true",
-        help="Disable Table of Contents in HTML output.",
+        help="Disable the table of contents in generated HTML output.",
     )
 
     # --- Help ---
@@ -95,17 +160,16 @@ def main():
         print(f"Error: Input file not found at '{args.input_file}'", file=sys.stderr)
         sys.exit(1)
 
-    # --- Set sensible defaults if not provided ---
-    if not args.format and args.output:
-        args.format = os.path.splitext(args.output)[1].lower().replace(".", "")
-    elif not args.format:
-        args.format = "html"  # Default to HTML if no other info
+    try:
+        resolved_format, resolved_output = _resolve_format_and_output(args)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(2)
 
-    if not args.output:
-        base_name = os.path.splitext(args.input_file)[0]
-        args.output = f"{base_name}.{args.format}"
+    args.format = resolved_format
+    args.output = resolved_output
 
-    if os.path.exists(args.output) and not args.force:
+    if os.path.exists(args.output) and not args.force and not getattr(args, "analyze", False):
         print(
             f"Error: Output file '{args.output}' already exists. Use --force to overwrite.",
             file=sys.stderr,
@@ -113,12 +177,32 @@ def main():
         sys.exit(1)
 
     # --- The Dispatcher Logic ---
-    if is_chat_file(args.input_file):
-        print("Chat file detected. Using chat history converter...")
-        run_chat_conversion(args)
+    if args.input_type == "chat":
+        detected_chat = True
+    elif args.input_type == "document":
+        detected_chat = False
     else:
-        print("Document file detected. Using document converter...")
-        run_doc_conversion(args)
+        detected_chat = is_chat_file(args.input_file)
+
+    try:
+        if detected_chat:
+            print("Chat file selected. Using chat history converter...")
+            message = run_chat_conversion(args)
+        else:
+            print("Document file selected. Using document converter...")
+            message = run_doc_conversion(args)
+    except ChatConversionError as exc:
+        print(f"Chat conversion failed: {exc}", file=sys.stderr)
+        sys.exit(1)
+    except DocumentConversionError as exc:
+        print(f"Document conversion failed: {exc}", file=sys.stderr)
+        sys.exit(1)
+    except Exception as exc:  # pragma: no cover - defensive programming
+        print(f"Unexpected error: {exc}", file=sys.stderr)
+        sys.exit(1)
+    else:
+        if message:
+            print(message)
 
 
 if __name__ == "__main__":

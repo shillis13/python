@@ -9,8 +9,61 @@ This script is intended to be called by a master dispatcher.
 import argparse
 import os
 import sys
+from typing import Optional, Tuple
+
 import lib_doc_converter as converter
 import conversion_utils as utils
+
+
+SUPPORTED_FORMATS = {"html", "md", "json", "yml"}
+
+
+class DocumentConversionError(RuntimeError):
+    """Raised when the document conversion pipeline encounters a fatal error."""
+
+
+def _normalize_format(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+
+    normalized = value.lower().lstrip(".")
+    if normalized == "yaml":
+        normalized = "yml"
+
+    return normalized
+
+
+def _resolve_output_options(args) -> Tuple[str, str]:
+    requested_format = _normalize_format(getattr(args, "format", None))
+    output_path = getattr(args, "output", None)
+
+    if output_path and not requested_format:
+        requested_format = _normalize_format(os.path.splitext(output_path)[1])
+
+    if not requested_format:
+        requested_format = "html"
+
+    if requested_format not in SUPPORTED_FORMATS:
+        raise DocumentConversionError(
+            "Unsupported output format '{0}'. Supported formats: {1}.".format(
+                requested_format, ", ".join(sorted(SUPPORTED_FORMATS))
+            )
+        )
+
+    if not output_path:
+        base_name = os.path.splitext(args.input_file)[0]
+        output_path = f"{base_name}.{requested_format}"
+
+    output_dir = os.path.dirname(os.path.abspath(output_path))
+    if output_dir and not os.path.exists(output_dir):
+        try:
+            os.makedirs(output_dir, exist_ok=True)
+        except OSError as exc:  # pragma: no cover - filesystem failure
+            raise DocumentConversionError(
+                f"Unable to create output directory '{output_dir}': {exc}"
+            ) from exc
+
+    return requested_format, output_path
 
 # Default CSS for HTML Output
 DEFAULT_CSS = """
@@ -36,46 +89,69 @@ Returns:
 
 
 def run_doc_conversion(args):
-    input_ext = os.path.splitext(args.input_file)[1].lower().replace(".", "")
-    if input_ext == "yaml":
-        input_ext = "yml"
+    if not getattr(args, "input_file", None):
+        raise DocumentConversionError(
+            "An input file is required for document conversion."
+        )
 
-    # --- Parsing Logic ---
-    metadata, content = converter.parse_document(args.input_file, input_ext)
-    if "error" in metadata:
-        print(f"Error parsing document: {metadata['error']}", file=sys.stderr)
-        sys.exit(1)
+    input_file = args.input_file
+    if not os.path.isfile(input_file):
+        raise DocumentConversionError(f"Input file not found: {input_file}")
+
+    args.format, args.output = _resolve_output_options(args)
+
+    input_ext = _normalize_format(os.path.splitext(input_file)[1])
+
+    try:
+        metadata, content = converter.parse_document(input_file, input_ext)
+    except Exception as exc:  # pragma: no cover - defensive programming
+        raise DocumentConversionError(
+            f"Failed to parse document '{input_file}': {exc}"
+        ) from exc
+
+    if isinstance(metadata, dict) and "error" in metadata:
+        raise DocumentConversionError(metadata["error"])
+
+    if not isinstance(metadata, dict):
+        raise DocumentConversionError("Document metadata must be a mapping.")
 
     if "title" not in metadata:
-        metadata["title"] = os.path.splitext(os.path.basename(args.input_file))[
-            0
-        ].replace("_", " ")
+        metadata["title"] = os.path.splitext(os.path.basename(input_file))[0].replace(
+            "_",
+            " ",
+        )
 
-    # --- Writer Selection ---
-    output_content = ""
-    if args.format == "html":
-        output_content = converter.to_html_document(
-            metadata, content, DEFAULT_CSS, include_toc=not args.no_toc
-        )
-    elif args.format == "md":
-        output_content = content
-    elif args.format == "json":
-        output_content = utils.to_json_string(
-            {"metadata": metadata, "content": content}
-        )
-    elif args.format == "yml":
-        output_content = utils.to_yaml_string(
-            {"metadata": metadata, "content": content}
-        )
-    else:
-        print(f"Error: Unsupported output format '{args.format}'.", file=sys.stderr)
-        sys.exit(1)
+    try:
+        if args.format == "html":
+            output_content = converter.to_html_document(
+                metadata, content, DEFAULT_CSS, include_toc=not getattr(args, "no_toc", False)
+            )
+        elif args.format == "md":
+            output_content = content
+        elif args.format == "json":
+            output_content = utils.to_json_string(
+                {"metadata": metadata, "content": content}
+            )
+        elif args.format == "yml":
+            output_content = utils.to_yaml_string(
+                {"metadata": metadata, "content": content}
+            )
+        else:  # pragma: no cover - guarded by _resolve_output_options
+            raise DocumentConversionError(
+                f"Unsupported output format '{args.format}'."
+            )
+    except DocumentConversionError:
+        raise
+    except Exception as exc:  # pragma: no cover - defensive programming
+        raise DocumentConversionError(
+            f"Failed to render document as {args.format}: {exc}"
+        ) from exc
 
     result = utils.write_file_content(args.output, output_content)
-    if "error" in result:
-        print(f"Error: {result['error']}", file=sys.stderr)
-    else:
-        print(f"Successfully converted document to '{args.output}'")
+    if isinstance(result, dict) and "error" in result:
+        raise DocumentConversionError(result["error"])
+
+    return f"Successfully converted document to '{args.output}'"
 
 
 """
@@ -84,24 +160,40 @@ Main entry point for running this script directly.
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Standalone Document Converter.")
-    parser.add_argument("input_file")
-    parser.add_argument("-o", "--output")
-    parser.add_argument("-f", "--format")
-    parser.add_argument("--no-toc", action="store_true")
+    parser = argparse.ArgumentParser(
+        description="Convert narrative documents into Markdown, HTML, JSON, or YAML.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  python doc_converter.py report.md --format html\n"
+            "  python doc_converter.py handbook.yml --format md\n"
+            "  python doc_converter.py notes.md --no-toc --output build/notes.html"
+        ),
+    )
+    parser.add_argument("input_file", help="Path to the document to convert.")
+    parser.add_argument(
+        "-o", "--output", help="Destination file. Defaults to <input>.<format>."
+    )
+    parser.add_argument(
+        "-f",
+        "--format",
+        help="Output format: html, md, json, or yml. Defaults based on output or html.",
+    )
+    parser.add_argument(
+        "--no-toc",
+        action="store_true",
+        help="Disable the table of contents when generating HTML output.",
+    )
     args = parser.parse_args()
 
-    # Simple defaulting for standalone mode
-    if not args.format and args.output:
-        args.format = os.path.splitext(args.output)[1].lower().replace(".", "")
-    elif not args.format:
-        args.format = "html"
-
-    if not args.output:
-        base_name = os.path.splitext(args.input_file)[0]
-        args.output = f"{base_name}.{args.format}"
-
-    run_doc_conversion(args)
+    try:
+        message = run_doc_conversion(args)
+    except DocumentConversionError as exc:
+        print(f"Document conversion failed: {exc}", file=sys.stderr)
+        sys.exit(1)
+    else:
+        if message:
+            print(message)
 
 
 if __name__ == "__main__":
