@@ -40,7 +40,9 @@ def send_email(
             mime_type, _ = mimetypes.guess_type(path)
             maintype, subtype = (mime_type or "application/octet-stream").split("/", 1)
             with path.open("rb") as fp:
-                message.add_attachment(fp.read(), maintype=maintype, subtype=subtype, filename=path.name)
+                message.add_attachment(
+                    fp.read(), maintype=maintype, subtype=subtype, filename=path.name
+                )
             log_debug(f"Attached file {path}")
 
     encoded_message = base64.urlsafe_b64encode(message.as_bytes()).decode()

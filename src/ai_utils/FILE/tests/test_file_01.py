@@ -2,18 +2,23 @@ from unittest.mock import patch, mock_open
 
 import os
 import sys
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))  # noqa: E402 pylint: disable=wrong-import-position
+
+sys.path.insert(
+    0, os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+)  # noqa: E402 pylint: disable=wrong-import-position
 
 import liaison
 
-#import shutil
-#import pytest
+# import shutil
+# import pytest
+
 
 def test_parse_links():
     text = "📄 [Download Run1.xlsx](sandbox:/mnt/data/Run1.xlsx?_chatgptios_conversationID=683fb24a-3ce4-8011-8f0d-31bc53dee078&_chatgptios_messageID=ee1912c0-3827-4376-89f3-89efab99e0af)"
     links = liaison.parse_links(text)
     assert links == ["Run1.xlsx"]
-    
+
+
 def test_parse_links_multiple():
     text = (
         "📄 [Report1](sandbox:/mnt/data/Report1.xlsx) "
@@ -22,7 +27,8 @@ def test_parse_links_multiple():
     )
     links = liaison.parse_links(text)
     assert links == ["Report1.xlsx", "Report2.csv", "photo.png"]
-    
+
+
 @patch("liaison.requests.get")
 @patch("builtins.open", new_callable=mock_open)
 def test_download_file(mock_file, mock_get):
@@ -31,6 +37,7 @@ def test_download_file(mock_file, mock_get):
     path = liaison.download_file("MyFile.xlsx")
     assert path.endswith("MyFile.xlsx")
     mock_file.assert_called_once()
+
 
 def test_ensure_dirs(tmp_path):
     os.chdir(tmp_path)
@@ -42,6 +49,7 @@ def test_ensure_dirs(tmp_path):
 # Additional tests for manifest generation and comparison
 import hashlib
 
+
 def test_generate_manifest(tmp_path):
     file1 = tmp_path / "file1.txt"
     file1.write_text("hello world")
@@ -50,6 +58,7 @@ def test_generate_manifest(tmp_path):
     manifest = liaison.generate_manifest(tmp_path)
     assert manifest["file1.txt"]["sha256"] == hashlib.sha256(b"hello world").hexdigest()
     assert manifest["file2.txt"]["sha256"] == hashlib.sha256(b"goodbye").hexdigest()
+
 
 def test_compare_manifest(tmp_path):
     # Set up local dir with one good, one outdated, one extra
@@ -62,7 +71,7 @@ def test_compare_manifest(tmp_path):
     manifest = {
         "same.txt": same_hash,
         "outdated.txt": updated_hash,
-        "newfile.txt": hashlib.sha256(b"new file").hexdigest()
+        "newfile.txt": hashlib.sha256(b"new file").hexdigest(),
     }
 
     to_download, to_delete = liaison.compare_manifest(manifest, tmp_path)

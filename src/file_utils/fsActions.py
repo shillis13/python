@@ -37,16 +37,10 @@ setup_logging()
 
 class FileSystemActions:
     """Enhanced file system operations with filtering support."""
-    
+
     def __init__(self, dry_run: bool = True):
         self.dry_run = dry_run
-        self.stats = {
-            'moved': 0,
-            'copied': 0,
-            'deleted': 0,
-            'errors': 0,
-            'skipped': 0
-        }
+        self.stats = {"moved": 0, "copied": 0, "deleted": 0, "errors": 0, "skipped": 0}
         self.last_operation_details: Dict[str, Any] | None = None
 
     def _set_last_operation(
@@ -62,16 +56,21 @@ class FileSystemActions:
         """Record details of the most recent filesystem action."""
 
         self.last_operation_details = {
-            'action': action,
-            'source': str(source),
-            'target': str(target) if target is not None else '',
-            'details': details or '',
-            'status': success,
-            'message': message or '',
+            "action": action,
+            "source": str(source),
+            "target": str(target) if target is not None else "",
+            "details": details or "",
+            "status": success,
+            "message": message or "",
         }
-    
-    def create_target_path(self, source_path: Path, destination: Path, 
-                          with_dir: bool = False, base_path: Optional[Path] = None) -> Path:
+
+    def create_target_path(
+        self,
+        source_path: Path,
+        destination: Path,
+        with_dir: bool = False,
+        base_path: Optional[Path] = None,
+    ) -> Path:
         """Create target path for operation, optionally preserving directory structure."""
         if with_dir and base_path:
             try:
@@ -84,7 +83,7 @@ class FileSystemActions:
         else:
             # Flat structure - just use filename
             return destination / source_path.name
-    
+
     @dry_run_decorator()
     def move_file(self, source: Path, target: Path, dry_run: bool = False) -> bool:
         """Move a single file or directory."""
@@ -92,21 +91,21 @@ class FileSystemActions:
             # Ensure target directory exists
             target.parent.mkdir(parents=True, exist_ok=True)
             final_target = target
-            conflict_msg = ''
+            conflict_msg = ""
 
             # Handle existing target
             if target.exists():
                 if target.is_dir() and source.is_dir():
                     # Merge directories
                     self.merge_directories(source, target, dry_run)
-                    self.stats['moved'] += 1
+                    self.stats["moved"] += 1
                     self._set_last_operation(
-                        action='MOVE',
+                        action="MOVE",
                         source=source,
                         target=target,
-                        details='merge into existing directory',
+                        details="merge into existing directory",
                         success=True,
-                        message='merged into existing directory',
+                        message="merged into existing directory",
                     )
                     return True
                 else:
@@ -127,21 +126,21 @@ class FileSystemActions:
                 shutil.move(str(source), str(final_target))
 
             log_info(f"Moved: {source} -> {final_target}")
-            self.stats['moved'] += 1
+            self.stats["moved"] += 1
             self._set_last_operation(
-                action='MOVE',
+                action="MOVE",
                 source=source,
                 target=final_target,
                 success=True,
-                message=conflict_msg if conflict_msg else '',
+                message=conflict_msg if conflict_msg else "",
             )
             return True
 
         except Exception as e:
             log_info(f"Error moving {source}: {e}")
-            self.stats['errors'] += 1
+            self.stats["errors"] += 1
             self._set_last_operation(
-                action='MOVE',
+                action="MOVE",
                 source=source,
                 target=target,
                 success=False,
@@ -155,7 +154,7 @@ class FileSystemActions:
         try:
             # Ensure target directory exists
             target.parent.mkdir(parents=True, exist_ok=True)
-            conflict_msg = ''
+            conflict_msg = ""
 
             # Handle existing target
             if target.exists():
@@ -175,28 +174,28 @@ class FileSystemActions:
                     shutil.copy2(source, target)
 
             log_info(f"Copied: {source} -> {target}")
-            self.stats['copied'] += 1
+            self.stats["copied"] += 1
             self._set_last_operation(
-                action='COPY',
+                action="COPY",
                 source=source,
                 target=target,
                 success=True,
-                message=conflict_msg if conflict_msg else '',
+                message=conflict_msg if conflict_msg else "",
             )
             return True
 
         except Exception as e:
             log_info(f"Error copying {source}: {e}")
-            self.stats['errors'] += 1
+            self.stats["errors"] += 1
             self._set_last_operation(
-                action='COPY',
+                action="COPY",
                 source=source,
                 target=target,
                 success=False,
                 message=str(e),
             )
             return False
-    
+
     @dry_run_decorator()
     def delete_file(self, source: Path, dry_run: bool = False) -> bool:
         """Delete a single file or directory."""
@@ -208,34 +207,34 @@ class FileSystemActions:
                     source.unlink()
 
             log_info(f"Deleted: {source}")
-            self.stats['deleted'] += 1
+            self.stats["deleted"] += 1
             self._set_last_operation(
-                action='DELETE',
+                action="DELETE",
                 source=source,
                 success=True,
-                message='',
+                message="",
             )
             return True
 
         except Exception as e:
             log_info(f"Error deleting {source}: {e}")
-            self.stats['errors'] += 1
+            self.stats["errors"] += 1
             self._set_last_operation(
-                action='DELETE',
+                action="DELETE",
                 source=source,
                 success=False,
                 message=str(e),
             )
             return False
-    
+
     def merge_directories(self, source: Path, target: Path, dry_run: bool = False):
         """Merge source directory into target directory."""
         if not source.is_dir() or not target.is_dir():
             return
-        
+
         for item in source.iterdir():
             target_item = target / item.name
-            
+
             if item.is_dir():
                 if target_item.exists() and target_item.is_dir():
                     # Recursively merge subdirectories
@@ -248,16 +247,18 @@ class FileSystemActions:
                 # Move the file
                 if not dry_run:
                     shutil.move(str(item), str(target_item))
-        
+
         # Remove source directory if empty
         if not dry_run:
             try:
                 source.rmdir()
             except OSError:
                 pass  # Directory not empty, that's okay
-    
+
     @dry_run_decorator()
-    def set_permissions(self, path: Path, permissions: str, dry_run: bool = False) -> bool:
+    def set_permissions(
+        self, path: Path, permissions: str, dry_run: bool = False
+    ) -> bool:
         """Set file permissions (Unix-style octal)."""
         try:
             if not dry_run:
@@ -267,139 +268,206 @@ class FileSystemActions:
 
             log_info(f"Set permissions {permissions} on: {path}")
             self._set_last_operation(
-                action='PERMISSIONS',
+                action="PERMISSIONS",
                 source=path,
                 details=f"chmod {permissions}",
                 success=True,
-                message='',
+                message="",
             )
             return True
 
         except Exception as e:
             log_info(f"Error setting permissions on {path}: {e}")
-            self.stats['errors'] += 1
+            self.stats["errors"] += 1
             self._set_last_operation(
-                action='PERMISSIONS',
+                action="PERMISSIONS",
                 source=path,
                 details=f"chmod {permissions}",
                 success=False,
                 message=str(e),
             )
             return False
-    
+
     @dry_run_decorator()
-    def set_attributes(self, path: Path, attributes: Dict[str, Any], dry_run: bool = False) -> bool:
+    def set_attributes(
+        self, path: Path, attributes: Dict[str, Any], dry_run: bool = False
+    ) -> bool:
         """Set file attributes (timestamps, etc.)."""
         try:
             if not dry_run:
                 stat_info = path.stat()
-                
+
                 # Set access and modification times if specified
-                if 'atime' in attributes:
-                    atime = float(attributes['atime'])
+                if "atime" in attributes:
+                    atime = float(attributes["atime"])
                 else:
                     atime = stat_info.st_atime
-                
-                if 'mtime' in attributes:
-                    mtime = float(attributes['mtime'])
+
+                if "mtime" in attributes:
+                    mtime = float(attributes["mtime"])
                 else:
                     mtime = stat_info.st_mtime
-                
+
                 os.utime(path, (atime, mtime))
 
             log_info(f"Set attributes on: {path}")
             attr_details = ", ".join(f"{k}={attributes[k]}" for k in attributes)
             self._set_last_operation(
-                action='ATTRIBUTES',
+                action="ATTRIBUTES",
                 source=path,
                 details=attr_details,
                 success=True,
-                message='',
+                message="",
             )
             return True
 
         except Exception as e:
             log_info(f"Error setting attributes on {path}: {e}")
-            self.stats['errors'] += 1
+            self.stats["errors"] += 1
             attr_details = ", ".join(f"{k}={attributes[k]}" for k in attributes)
             self._set_last_operation(
-                action='ATTRIBUTES',
+                action="ATTRIBUTES",
                 source=path,
                 details=attr_details,
                 success=False,
                 message=str(e),
             )
             return False
-    
+
     def print_stats(self):
         """Print operation statistics."""
-        total_operations = sum(self.stats.values()) - self.stats['errors'] - self.stats['skipped']
-        
+        total_operations = (
+            sum(self.stats.values()) - self.stats["errors"] - self.stats["skipped"]
+        )
+
         if total_operations > 0:
             print(f"\n📊 Operation Statistics:", file=sys.stderr)
-            if self.stats['moved'] > 0:
+            if self.stats["moved"] > 0:
                 print(f"   Moved: {self.stats['moved']}", file=sys.stderr)
-            if self.stats['copied'] > 0:
+            if self.stats["copied"] > 0:
                 print(f"   Copied: {self.stats['copied']}", file=sys.stderr)
-            if self.stats['deleted'] > 0:
+            if self.stats["deleted"] > 0:
                 print(f"   Deleted: {self.stats['deleted']}", file=sys.stderr)
-            if self.stats['errors'] > 0:
+            if self.stats["errors"] > 0:
                 print(f"   Errors: {self.stats['errors']}", file=sys.stderr)
-            if self.stats['skipped'] > 0:
+            if self.stats["skipped"] > 0:
                 print(f"   Skipped: {self.stats['skipped']}", file=sys.stderr)
 
 
 def add_args(parser: argparse.ArgumentParser) -> None:
     """Register command line arguments for this module."""
     # Actions
-    parser.add_argument('--move', '-m', help="Move files/directories to specified destination")
-    parser.add_argument('--copy', '-c', help="Copy files/directories to specified destination")
-    parser.add_argument('--delete', '-d', action='store_true', help="Delete specified files/directories")
-    
+    parser.add_argument(
+        "--move", "-m", help="Move files/directories to specified destination"
+    )
+    parser.add_argument(
+        "--copy", "-c", help="Copy files/directories to specified destination"
+    )
+    parser.add_argument(
+        "--delete", "-d", action="store_true", help="Delete specified files/directories"
+    )
+
     # Structure options
-    parser.add_argument('--with-dir', '-wd', action='store_true', 
-                       help="Preserve relative directory structure from base path")
-    parser.add_argument('--base-path', '-bp', help="Base path for --with-dir option (default: first input path)")
-    
+    parser.add_argument(
+        "--with-dir",
+        "-wd",
+        action="store_true",
+        help="Preserve relative directory structure from base path",
+    )
+    parser.add_argument(
+        "--base-path",
+        "-bp",
+        help="Base path for --with-dir option (default: first input path)",
+    )
+
     # Permission and attribute options
-    parser.add_argument('--set-permissions', '-sp', help="Set permissions (octal, e.g., 755)")
-    parser.add_argument('--set-atime', help="Set access time (Unix timestamp)")
-    parser.add_argument('--set-mtime', help="Set modification time (Unix timestamp)")
-    
+    parser.add_argument(
+        "--set-permissions", "-sp", help="Set permissions (octal, e.g., 755)"
+    )
+    parser.add_argument("--set-atime", help="Set access time (Unix timestamp)")
+    parser.add_argument("--set-mtime", help="Set modification time (Unix timestamp)")
+
     # Input sources
-    parser.add_argument('files', nargs='*', help="Files/directories to process")
-    parser.add_argument('--from-file', '-ff', help="Read file paths from file")
-    
+    parser.add_argument("files", nargs="*", help="Files/directories to process")
+    parser.add_argument("--from-file", "-ff", help="Read file paths from file")
+
     # Filtering integration
-    parser.add_argument('--filter-file', '-fc', help="YAML filter configuration file")
-    
+    parser.add_argument("--filter-file", "-fc", help="YAML filter configuration file")
+
     # Individual filter options (subset of fsFilters for convenience)
-    parser.add_argument('--file-pattern', '-fp', action='append', default=[], 
-                       help="File name patterns to include")
-    parser.add_argument('--dir-pattern', '-dp', action='append', default=[], 
-                       help="Directory name patterns to include")
-    parser.add_argument('--pattern', '-p', help="Pattern for both files and directories")
-    parser.add_argument('--size-gt', help="Size greater than (e.g., 100K, 1M)")
-    parser.add_argument('--size-lt', help="Size less than")
-    parser.add_argument('--type', '-t', action='append', default=[], 
-                       help="File types to include (e.g., image, video)")
-    parser.add_argument('--extension', '-e', action='append', default=[], 
-                       help="File extensions to include")
-    parser.add_argument('--modified-after', help="Modified after date (YYYY-MM-DD or 7d)")
-    parser.add_argument('--modified-before', help="Modified before date")
-    parser.add_argument('--git-ignore', '-g', action='store_true', help="Use .gitignore files")
-    
+    parser.add_argument(
+        "--file-pattern",
+        "-fp",
+        action="append",
+        default=[],
+        help="File name patterns to include",
+    )
+    parser.add_argument(
+        "--dir-pattern",
+        "-dp",
+        action="append",
+        default=[],
+        help="Directory name patterns to include",
+    )
+    parser.add_argument(
+        "--pattern", "-p", help="Pattern for both files and directories"
+    )
+    parser.add_argument("--size-gt", help="Size greater than (e.g., 100K, 1M)")
+    parser.add_argument("--size-lt", help="Size less than")
+    parser.add_argument(
+        "--type",
+        "-t",
+        action="append",
+        default=[],
+        help="File types to include (e.g., image, video)",
+    )
+    parser.add_argument(
+        "--extension",
+        "-e",
+        action="append",
+        default=[],
+        help="File extensions to include",
+    )
+    parser.add_argument(
+        "--modified-after", help="Modified after date (YYYY-MM-DD or 7d)"
+    )
+    parser.add_argument("--modified-before", help="Modified before date")
+    parser.add_argument(
+        "--git-ignore", "-g", action="store_true", help="Use .gitignore files"
+    )
+
     # Execution options
-    parser.add_argument('--dry-run', dest='dry_run', action='store_true', default=True,
-                       help="Simulate operations without making changes (default)")
-    parser.add_argument('--execute', '-x', dest='dry_run', action='store_false',
-                       help="Execute operations on the filesystem")
-    parser.add_argument('--force', '-f', action='store_true', 
-                       help="Force operations, overwrite existing files")
-    
+    parser.add_argument(
+        "--dry-run",
+        dest="dry_run",
+        action="store_true",
+        default=True,
+        help="Simulate operations without making changes (default)",
+    )
+    parser.add_argument(
+        "--execute",
+        "-x",
+        dest="dry_run",
+        action="store_false",
+        help="Execute operations on the filesystem",
+    )
+    parser.add_argument(
+        "--force",
+        "-f",
+        action="store_true",
+        help="Force operations, overwrite existing files",
+    )
+    parser.add_argument(
+        "--quiet", "-q", action="store_true", help="Suppress commentary and summaries"
+    )
+
     # Help options
-    parser.add_argument('--help-examples', action='store_true', help="Show usage examples")
-    parser.add_argument('--help-verbose', action='store_true', help="Show detailed help")
+    parser.add_argument(
+        "--help-examples", action="store_true", help="Show usage examples"
+    )
+    parser.add_argument(
+        "--help-verbose", action="store_true", help="Show detailed help"
+    )
 
 
 register_arguments(add_args)
@@ -407,7 +475,9 @@ register_arguments(add_args)
 
 def parse_arguments():
     """Parse command line arguments."""
-    args, _ = parse_known_args(description="Enhanced file system operations with filtering.")
+    args, _ = parse_known_args(
+        description="Enhanced file system operations with filtering."
+    )
     return args
 
 
@@ -516,6 +586,7 @@ EXECUTION MODES:
     --dry-run              Preview operations (default, safe mode)
     --execute              Actually perform operations
     --force                Overwrite existing files without prompting
+    --quiet, -q            Suppress commentary (summary table only)
 
 ERROR HANDLING:
     - Existing files: Creates unique names (file_1.txt, file_2.txt, etc.)
@@ -563,8 +634,8 @@ def _build_status_text(status: bool, dry_run: bool, message: str) -> str:
 def _format_target(details: Dict[str, Any]) -> str:
     """Combine target and auxiliary details for display."""
 
-    target = details.get('target', '').strip()
-    extra = details.get('details', '').strip()
+    target = details.get("target", "").strip()
+    extra = details.get("details", "").strip()
 
     if target and extra:
         return f"{target} [{extra}]"
@@ -583,21 +654,21 @@ def _prepare_summary_entry(
     """Normalize an operation detail dictionary for table rendering."""
 
     entry: Dict[str, Any] = {
-        'path': str(fallback_path),
-        'action': fallback_action,
-        'target': '',
-        'details': '',
-        'status': False,
-        'message': '',
+        "path": str(fallback_path),
+        "action": fallback_action,
+        "target": "",
+        "details": "",
+        "status": False,
+        "message": "",
     }
 
     if details:
-        entry['path'] = details.get('source', entry['path'])
-        entry['action'] = details.get('action', entry['action'])
-        entry['target'] = details.get('target', '')
-        entry['details'] = details.get('details', '')
-        entry['status'] = details.get('status', entry['status'])
-        entry['message'] = details.get('message', entry['message'])
+        entry["path"] = details.get("source", entry["path"])
+        entry["action"] = details.get("action", entry["action"])
+        entry["target"] = details.get("target", "")
+        entry["details"] = details.get("details", "")
+        entry["status"] = details.get("status", entry["status"])
+        entry["message"] = details.get("message", entry["message"])
 
     return entry
 
@@ -612,15 +683,17 @@ def _print_action_summary(rows: List[Dict[str, Any]], dry_run: bool) -> None:
     prepared_rows: List[tuple[str, str, str, str]] = []
 
     for entry in rows:
-        status_text = entry.get('status_text')
-        if not status_text and 'status' in entry:
-            status_text = _build_status_text(entry['status'], dry_run, entry.get('message', ''))
+        status_text = entry.get("status_text")
+        if not status_text and "status" in entry:
+            status_text = _build_status_text(
+                entry["status"], dry_run, entry.get("message", "")
+            )
         prepared_rows.append(
             (
-                entry.get('path', ''),
-                entry.get('action', ''),
-                entry.get('target', _format_target(entry)),
-                status_text or '',
+                entry.get("path", ""),
+                entry.get("action", ""),
+                entry.get("target", _format_target(entry)),
+                status_text or "",
             )
         )
 
@@ -648,11 +721,11 @@ def _print_action_summary(rows: List[Dict[str, Any]], dry_run: bool) -> None:
                 status_lower = status.lower()
                 color = None
                 if "dry run" in status_lower or "ok" in status_lower:
-                    color = 'green' if 'ok' in status_lower else 'yellow'
+                    color = "green" if "ok" in status_lower else "yellow"
                 elif "skip" in status_lower:
-                    color = 'cyan'
+                    color = "cyan"
                 else:
-                    color = 'red'
+                    color = "red"
                 padded = colorize_string(padded, fore_color=color)
             cells.append(f" {padded} ")
         print("|" + "|".join(cells) + "|")
@@ -663,83 +736,88 @@ def _print_action_summary(rows: List[Dict[str, Any]], dry_run: bool) -> None:
 def create_filter_from_args(args) -> FileSystemFilter | None:
     """Create a :class:`FileSystemFilter` from ``args`` if filters are present."""
 
-    has_filters = any([
-        getattr(args, 'filter_file', None),
-        isinstance(getattr(args, 'size_gt', None), str),
-        isinstance(getattr(args, 'size_lt', None), str),
-        isinstance(getattr(args, 'size_eq', None), str),
-        isinstance(getattr(args, 'modified_after', None), str),
-        isinstance(getattr(args, 'modified_before', None), str),
-        isinstance(getattr(args, 'created_after', None), str),
-        isinstance(getattr(args, 'created_before', None), str),
-        (getattr(args, 'file_pattern_filter', []) or getattr(args, 'dir_pattern_filter', [])),
-        isinstance(getattr(args, 'pattern_filter', None), str),
-        (getattr(args, 'file_ignore', []) or getattr(args, 'dir_ignore', [])),
-        isinstance(getattr(args, 'ignore_filter', None), str),
-        getattr(args, 'type_filter', []),
-        getattr(args, 'extension_filter', []),
-        getattr(args, 'git_ignore_filter', False),
-    ])
+    has_filters = any(
+        [
+            getattr(args, "filter_file", None),
+            isinstance(getattr(args, "size_gt", None), str),
+            isinstance(getattr(args, "size_lt", None), str),
+            isinstance(getattr(args, "size_eq", None), str),
+            isinstance(getattr(args, "modified_after", None), str),
+            isinstance(getattr(args, "modified_before", None), str),
+            isinstance(getattr(args, "created_after", None), str),
+            isinstance(getattr(args, "created_before", None), str),
+            (
+                getattr(args, "file_pattern_filter", [])
+                or getattr(args, "dir_pattern_filter", [])
+            ),
+            isinstance(getattr(args, "pattern_filter", None), str),
+            (getattr(args, "file_ignore", []) or getattr(args, "dir_ignore", [])),
+            isinstance(getattr(args, "ignore_filter", None), str),
+            getattr(args, "type_filter", []),
+            getattr(args, "extension_filter", []),
+            getattr(args, "git_ignore_filter", False),
+        ]
+    )
     if not has_filters:
         return None
 
     fs_filter = FileSystemFilter()
 
-    if getattr(args, 'filter_file', None):
+    if getattr(args, "filter_file", None):
         try:
-            with open(args.filter_file, 'r', encoding='utf-8') as f:
+            with open(args.filter_file, "r", encoding="utf-8") as f:
                 config = yaml.safe_load(f) or {}
             apply_config_to_filter(fs_filter, config)
         except Exception as e:
             log_info(f"Could not load filter file {args.filter_file}: {e}")
 
-    pattern = getattr(args, 'pattern', None)
+    pattern = getattr(args, "pattern", None)
     if isinstance(pattern, str) and pattern:
         fs_filter.add_file_pattern(pattern)
         fs_filter.add_dir_pattern(pattern)
 
-    pattern_filter = getattr(args, 'pattern_filter', None)
+    pattern_filter = getattr(args, "pattern_filter", None)
     if isinstance(pattern_filter, str) and pattern_filter:
         fs_filter.add_file_pattern(pattern_filter)
         fs_filter.add_dir_pattern(pattern_filter)
 
-    for pattern in getattr(args, 'file_pattern_filter', []) or []:
+    for pattern in getattr(args, "file_pattern_filter", []) or []:
         fs_filter.add_file_pattern(pattern)
 
-    for pattern in getattr(args, 'dir_pattern_filter', []) or []:
+    for pattern in getattr(args, "dir_pattern_filter", []) or []:
         fs_filter.add_dir_pattern(pattern)
 
-    if isinstance(getattr(args, 'size_gt', None), str):
-        fs_filter.add_size_filter('gt', args.size_gt)
-    if isinstance(getattr(args, 'size_lt', None), str):
-        fs_filter.add_size_filter('lt', args.size_lt)
-    if isinstance(getattr(args, 'size_eq', None), str):
-        fs_filter.add_size_filter('eq', args.size_eq)
+    if isinstance(getattr(args, "size_gt", None), str):
+        fs_filter.add_size_filter("gt", args.size_gt)
+    if isinstance(getattr(args, "size_lt", None), str):
+        fs_filter.add_size_filter("lt", args.size_lt)
+    if isinstance(getattr(args, "size_eq", None), str):
+        fs_filter.add_size_filter("eq", args.size_eq)
 
-    if isinstance(getattr(args, 'modified_after', None), str):
-        fs_filter.add_date_filter('after', args.modified_after, 'modified')
-    if isinstance(getattr(args, 'modified_before', None), str):
-        fs_filter.add_date_filter('before', args.modified_before, 'modified')
-    if isinstance(getattr(args, 'created_after', None), str):
-        fs_filter.add_date_filter('after', args.created_after, 'created')
-    if isinstance(getattr(args, 'created_before', None), str):
-        fs_filter.add_date_filter('before', args.created_before, 'created')
+    if isinstance(getattr(args, "modified_after", None), str):
+        fs_filter.add_date_filter("after", args.modified_after, "modified")
+    if isinstance(getattr(args, "modified_before", None), str):
+        fs_filter.add_date_filter("before", args.modified_before, "modified")
+    if isinstance(getattr(args, "created_after", None), str):
+        fs_filter.add_date_filter("after", args.created_after, "created")
+    if isinstance(getattr(args, "created_before", None), str):
+        fs_filter.add_date_filter("before", args.created_before, "created")
 
-    ignore_filter = getattr(args, 'ignore_filter', None)
+    ignore_filter = getattr(args, "ignore_filter", None)
     if isinstance(ignore_filter, str) and ignore_filter:
         fs_filter.add_file_ignore_pattern(ignore_filter)
         fs_filter.add_dir_ignore_pattern(ignore_filter)
 
-    for pattern in getattr(args, 'file_ignore', []) or []:
+    for pattern in getattr(args, "file_ignore", []) or []:
         fs_filter.add_file_ignore_pattern(pattern)
 
-    for pattern in getattr(args, 'dir_ignore', []) or []:
+    for pattern in getattr(args, "dir_ignore", []) or []:
         fs_filter.add_dir_ignore_pattern(pattern)
 
-    for file_type in getattr(args, 'type_filter', []) or []:
+    for file_type in getattr(args, "type_filter", []) or []:
         fs_filter.add_type_filter(file_type)
 
-    for ext in getattr(args, 'extension_filter', []) or []:
+    for ext in getattr(args, "extension_filter", []) or []:
         fs_filter.add_extension_filter(ext)
 
     return fs_filter
@@ -751,33 +829,41 @@ def process_actions_pipeline(args):
     if args.help_examples:
         show_examples()
         return
-    
+
     if args.help_verbose:
         show_verbose_help()
         return
-    
+
+    if args.quiet:
+        setup_logging(level=logging.ERROR)
+
     # Validate action arguments
     actions = [args.move, args.copy, args.delete]
     action_count = sum(1 for action in actions if action or action is True)
-    
+
     if action_count == 0:
-        print("❌ No action specified. Use --move, --copy, or --delete.", file=sys.stderr)
+        print(
+            "❌ No action specified. Use --move, --copy, or --delete.", file=sys.stderr
+        )
         return
-    
+
     if action_count > 1:
-        print("❌ Multiple actions specified. Choose one: --move, --copy, or --delete.", file=sys.stderr)
+        print(
+            "❌ Multiple actions specified. Choose one: --move, --copy, or --delete.",
+            file=sys.stderr,
+        )
         return
-    
+
     # Get input paths
     input_paths, dry_run_detected = get_file_paths_from_input(args)
-    
+
     if not input_paths:
         print("ℹ️ No input files found to process.", file=sys.stderr)
         return
-    
+
     if dry_run_detected:
         args.dry_run = True
-    
+
     # Create filter and apply filtering
     fs_filter = create_filter_from_args(args)
 
@@ -785,23 +871,29 @@ def process_actions_pipeline(args):
     if args.git_ignore:
         if fs_filter is None:
             fs_filter = FileSystemFilter()
-        base_paths = [Path(p).parent if Path(p).is_file() else Path(p)
-                     for p in input_paths if Path(p).exists()]
+        base_paths = [
+            Path(p).parent if Path(p).is_file() else Path(p)
+            for p in input_paths
+            if Path(p).exists()
+        ]
         if base_paths:
             fs_filter.enable_gitignore(base_paths)
 
     # Apply filtering if filters are defined; otherwise keep original paths
     if fs_filter:
-        base_paths = [Path(p).parent if Path(p).is_file() else Path(p)
-                     for p in input_paths if Path(p).exists()]
+        base_paths = [
+            Path(p).parent if Path(p).is_file() else Path(p)
+            for p in input_paths
+            if Path(p).exists()
+        ]
         filtered_paths = fs_filter.filter_paths(input_paths, base_paths)
     else:
         filtered_paths = input_paths
-    
+
     if not filtered_paths:
         print("ℹ️ No files remain after filtering.", file=sys.stderr)
         return
-    
+
     # Set up base path for --with-dir option
     base_path = None
     if args.with_dir:
@@ -811,10 +903,10 @@ def process_actions_pipeline(args):
             # Use common parent of first few paths
             first_path = Path(filtered_paths[0])
             base_path = first_path.parent if first_path.is_file() else first_path
-    
+
     # Create actions handler
     actions_handler = FileSystemActions(dry_run=args.dry_run)
-    
+
     summary_rows: List[Dict[str, Any]] = []
 
     # Process each file/directory
@@ -823,14 +915,16 @@ def process_actions_pipeline(args):
 
         if not source_path.exists():
             log_info(f"Skipping non-existent path: {source_path}")
-            actions_handler.stats['skipped'] += 1
-            summary_rows.append({
-                'path': str(source_path),
-                'action': 'SKIP',
-                'target': '-',
-                'status_text': 'SKIPPED (missing)',
-                'message': 'Path does not exist',
-            })
+            actions_handler.stats["skipped"] += 1
+            summary_rows.append(
+                {
+                    "path": str(source_path),
+                    "action": "SKIP",
+                    "target": "-",
+                    "status_text": "SKIPPED (missing)",
+                    "message": "Path does not exist",
+                }
+            )
             continue
 
         # Perform the requested action
@@ -844,7 +938,7 @@ def process_actions_pipeline(args):
                 _prepare_summary_entry(
                     actions_handler.last_operation_details,
                     source_path,
-                    'MOVE',
+                    "MOVE",
                 )
             )
 
@@ -858,7 +952,7 @@ def process_actions_pipeline(args):
                 _prepare_summary_entry(
                     actions_handler.last_operation_details,
                     source_path,
-                    'COPY',
+                    "COPY",
                 )
             )
 
@@ -868,27 +962,29 @@ def process_actions_pipeline(args):
                 _prepare_summary_entry(
                     actions_handler.last_operation_details,
                     source_path,
-                    'DELETE',
+                    "DELETE",
                 )
             )
 
         # Set permissions if requested
         if args.set_permissions:
-            actions_handler.set_permissions(source_path, args.set_permissions, args.dry_run)
+            actions_handler.set_permissions(
+                source_path, args.set_permissions, args.dry_run
+            )
             summary_rows.append(
                 _prepare_summary_entry(
                     actions_handler.last_operation_details,
                     source_path,
-                    'PERMISSIONS',
+                    "PERMISSIONS",
                 )
             )
 
         # Set attributes if requested
         attributes = {}
         if args.set_atime:
-            attributes['atime'] = args.set_atime
+            attributes["atime"] = args.set_atime
         if args.set_mtime:
-            attributes['mtime'] = args.set_mtime
+            attributes["mtime"] = args.set_mtime
 
         if attributes:
             actions_handler.set_attributes(source_path, attributes, args.dry_run)
@@ -896,7 +992,7 @@ def process_actions_pipeline(args):
                 _prepare_summary_entry(
                     actions_handler.last_operation_details,
                     source_path,
-                    'ATTRIBUTES',
+                    "ATTRIBUTES",
                 )
             )
 
@@ -904,23 +1000,27 @@ def process_actions_pipeline(args):
     _print_action_summary(summary_rows, args.dry_run)
 
     # Print statistics
-    actions_handler.print_stats()
-    
+    if not args.quiet:
+        actions_handler.print_stats()
+
     # Print mode information
     mode_msg = "DRY RUN" if args.dry_run else "EXECUTED"
-    total_processed = len(filtered_paths) - actions_handler.stats['skipped']
-    
-    if total_processed > 0:
-        print(f"✅ {mode_msg}: Processed {total_processed} items successfully.", file=sys.stderr)
-    
-    if args.dry_run and total_processed > 0:
+    total_processed = len(filtered_paths) - actions_handler.stats["skipped"]
+
+    if total_processed > 0 and not args.quiet:
+        print(
+            f"✅ {mode_msg}: Processed {total_processed} items successfully.",
+            file=sys.stderr,
+        )
+
+    if args.dry_run and total_processed > 0 and not args.quiet:
         print("   Use --execute to perform actual operations.", file=sys.stderr)
 
 
 def main():
     """Main entry point."""
     args = parse_arguments()
-    
+
     # Handle no arguments case
     if len(sys.argv) == 1:
         print("fsActions.py - Enhanced File System Operations")
@@ -929,7 +1029,7 @@ def main():
         print("For examples: fsActions.py --help-examples")
         print("For detailed help: fsActions.py --help-verbose")
         return
-    
+
     process_actions_pipeline(args)
 
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-""" 
+"""
 File: renameFiles.py
 
 A wrapper around the f2 utility
@@ -162,6 +162,7 @@ def _rename_internal(args) -> None:
     if results:
         _print_results_table(results)
 
+
 """
 Executes renaming based on provided arguments.
 If ``args.format`` is specified, perform the renaming internally to
@@ -169,6 +170,7 @@ support placeholders like ``{date}``, ``{name}``, ``{ext}``, and
 sequential numbering patterns such as ``{%03d}``. Otherwise, delegate to
 the ``f2`` utility.
 """
+
 
 def rename_files(args):
     if any(
@@ -194,9 +196,12 @@ def rename_files(args):
     except FileNotFoundError:
         log_error("f2 executable not found. Ensure it is installed and in PATH.")
         sys.exit(1)
+
+
 """
 Construct the f2 command based on the provided arguments.
 """
+
 
 def build_f2_command(args):
     command = ["f2"]
@@ -234,13 +239,13 @@ def build_f2_command(args):
             log_debug(f"Added --replace argument for indexing: {args.indexing}")
 
         if args.change_case:
-            if args.change_case == 'upper':
+            if args.change_case == "upper":
                 command.append("--upper")
-            elif args.change_case == 'lower':
+            elif args.change_case == "lower":
                 command.append("--lower")
-            elif args.change_case == 'camel':
+            elif args.change_case == "camel":
                 command.append("--camel")
-            elif args.change_case == 'proper':
+            elif args.change_case == "proper":
                 command.append("--proper")
             log_debug(f"Added --change-case argument: {args.change_case}")
 
@@ -250,7 +255,9 @@ def build_f2_command(args):
 
         if args.no_clean:
             command.extend(["--find", r"[^\w\-_\. ]", "--replace", ""])
-            log_debug("Added --find and --replace arguments to remove special characters")
+            log_debug(
+                "Added --find and --replace arguments to remove special characters"
+            )
 
             command.extend(["--find", r"^\s+|\s+$", "--replace", ""])
             log_debug(
@@ -293,9 +300,8 @@ def build_f2_command(args):
     return command
 
 
-
 def print_usage():
-    ''' Usage '''
+    """Usage"""
     usage_text = """
     Usage: renameFiles.py [options]
 
@@ -321,93 +327,209 @@ def print_usage():
       --help-examples              Show help with examples only
       --help-exfil                 Show help specifically about using exfil data and options
     """
-    print_colored(usage_text, fore_color='green', style='bright')
+    print_colored(usage_text, fore_color="green", style="bright")
 
 
 def print_help():
-    ''' Help'''
-    print_colored("Detailed Help with Examples:", fore_color='yellow', style='bright')
+    """Help"""
+    print_colored("Detailed Help with Examples:", fore_color="yellow", style="bright")
 
     examples = [
-        ("1. Basic Rename:", "renameFiles.py --find \"old\" --replace \"new\"",
-            "This will replace 'old' with 'new' in all matching files."),
-        ("2. Using Format:", "renameFiles.py --format \"{date}-{name}.{ext}\"",
-            "This renames files using the current date and original filename."),
-        ("3. Remove Vowels:", "renameFiles.py --remove-vowels",
-            "This will remove all vowels from the filenames."),
-        ("4. Change Case:", "renameFiles.py --change-case lower",
-            "This will convert all filenames to lowercase."),
-        ("5. Replace Whitespace:", "renameFiles.py --replace-white-space \"_\"",
-            "This replaces all spaces in the filenames with underscores."),
-        ("6. Sequential Numbering with Indexing:", "renameFiles.py --format \"image-{%03d}.{ext}\"",
+        (
+            "1. Basic Rename:",
+            'renameFiles.py --find "old" --replace "new"',
+            "This will replace 'old' with 'new' in all matching files.",
+        ),
+        (
+            "2. Using Format:",
+            'renameFiles.py --format "{date}-{name}.{ext}"',
+            "This renames files using the current date and original filename.",
+        ),
+        (
+            "3. Remove Vowels:",
+            "renameFiles.py --remove-vowels",
+            "This will remove all vowels from the filenames.",
+        ),
+        (
+            "4. Change Case:",
+            "renameFiles.py --change-case lower",
+            "This will convert all filenames to lowercase.",
+        ),
+        (
+            "5. Replace Whitespace:",
+            'renameFiles.py --replace-white-space "_"',
+            "This replaces all spaces in the filenames with underscores.",
+        ),
+        (
+            "6. Sequential Numbering with Indexing:",
+            'renameFiles.py --format "image-{%03d}.{ext}"',
             "This will rename files using a sequential numbering format with zero-padding to three digits.\n"
-            "The numbering will process the files in sorted order, which is: a_1.jpg, a_10.jpg, a_2.jpg."),
-        ("7. Fixing Existing Numbering:", "renameFiles.py -f \'(^.*) \\((\\d+)\\)(\\.*)\' -r \'{$1}_{$2%03d}_{$3}\'",
-            "This command fixes the numbering in filenames like \"1 (1).jpg\" to \"1_001_.jpg\", \"Prestuff (10) Poststuff.jpg\" to \"PreStuff_010_Poststuff.jpg\", etc."),
-        ("8. Using Built-in Variables:", "renameFiles.py --format \"{f}_{2p}.{ext}\"",
-            "This will rename files by taking the first two path segments and the filename."),
-        ("9. Date Formatting:", "renameFiles.py --format \"{date:yyyy-MM-dd}-{name}.{ext}\"",
-            "This renames files using a custom date format."),
-        ("10. Using ExifTool Variables:", "renameFiles.py --format \"{exif:CreateDate}-{f}.{ext}\"",
-            "This renames files using the creation date from Exif metadata."),
-        ("11. Undo Operation:", "renameFiles.py --undo",
-            "Undo the last renaming operation."),
-        ("12. Dry Run:", "renameFiles.py --find \"old\" --replace \"new\" --dry-run",
-            "Simulate the rename operation without making any changes."),
-        ("13. Verbose Mode:", "renameFiles.py --format \"{name}-v2.{ext}\" --verbose",
-            "Rename files with detailed output about each operation."),
-        ("14. Move files into dirs by first char:", "renameFiles.py --find \"(^.)(.*$)\" --replace \"{<$1>.up}/$1$2\" -e", "Organize files into dirs by first char of filename.")
+            "The numbering will process the files in sorted order, which is: a_1.jpg, a_10.jpg, a_2.jpg.",
+        ),
+        (
+            "7. Fixing Existing Numbering:",
+            "renameFiles.py -f '(^.*) \\((\\d+)\\)(\\.*)' -r '{$1}_{$2%03d}_{$3}'",
+            'This command fixes the numbering in filenames like "1 (1).jpg" to "1_001_.jpg", "Prestuff (10) Poststuff.jpg" to "PreStuff_010_Poststuff.jpg", etc.',
+        ),
+        (
+            "8. Using Built-in Variables:",
+            'renameFiles.py --format "{f}_{2p}.{ext}"',
+            "This will rename files by taking the first two path segments and the filename.",
+        ),
+        (
+            "9. Date Formatting:",
+            'renameFiles.py --format "{date:yyyy-MM-dd}-{name}.{ext}"',
+            "This renames files using a custom date format.",
+        ),
+        (
+            "10. Using ExifTool Variables:",
+            'renameFiles.py --format "{exif:CreateDate}-{f}.{ext}"',
+            "This renames files using the creation date from Exif metadata.",
+        ),
+        (
+            "11. Undo Operation:",
+            "renameFiles.py --undo",
+            "Undo the last renaming operation.",
+        ),
+        (
+            "12. Dry Run:",
+            'renameFiles.py --find "old" --replace "new" --dry-run',
+            "Simulate the rename operation without making any changes.",
+        ),
+        (
+            "13. Verbose Mode:",
+            'renameFiles.py --format "{name}-v2.{ext}" --verbose',
+            "Rename files with detailed output about each operation.",
+        ),
+        (
+            "14. Move files into dirs by first char:",
+            'renameFiles.py --find "(^.)(.*$)" --replace "{<$1>.up}/$1$2" -e',
+            "Organize files into dirs by first char of filename.",
+        ),
     ]
-
 
     for title, command, description in examples:
         # Replace newline with newline + tab to indent subsequent lines
         indented_description = description.replace("\n", "\n\t")
 
-        print_colored(title, fore_color='cyan', style='bright')
-        print_colored(f"\t{command}", fore_color='green')
-        print_colored(f"\t{indented_description}", fore_color='white')
+        print_colored(title, fore_color="cyan", style="bright")
+        print_colored(f"\t{command}", fore_color="green")
+        print_colored(f"\t{indented_description}", fore_color="white")
         print()
 
 
 def add_args(parser: argparse.ArgumentParser) -> None:
     """Register command line arguments for this module."""
-    parser.add_argument('--find', '-f', type=str, help='Search pattern in filenames.')
-    parser.add_argument('--replace', '-r', type=str, help='Replacement pattern in filenames.')
-    parser.add_argument('--format', '-F', type=str, help='Format string for renaming files.')
-    parser.add_argument('--indexing', type=int, help='Add sequential numbering with specified digit padding.')
-    parser.add_argument('--remove-vowels', '-rv', action='store_true', help='Remove vowels from filenames.')
-    parser.add_argument('--change-case', '-cc', type=str, choices=['upper', 'lower', 'camel', 'proper'], help='Change case of filenames.')
-    parser.add_argument('--replace-white-space', '-repws', type=str, help='Replace whitespace in filenames with specified character.')
-    parser.add_argument('--remove-white-space', '-remws', action='store_true', help='Remove all whitespace from filenames.')
-    parser.add_argument('--no-clean', '-nc', action='store_true', help='Remove special characters and trim leading/trailing whitespace.')
-    parser.add_argument('--undo', action='store_true', help='Undo the last renaming operation.')
-    parser.add_argument('--recursive', '-R', action='store_true', help='Search subfolders recursively.')
-    parser.add_argument('--hidden', '-H', action='store_true', help='Include hidden files (ignored by default).')
-    parser.add_argument('--dry-run', dest='dry_run', action='store_true', default=True,
-                        help='Simulate the rename actions without making any changes (default).')
-    parser.add_argument('--exec', '-x', dest='dry_run', action='store_false',
-                        help='Execute the renaming operation and commit the changes to the filesystem.')
-    parser.add_argument('--help-f2', '-hf2', action='store_true', help='Show detailed help with examples.')
-    parser.add_argument('--help-verbose', '-hv', action='store_true', help='Show detailed help with examples.')
-    parser.add_argument('--help-examples', '-hx', action='store_true', help='Show help with examples.')
-    parser.add_argument('--help-exfil', '-he', action='store_true', help='Show detailed help with examples.')
-    parser.add_argument('--usage', '-u', action='store_true', help='Show usage info.')
-    parser.add_argument('--fileByFirstChar', '-fbfc', action='store_true',
-                        help='Organize files into folders by first character (letter, number, special char).')
+    parser.add_argument("--find", "-f", type=str, help="Search pattern in filenames.")
+    parser.add_argument(
+        "--replace", "-r", type=str, help="Replacement pattern in filenames."
+    )
+    parser.add_argument(
+        "--format", "-F", type=str, help="Format string for renaming files."
+    )
+    parser.add_argument(
+        "--indexing",
+        type=int,
+        help="Add sequential numbering with specified digit padding.",
+    )
+    parser.add_argument(
+        "--remove-vowels",
+        "-rv",
+        action="store_true",
+        help="Remove vowels from filenames.",
+    )
+    parser.add_argument(
+        "--change-case",
+        "-cc",
+        type=str,
+        choices=["upper", "lower", "camel", "proper"],
+        help="Change case of filenames.",
+    )
+    parser.add_argument(
+        "--replace-white-space",
+        "-repws",
+        type=str,
+        help="Replace whitespace in filenames with specified character.",
+    )
+    parser.add_argument(
+        "--remove-white-space",
+        "-remws",
+        action="store_true",
+        help="Remove all whitespace from filenames.",
+    )
+    parser.add_argument(
+        "--no-clean",
+        "-nc",
+        action="store_true",
+        help="Remove special characters and trim leading/trailing whitespace.",
+    )
+    parser.add_argument(
+        "--undo", action="store_true", help="Undo the last renaming operation."
+    )
+    parser.add_argument(
+        "--recursive", "-R", action="store_true", help="Search subfolders recursively."
+    )
+    parser.add_argument(
+        "--hidden",
+        "-H",
+        action="store_true",
+        help="Include hidden files (ignored by default).",
+    )
+    parser.add_argument(
+        "--dry-run",
+        dest="dry_run",
+        action="store_true",
+        default=True,
+        help="Simulate the rename actions without making any changes (default).",
+    )
+    parser.add_argument(
+        "--exec",
+        "-x",
+        dest="dry_run",
+        action="store_false",
+        help="Execute the renaming operation and commit the changes to the filesystem.",
+    )
+    parser.add_argument(
+        "--help-f2",
+        "-hf2",
+        action="store_true",
+        help="Show detailed help with examples.",
+    )
+    parser.add_argument(
+        "--help-verbose",
+        "-hv",
+        action="store_true",
+        help="Show detailed help with examples.",
+    )
+    parser.add_argument(
+        "--help-examples", "-hx", action="store_true", help="Show help with examples."
+    )
+    parser.add_argument(
+        "--help-exfil",
+        "-he",
+        action="store_true",
+        help="Show detailed help with examples.",
+    )
+    parser.add_argument("--usage", "-u", action="store_true", help="Show usage info.")
+    parser.add_argument(
+        "--fileByFirstChar",
+        "-fbfc",
+        action="store_true",
+        help="Organize files into folders by first character (letter, number, special char).",
+    )
 
 
 register_arguments(add_args)
 
 
 def parse_args():
-    parser = build_parser(description='Wrapper for f2 command-line file renaming tool.')
+    parser = build_parser(description="Wrapper for f2 command-line file renaming tool.")
     args = parser.parse_args()
     return args
 
 
 def main():
-    ''' main '''
+    """main"""
     args = parse_args()
 
     if args.usage:
@@ -436,7 +558,7 @@ if __name__ == "__main__":
 
 
 def print_exfil_help():
-    ''' Help info for using exfil variables'''
+    """Help info for using exfil variables"""
     help_text = """
     Usage: renameFiles.py [options]
 
@@ -485,4 +607,3 @@ def print_exfil_help():
     For more detailed information and examples, please refer to the ExifTool documentation (https://exiftool.org/) and the f2 wiki (https://github.com/ayoisaiah/f2/wiki/Real-world-examples).
     """
     print(help_text)
-

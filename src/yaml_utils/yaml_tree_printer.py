@@ -21,20 +21,25 @@ from yaml_utils.yaml_helpers import load_yaml
 # Try to import colorama for colored output
 try:
     from colorama import Fore, Style, init
+
     init(autoreset=True)
     _COLORS_AVAILABLE = True
 except ImportError:
     # Fallback if colorama not available
     class Fore:
         RED = GREEN = BLUE = YELLOW = CYAN = MAGENTA = WHITE = RESET = ""
+
     class Style:
         BRIGHT = DIM = RESET_ALL = ""
+
     _COLORS_AVAILABLE = False
 
 
 """
 Format a key with appropriate color coding
 """
+
+
 def _format_key(key: str, value: Any, colors_enabled: bool) -> str:
     if not colors_enabled:
         return str(key)
@@ -55,6 +60,8 @@ def _format_key(key: str, value: Any, colors_enabled: bool) -> str:
 """
 Format a value for display with truncation and color coding
 """
+
+
 def _format_value(value: Any, max_length: int, colors_enabled: bool) -> str:
     if isinstance(value, (dict, list)):
         count = len(value)
@@ -63,16 +70,20 @@ def _format_value(value: Any, max_length: int, colors_enabled: bool) -> str:
 
     value_str = str(value)
     if len(value_str) > max_length:
-        value_str = value_str[:max_length-3] + "..."
+        value_str = value_str[: max_length - 3] + "..."
 
     if not colors_enabled:
         return f" = {value_str}"
 
     color = Fore.WHITE
-    if isinstance(value, bool): color = Fore.MAGENTA
-    elif isinstance(value, (int, float)): color = Fore.YELLOW
-    elif isinstance(value, str): color = Fore.GREEN
-    elif value is None: color = Fore.RED
+    if isinstance(value, bool):
+        color = Fore.MAGENTA
+    elif isinstance(value, (int, float)):
+        color = Fore.YELLOW
+    elif isinstance(value, str):
+        color = Fore.GREEN
+    elif value is None:
+        color = Fore.RED
 
     return f" = {color}{value_str}{Style.RESET_ALL}"
 
@@ -80,6 +91,8 @@ def _format_value(value: Any, max_length: int, colors_enabled: bool) -> str:
 """
 Internal recursive function to generate the ASCII tree representation.
 """
+
+
 def _generate_tree_recursive(
     data: Any,
     show_values: bool,
@@ -89,7 +102,7 @@ def _generate_tree_recursive(
     colors_enabled: bool,
     current_depth: int = 0,
     prefix: str = "",
-    is_last: bool = True
+    is_last: bool = True,
 ) -> str:
     if max_depth != -1 and current_depth > max_depth:
         return f"{prefix}{'└── ' if is_last else '├── '}{Style.DIM if colors_enabled else ''}[depth limit reached]{Style.RESET_ALL if colors_enabled else ''}\n"
@@ -103,25 +116,36 @@ def _generate_tree_recursive(
             items = [(k, v) for k, v in items if pattern.search(str(k))]
 
         for i, (key, value) in enumerate(items):
-            is_last_item = (i == len(items) - 1)
+            is_last_item = i == len(items) - 1
             connector = "└── " if is_last_item else "├── "
             next_prefix = prefix + ("    " if is_last_item else "│   ")
 
             key_display = _format_key(key, value, colors_enabled)
-            value_display = _format_value(value, value_truncate, colors_enabled) if show_values else ""
+            value_display = (
+                _format_value(value, value_truncate, colors_enabled)
+                if show_values
+                else ""
+            )
 
             tree_lines.append(f"{prefix}{connector}{key_display}{value_display}\n")
 
             if isinstance(value, (dict, list)) and value:
                 subtree = _generate_tree_recursive(
-                    value, show_values, max_depth, key_filter, value_truncate,
-                    colors_enabled, current_depth + 1, next_prefix, True
+                    value,
+                    show_values,
+                    max_depth,
+                    key_filter,
+                    value_truncate,
+                    colors_enabled,
+                    current_depth + 1,
+                    next_prefix,
+                    True,
                 )
                 tree_lines.append(subtree)
 
     elif isinstance(data, list):
         for i, item in enumerate(data):
-            is_last_item = (i == len(data) - 1)
+            is_last_item = i == len(data) - 1
             connector = "└── " if is_last_item else "├── "
             next_prefix = prefix + ("    " if is_last_item else "│   ")
 
@@ -134,8 +158,15 @@ def _generate_tree_recursive(
 
             if isinstance(item, (dict, list)):
                 subtree = _generate_tree_recursive(
-                    item, show_values, max_depth, key_filter, value_truncate,
-                    colors_enabled, current_depth + 1, next_prefix, True
+                    item,
+                    show_values,
+                    max_depth,
+                    key_filter,
+                    value_truncate,
+                    colors_enabled,
+                    current_depth + 1,
+                    next_prefix,
+                    True,
                 )
                 tree_lines.append(subtree)
 
@@ -145,33 +176,35 @@ def _generate_tree_recursive(
 """
 Analyze YAML structure recursively to gather statistics.
 """
+
+
 def _analyze_structure(data: Any, depth: int = 0) -> Dict[str, Any]:
-    stats = {'total_keys': 0, 'max_depth': depth, 'types': {}}
+    stats = {"total_keys": 0, "max_depth": depth, "types": {}}
 
     def count_type(value):
         type_name = type(value).__name__
-        stats['types'][type_name] = stats['types'].get(type_name, 0) + 1
+        stats["types"][type_name] = stats["types"].get(type_name, 0) + 1
 
     if isinstance(data, dict):
-        stats['total_keys'] += len(data)
+        stats["total_keys"] += len(data)
         for key, value in data.items():
             count_type(value)
             if isinstance(value, (dict, list)):
                 substats = _analyze_structure(value, depth + 1)
-                stats['total_keys'] += substats['total_keys']
-                stats['max_depth'] = max(stats['max_depth'], substats['max_depth'])
-                for dtype, count in substats['types'].items():
-                    stats['types'][dtype] = stats['types'].get(dtype, 0) + count
+                stats["total_keys"] += substats["total_keys"]
+                stats["max_depth"] = max(stats["max_depth"], substats["max_depth"])
+                for dtype, count in substats["types"].items():
+                    stats["types"][dtype] = stats["types"].get(dtype, 0) + count
 
     elif isinstance(data, list):
         for item in data:
             count_type(item)
             if isinstance(item, (dict, list)):
                 substats = _analyze_structure(item, depth + 1)
-                stats['total_keys'] += substats['total_keys']
-                stats['max_depth'] = max(stats['max_depth'], substats['max_depth'])
-                for dtype, count in substats['types'].items():
-                    stats['types'][dtype] = stats['types'].get(dtype, 0) + count
+                stats["total_keys"] += substats["total_keys"]
+                stats["max_depth"] = max(stats["max_depth"], substats["max_depth"])
+                for dtype, count in substats["types"].items():
+                    stats["types"][dtype] = stats["types"].get(dtype, 0) + count
 
     return stats
 
@@ -192,6 +225,8 @@ Args:
 Returns:
     A string containing the formatted ASCII tree and optional stats.
 """
+
+
 def yaml_tree_print(
     data: Any,
     show_values: bool = False,
@@ -199,7 +234,7 @@ def yaml_tree_print(
     key_filter: Optional[str] = None,
     value_truncate: int = 50,
     use_color: bool = True,
-    show_stats: bool = False
+    show_stats: bool = False,
 ) -> str:
     colors_enabled = _COLORS_AVAILABLE and use_color
 
@@ -213,9 +248,9 @@ def yaml_tree_print(
             f"\n{Style.BRIGHT if colors_enabled else ''}YAML Structure Statistics:{Style.RESET_ALL if colors_enabled else ''}",
             f"  Total keys: {stats['total_keys']}",
             f"  Maximum depth: {stats['max_depth']}",
-            "  Data types:"
+            "  Data types:",
         ]
-        for dtype, count in stats['types'].items():
+        for dtype, count in stats["types"].items():
             stats_lines.append(f"    {dtype}: {count}")
         tree_output += "\n" + "\n".join(stats_lines)
 
@@ -236,10 +271,12 @@ Examples:
   # Include statistics
   python yaml_tree_printer.py config.yaml --stats
 """
+
+
 def main():
     """Main function for command-line execution."""
     parser = argparse.ArgumentParser(
-        description='Display YAML files as ASCII directory trees',
+        description="Display YAML files as ASCII directory trees",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -254,16 +291,39 @@ Examples:
 
   # Include statistics
   python yaml_tree_printer.py config.yaml --stats
-        """
+        """,
     )
 
-    parser.add_argument('yaml_file', type=Path, help='YAML file to display')
-    parser.add_argument('-v', '--show-values', action='store_true', help='Show key values')
-    parser.add_argument('-d', '--max-depth', type=int, default=-1, help='Maximum depth to display (-1 for unlimited)')
-    parser.add_argument('-f', '--filter', dest='key_filter', help='Regex pattern to filter keys (case-insensitive)')
-    parser.add_argument('-t', '--truncate', type=int, default=50, help='Maximum length for displayed values')
-    parser.add_argument('-s', '--stats', action='store_true', help='Show structure statistics')
-    parser.add_argument('--no-color', action='store_true', help='Disable colored output')
+    parser.add_argument("yaml_file", type=Path, help="YAML file to display")
+    parser.add_argument(
+        "-v", "--show-values", action="store_true", help="Show key values"
+    )
+    parser.add_argument(
+        "-d",
+        "--max-depth",
+        type=int,
+        default=-1,
+        help="Maximum depth to display (-1 for unlimited)",
+    )
+    parser.add_argument(
+        "-f",
+        "--filter",
+        dest="key_filter",
+        help="Regex pattern to filter keys (case-insensitive)",
+    )
+    parser.add_argument(
+        "-t",
+        "--truncate",
+        type=int,
+        default=50,
+        help="Maximum length for displayed values",
+    )
+    parser.add_argument(
+        "-s", "--stats", action="store_true", help="Show structure statistics"
+    )
+    parser.add_argument(
+        "--no-color", action="store_true", help="Disable colored output"
+    )
 
     args = parser.parse_args()
 
@@ -272,7 +332,9 @@ Examples:
 
         use_color_flag = not args.no_color
 
-        print(f"{Style.BRIGHT if use_color_flag and _COLORS_AVAILABLE else ''}YAML Tree: {args.yaml_file}{Style.RESET_ALL if use_color_flag and _COLORS_AVAILABLE else ''}")
+        print(
+            f"{Style.BRIGHT if use_color_flag and _COLORS_AVAILABLE else ''}YAML Tree: {args.yaml_file}{Style.RESET_ALL if use_color_flag and _COLORS_AVAILABLE else ''}"
+        )
         print("=" * 50)
 
         # Call the main library function to generate the output
@@ -283,16 +345,18 @@ Examples:
             key_filter=args.key_filter,
             value_truncate=args.truncate,
             use_color=use_color_flag,
-            show_stats=args.stats
+            show_stats=args.stats,
         )
 
         print(tree_output)
 
     except Exception as e:
-        print(f"{Fore.RED if _COLORS_AVAILABLE else ''}❌ Error: {e}{Style.RESET_ALL if _COLORS_AVAILABLE else ''}", file=sys.stderr)
+        print(
+            f"{Fore.RED if _COLORS_AVAILABLE else ''}❌ Error: {e}{Style.RESET_ALL if _COLORS_AVAILABLE else ''}",
+            file=sys.stderr,
+        )
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()
-
-

@@ -14,9 +14,11 @@ import os
 *    str: The content of the file as a string.
 *    dict: A dictionary with an 'error' key if reading fails.
 """
+
+
 def read_file_content(file_path):
     try:
-        with open(file_path, 'r', encoding='utf-8') as f:
+        with open(file_path, "r", encoding="utf-8") as f:
             return f.read()
     except Exception as e:
         return {"error": f"Failed to read file {file_path}: {e}"}
@@ -32,9 +34,11 @@ def read_file_content(file_path):
 *Returns:
 *    dict: A dictionary with 'success': True or an 'error' key.
 """
+
+
 def write_file_content(file_path, content):
     try:
-        with open(file_path, 'w', encoding='utf-8') as f:
+        with open(file_path, "w", encoding="utf-8") as f:
             f.write(content)
         return {"success": True}
     except Exception as e:
@@ -51,6 +55,8 @@ def write_file_content(file_path, content):
 *    dict: The parsed Python dictionary.
 *    dict: A dictionary with an 'error' key if parsing fails.
 """
+
+
 def load_json_from_string(content):
     try:
         return json.loads(content)
@@ -67,6 +73,8 @@ def load_json_from_string(content):
 * Returns:
 *     str: The formatted JSON string.
 """
+
+
 def to_json_string(data):
     return json.dumps(data, indent=2)
 
@@ -81,6 +89,8 @@ def to_json_string(data):
 *     dict: The parsed Python dictionary.
 *     dict: A dictionary with an 'error' key if parsing fails.
 """
+
+
 def load_yaml_from_string(content):
     try:
         # Use safe_load_all to handle multi-document streams.
@@ -102,6 +112,7 @@ def load_yaml_from_string(content):
 *  Returns:
 *    str: The YAML string.
 """
+
+
 def to_yaml_string(data):
     return yaml.dump(data, sort_keys=False)
-

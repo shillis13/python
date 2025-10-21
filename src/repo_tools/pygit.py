@@ -110,7 +110,9 @@ class GitRepo:
 
     def branch_info(self) -> BranchInfo:
         self.ensure_repo()
-        name = run_git(self.path, ["rev-parse", "--abbrev-ref", "HEAD"], verbose=self.verbose).stdout.strip()
+        name = run_git(
+            self.path, ["rev-parse", "--abbrev-ref", "HEAD"], verbose=self.verbose
+        ).stdout.strip()
         upstream_proc = run_git(
             self.path,
             ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
@@ -152,7 +154,9 @@ class GitRepo:
                 unstaged += 1
         return WorkingTreeSummary(staged=staged, unstaged=unstaged, untracked=untracked)
 
-    def ahead_files(self, info: Optional[BranchInfo] = None) -> tuple[Optional[List[str]], Optional[str]]:
+    def ahead_files(
+        self, info: Optional[BranchInfo] = None
+    ) -> tuple[Optional[List[str]], Optional[str]]:
         self.ensure_repo()
         if info is None:
             info = self.branch_info()
@@ -174,7 +178,11 @@ class GitRepo:
         )
         files: set[str] = set()
         for line in log_proc.stdout.splitlines():
-            if not line or len(line) == 40 and all(c in "0123456789abcdef" for c in line):
+            if (
+                not line
+                or len(line) == 40
+                and all(c in "0123456789abcdef" for c in line)
+            ):
                 continue
             status, *rest = line.split("\t")
             if not rest:
@@ -185,7 +193,12 @@ class GitRepo:
         return sorted(files), None
 
     def has_staged_changes(self) -> bool:
-        proc = run_git(self.path, ["diff", "--cached", "--quiet"], check=False, verbose=self.verbose)
+        proc = run_git(
+            self.path,
+            ["diff", "--cached", "--quiet"],
+            check=False,
+            verbose=self.verbose,
+        )
         return proc.returncode == 1
 
     def add_all(self) -> None:
@@ -236,7 +249,6 @@ class Printer:
         print(colour_text(text, "red", self.colour), file=sys.stderr)
 
 
-
 def command_status(repo: GitRepo, printer: Printer) -> int:
     info = repo.branch_info()
     wt = repo.working_tree()
@@ -252,11 +264,15 @@ def command_status(repo: GitRepo, printer: Printer) -> int:
     else:
         printer.info("Working tree clean")
     if not info.upstream:
-        printer.warn("No upstream configured. Use 'pygit set-upstream <remote> <branch>'.")
+        printer.warn(
+            "No upstream configured. Use 'pygit set-upstream <remote> <branch>'."
+        )
     return 0
 
 
-def print_files_preview(files: Optional[List[str]], reason: Optional[str], printer: Printer) -> None:
+def print_files_preview(
+    files: Optional[List[str]], reason: Optional[str], printer: Printer
+) -> None:
     if files is None:
         printer.warn(f"File preview skipped: {reason}")
         return
@@ -303,7 +319,9 @@ def command_push(args: argparse.Namespace, repo: GitRepo, printer: Printer) -> i
     if not printer.apply_mode:
         printer.info("Would stage all changes (git add -A)")
         printer.info(
-            "Would commit staged changes" if args.message else "Would create commit if staged changes exist"
+            "Would commit staged changes"
+            if args.message
+            else "Would create commit if staged changes exist"
         )
         printer.info("Would push to upstream")
         return 0
@@ -360,11 +378,14 @@ def command_merge(args: argparse.Namespace, repo: GitRepo, printer: Printer) -> 
     if exists.returncode != 0:
         printer.error(f"Branch '{target}' not found.")
         return 1
-    ff_possible = run_git(
-        repo.path,
-        ["merge-base", "--is-ancestor", "HEAD", target],
-        check=False,
-    ).returncode == 0
+    ff_possible = (
+        run_git(
+            repo.path,
+            ["merge-base", "--is-ancestor", "HEAD", target],
+            check=False,
+        ).returncode
+        == 0
+    )
     if ff_possible:
         printer.info(f"Merging {target} would fast-forward current branch.")
     else:
@@ -376,7 +397,9 @@ def command_merge(args: argparse.Namespace, repo: GitRepo, printer: Printer) -> 
     return 0
 
 
-def command_refresh_main(args: argparse.Namespace, repo: GitRepo, printer: Printer) -> int:
+def command_refresh_main(
+    args: argparse.Namespace, repo: GitRepo, printer: Printer
+) -> int:
     main_branch = args.main
     remote_ref = f"origin/{main_branch}"
     if not printer.apply_mode:
@@ -390,7 +413,9 @@ def command_refresh_main(args: argparse.Namespace, repo: GitRepo, printer: Print
     return 0
 
 
-def command_set_upstream(args: argparse.Namespace, repo: GitRepo, printer: Printer) -> int:
+def command_set_upstream(
+    args: argparse.Namespace, repo: GitRepo, printer: Printer
+) -> int:
     remote = args.remote
     branch = args.branch
     if not printer.apply_mode:
@@ -401,7 +426,9 @@ def command_set_upstream(args: argparse.Namespace, repo: GitRepo, printer: Print
     return 0
 
 
-def command_files_to_push(args: argparse.Namespace, repo: GitRepo, printer: Printer) -> int:
+def command_files_to_push(
+    args: argparse.Namespace, repo: GitRepo, printer: Printer
+) -> int:
     info = repo.branch_info()
     files, reason = repo.ahead_files(info)
     if files is None:
@@ -460,12 +487,22 @@ set-upstream, files-to-push.
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Unified git helper with dry-run safety")
-    parser.add_argument("--apply", action="store_true", help="Execute commands (default dry-run)")
-    parser.add_argument("--repo", default=".", help="Path to repository (default: current directory)")
+    parser = argparse.ArgumentParser(
+        description="Unified git helper with dry-run safety"
+    )
+    parser.add_argument(
+        "--apply", action="store_true", help="Execute commands (default dry-run)"
+    )
+    parser.add_argument(
+        "--repo", default=".", help="Path to repository (default: current directory)"
+    )
     parser.add_argument("--no-color", action="store_true", help="Disable colour output")
-    parser.add_argument("--quiet", action="store_true", help="Suppress non-essential output")
-    parser.add_argument("-v", "--verbose", action="count", default=0, help="Increase verbosity")
+    parser.add_argument(
+        "--quiet", action="store_true", help="Suppress non-essential output"
+    )
+    parser.add_argument(
+        "-v", "--verbose", action="count", default=0, help="Increase verbosity"
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     subparsers.add_parser("status", help="Show repository status")
@@ -476,21 +513,31 @@ def build_parser() -> argparse.ArgumentParser:
 
     push_parser = subparsers.add_parser("push", help="Stage, commit and push changes")
     push_parser.add_argument("--message", help="Commit message to use when committing")
-    push_parser.add_argument("--allow-empty", action="store_true", help="Allow empty commit")
+    push_parser.add_argument(
+        "--allow-empty", action="store_true", help="Allow empty commit"
+    )
 
     subparsers.add_parser("sync", help="Pull (rebase) if behind then push if ahead")
 
     merge_parser = subparsers.add_parser("merge", help="Merge a branch into current")
     merge_parser.add_argument("branch")
 
-    refresh_parser = subparsers.add_parser("refresh-main", help="Fetch and merge the latest main branch")
-    refresh_parser.add_argument("--main", default="main", help="Name of the main branch (default: main)")
+    refresh_parser = subparsers.add_parser(
+        "refresh-main", help="Fetch and merge the latest main branch"
+    )
+    refresh_parser.add_argument(
+        "--main", default="main", help="Name of the main branch (default: main)"
+    )
 
-    upstream_parser = subparsers.add_parser("set-upstream", help="Set upstream for current branch")
+    upstream_parser = subparsers.add_parser(
+        "set-upstream", help="Set upstream for current branch"
+    )
     upstream_parser.add_argument("remote")
     upstream_parser.add_argument("branch")
 
-    subparsers.add_parser("files-to-push", help="List files contained in commits ahead of upstream")
+    subparsers.add_parser(
+        "files-to-push", help="List files contained in commits ahead of upstream"
+    )
 
     subparsers.add_parser("help-examples", help="Show common usage examples")
 

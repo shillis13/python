@@ -27,8 +27,11 @@ try:
     from yaml_chat_manager import ChatHistoryManager
 except ImportError:
     print("Error: Could not import ChatHistoryManager.")
-    print("Please ensure yaml_chat_manager.py is in the same directory or in the Python path.")
+    print(
+        "Please ensure yaml_chat_manager.py is in the same directory or in the Python path."
+    )
     exit(1)
+
 
 def parse_chat_history(markdown_content: str) -> List[Dict[str, str]]:
     """
@@ -50,7 +53,7 @@ def parse_chat_history(markdown_content: str) -> List[Dict[str, str]]:
         cleaned_content = content.strip()
 
         if "Show thinking" in cleaned_content:
-             cleaned_content = cleaned_content.split("Show thinking")[1].strip()
+            cleaned_content = cleaned_content.split("Show thinking")[1].strip()
 
         message = {"role": role, "content": cleaned_content}
         parsed_messages.append(message)
@@ -58,7 +61,12 @@ def parse_chat_history(markdown_content: str) -> List[Dict[str, str]]:
     return parsed_messages
 
 
-def convert_md_to_yaml(input_path: Path, output_path: Path, platform: str = "gemini", model_version: str = "1.5-pro-latest") -> bool:
+def convert_md_to_yaml(
+    input_path: Path,
+    output_path: Path,
+    platform: str = "gemini",
+    model_version: str = "1.5-pro-latest",
+) -> bool:
     """
     Reads a Markdown chat history, converts it, and saves it as a YAML file.
 
@@ -73,7 +81,7 @@ def convert_md_to_yaml(input_path: Path, output_path: Path, platform: str = "gem
     """
     result = False
     try:
-        with open(input_path, 'r', encoding='utf-8') as f:
+        with open(input_path, "r", encoding="utf-8") as f:
             markdown_content = f.read()
 
         messages = parse_chat_history(markdown_content)
@@ -82,12 +90,13 @@ def convert_md_to_yaml(input_path: Path, output_path: Path, platform: str = "gem
             print(f"Warning: No messages were parsed from '{input_path}'. Skipping.")
             return result
 
-        chat_manager = ChatHistoryManager(platform=platform, model_version=model_version)
+        chat_manager = ChatHistoryManager(
+            platform=platform, model_version=model_version
+        )
 
         for message in messages:
             chat_manager.record_message(
-                role=message['role'],
-                content=message['content']
+                role=message["role"], content=message["content"]
             )
 
         # Ensure the parent directory for the output file exists
@@ -103,24 +112,26 @@ def convert_md_to_yaml(input_path: Path, output_path: Path, platform: str = "gem
 
     return result
 
+
 def main():
     """
     Main function to handle command-line arguments and orchestrate the conversion.
     """
     parser = argparse.ArgumentParser(
         description="Convert Gemini Markdown chat histories to schema-compliant YAML files.",
-        epilog="Handles single or multiple input files with flexible output path logic."
+        epilog="Handles single or multiple input files with flexible output path logic.",
     )
     parser.add_argument(
         "input_files",
         type=Path,
-        nargs='+',
-        help="One or more paths to the input Markdown files."
+        nargs="+",
+        help="One or more paths to the input Markdown files.",
     )
     parser.add_argument(
-        "-o", "--output-path",
+        "-o",
+        "--output-path",
         type=Path,
-        help="The output path. Can be a file (for single input) or a directory."
+        help="The output path. Can be a file (for single input) or a directory.",
     )
 
     args = parser.parse_args()
@@ -134,7 +145,9 @@ def main():
     if len(input_files) > 1:
         output_dir = output_path_arg or Path.cwd()
         if output_dir.exists() and not output_dir.is_dir():
-            print(f"Error: For multiple inputs, the output path '{output_dir}' must be a directory, but it exists as a file.")
+            print(
+                f"Error: For multiple inputs, the output path '{output_dir}' must be a directory, but it exists as a file."
+            )
             return
 
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -152,7 +165,9 @@ def main():
         output_path = None
         if output_path_arg:
             # Check if the user intends for it to be a directory
-            if str(output_path_arg).endswith(('/', '\\')) or (output_path_arg.exists() and output_path_arg.is_dir()):
+            if str(output_path_arg).endswith(("/", "\\")) or (
+                output_path_arg.exists() and output_path_arg.is_dir()
+            ):
                 output_dir = Path(output_path_arg)
                 output_dir.mkdir(parents=True, exist_ok=True)
                 output_path = output_dir / (input_file.stem + ".yml")
@@ -162,7 +177,7 @@ def main():
         else:
             # Default case: output to current directory
             output_path = Path.cwd() / (input_file.stem + ".yml")
-        
+
         if convert_md_to_yaml(input_file, output_path):
             success_count += 1
         else:
@@ -173,6 +188,7 @@ def main():
     print(f"  ✅ Successful: {success_count}")
     if failure_count > 0:
         print(f"  ❌ Failed or Skipped: {failure_count}")
+
 
 if __name__ == "__main__":
     main()

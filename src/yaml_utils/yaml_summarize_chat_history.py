@@ -15,27 +15,30 @@ from collections import Counter, defaultdict
 import re
 from datetime import datetime
 
+
 # Assuming yaml_helpers.py is accessible
 # Load a YAML file and handle any errors.
 def load_yaml(filepath):
     """Loads a YAML file and handles errors."""
     try:
-        with open(filepath, 'r', encoding='utf-8') as f:
+        with open(filepath, "r", encoding="utf-8") as f:
             return yaml.safe_load(f)
     except Exception as e:
         print(f"Error loading YAML file: {e}")
         return None
+
 
 # Calculate the duration between two ISO 8601 timestamps.
 def get_conversation_duration(start_str, end_str):
     """Calculates the duration between two ISO 8601 timestamps."""
     try:
         # Handle different ISO 8601 formats by removing 'Z' if present
-        start_time = datetime.fromisoformat(start_str.replace('Z', '+00:00'))
-        end_time = datetime.fromisoformat(end_str.replace('Z', '+00:00'))
+        start_time = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
+        end_time = datetime.fromisoformat(end_str.replace("Z", "+00:00"))
         return str(end_time - start_time)
     except (ValueError, TypeError):
         return "N/A"
+
 
 # Analyze a chat history file and generate a structured summary brief.
 def generate_summary_brief(history_filepath: Path) -> str:
@@ -54,11 +57,11 @@ def generate_summary_brief(history_filepath: Path) -> str:
     start_date = metadata.get("created", "N/A")
     last_update = metadata.get("last_updated", "N/A")
     duration = get_conversation_duration(start_date, last_update)
-    
+
     total_messages = metadata.get("total_messages", 0)
     total_exchanges = metadata.get("total_exchanges", 0)
     num_sessions = len(sessions)
-    
+
     all_attachments = []
     full_text_content = []
     tag_to_message_index = defaultdict(list)
@@ -72,32 +75,51 @@ def generate_summary_brief(history_filepath: Path) -> str:
 
             # Build full text content
             if message.get("role") in ["user", "assistant"]:
-                full_text_content.append(f"[{message['role'].upper()} - Msg {msg_num}] {message['content']}")
-            
+                full_text_content.append(
+                    f"[{message['role'].upper()} - Msg {msg_num}] {message['content']}"
+                )
+
             # Index attachments
             if message.get("attachments"):
                 for attachment in message["attachments"]:
                     att_type = attachment.get("type", "unknown")
-                    name = attachment.get("filename") or attachment.get("title") or attachment.get("artifact_id", "N/A")
+                    name = (
+                        attachment.get("filename")
+                        or attachment.get("title")
+                        or attachment.get("artifact_id", "N/A")
+                    )
                     all_attachments.append(f"- {att_type.capitalize()}: {name}")
-            
+
             # Build tag and annotation indexes
             if message.get("tags"):
                 for tag in message["tags"]:
                     tag_to_message_index[tag].append(msg_id)
                     # Check for our special annotation tag
-                    if tag.lower() == '#key-insight':
-                        annotation_index.append({
-                            "message_id": msg_id,
-                            "message_number": msg_num,
-                            "content": message['content']
-                        })
+                    if tag.lower() == "#key-insight":
+                        annotation_index.append(
+                            {
+                                "message_id": msg_id,
+                                "message_number": msg_num,
+                                "content": message["content"],
+                            }
+                        )
 
     # --- Perform keyword analysis ---
     all_text = " ".join(full_text_content)
-    words = re.findall(r'\b[a-zA-Z]{4,}\b', all_text.lower())
+    words = re.findall(r"\b[a-zA-Z]{4,}\b", all_text.lower())
     # Exclude common but unhelpful words
-    stop_words = {'this', 'that', 'with', 'what', 'have', 'from', 'your', 'like', 'just', 'about'}
+    stop_words = {
+        "this",
+        "that",
+        "with",
+        "what",
+        "have",
+        "from",
+        "your",
+        "like",
+        "just",
+        "about",
+    }
     filtered_words = [word for word in words if word not in stop_words]
     common_words = [word for word, count in Counter(filtered_words).most_common(15)]
 
@@ -132,7 +154,9 @@ This index maps every tag used in the conversation to the messages where it appe
 """
     if tag_to_message_index:
         for tag, msg_ids in sorted(tag_to_message_index.items()):
-            brief += f"- **{tag}** ({len(msg_ids)} mentions):\n  - {', '.join(msg_ids)}\n"
+            brief += (
+                f"- **{tag}** ({len(msg_ids)} mentions):\n  - {', '.join(msg_ids)}\n"
+            )
     else:
         brief += "- No tags found.\n"
 
@@ -148,25 +172,29 @@ This index maps every tag used in the conversation to the messages where it appe
 """
     return brief.strip()
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Generate a summary brief from a chat history file for AI analysis.",
-        formatter_class=argparse.RawTextHelpFormatter
+        formatter_class=argparse.RawTextHelpFormatter,
     )
     parser.add_argument("history_file", help="Path to the chat_history.yml file.")
-    parser.add_argument("-o", "--output", help="Optional. Path to save the summary brief to a text file.")
-    
+    parser.add_argument(
+        "-o",
+        "--output",
+        help="Optional. Path to save the summary brief to a text file.",
+    )
+
     args = parser.parse_args()
 
     summary_content = generate_summary_brief(Path(args.history_file))
 
     if args.output:
         try:
-            with open(args.output, 'w', encoding='utf-8') as f:
+            with open(args.output, "w", encoding="utf-8") as f:
                 f.write(summary_content)
             print(f"✅ Summary brief saved to: {args.output}")
         except Exception as e:
             print(f"Error saving file: {e}")
     else:
         print(summary_content)
-

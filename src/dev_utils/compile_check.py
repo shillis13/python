@@ -111,10 +111,14 @@ def _iter_python_files(
                 if _should_exclude(root_path, patterns):
                     dirs[:] = []
                     continue
-                dirs[:] = [d for d in dirs if not _should_exclude(root_path / d, patterns)]
+                dirs[:] = [
+                    d for d in dirs if not _should_exclude(root_path / d, patterns)
+                ]
                 for name in files:
                     file_path = root_path / name
-                    if file_path.suffix == ".py" and not _should_exclude(file_path, patterns):
+                    if file_path.suffix == ".py" and not _should_exclude(
+                        file_path, patterns
+                    ):
                         resolved = file_path.resolve()
                         if resolved in seen:
                             continue
@@ -122,7 +126,11 @@ def _iter_python_files(
                         yield file_path
         else:
             for child in target.iterdir():
-                if child.is_file() and child.suffix == ".py" and not _should_exclude(child, patterns):
+                if (
+                    child.is_file()
+                    and child.suffix == ".py"
+                    and not _should_exclude(child, patterns)
+                ):
                     resolved = child.resolve()
                     if resolved in seen:
                         continue

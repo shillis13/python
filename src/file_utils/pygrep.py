@@ -10,25 +10,27 @@ import argparse
 import re
 import sys
 
+
 def bre_to_python(pattern):
     # Parentheses: \(...\) -> (...)
-    pattern = re.sub(r'\\\((.*?)\\\)', r'(\1)', pattern)
+    pattern = re.sub(r"\\\((.*?)\\\)", r"(\1)", pattern)
     # Curly braces: \{m,n\} -> {m,n}
-    pattern = re.sub(r'\\\{(\d+,\d*)\\\}', r'{\1}', pattern)
+    pattern = re.sub(r"\\\{(\d+,\d*)\\\}", r"{\1}", pattern)
     # Plus: \+ -> +
-    pattern = pattern.replace(r'\+', '+')
+    pattern = pattern.replace(r"\+", "+")
     # Question: \? -> ?
-    pattern = pattern.replace(r'\?', '?')
+    pattern = pattern.replace(r"\?", "?")
     return pattern
+
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--pattern', required=True, help='Regex pattern')
-    parser.add_argument('--mode', choices=['bre', 'ere'], required=True)
-    parser.add_argument('--file', required=True)
+    parser.add_argument("--pattern", required=True, help="Regex pattern")
+    parser.add_argument("--mode", choices=["bre", "ere"], required=True)
+    parser.add_argument("--file", required=True)
     args = parser.parse_args()
 
-    if args.mode == 'bre':
+    if args.mode == "bre":
         pattern = bre_to_python(args.pattern)
     else:
         pattern = args.pattern
@@ -39,11 +41,11 @@ def main():
         print(f"Regex compile error: {e}")
         sys.exit(1)
 
-    with open(args.file, encoding='utf-8') as f:
+    with open(args.file, encoding="utf-8") as f:
         for line in f:
             if prog.search(line):
-                print(line.rstrip('\n'))
+                print(line.rstrip("\n"))
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()
-

@@ -64,32 +64,41 @@ def _get_yaml_module():
 
 class EnhancedFileFinder:
     """Enhanced file finder with comprehensive filtering support."""
-    
+
     def __init__(self):
         self.stats = {
-            'directories_searched': 0,
-            'files_found': 0,
-            'directories_found': 0,
-            'symlinks_found': 0,
-            'permission_errors': 0,
-            'other_errors': 0
+            "directories_searched": 0,
+            "files_found": 0,
+            "directories_found": 0,
+            "symlinks_found": 0,
+            "permission_errors": 0,
+            "other_errors": 0,
         }
         self.extension_data = None
-    
+
     def load_extension_data(self):
         """Load file extension data for type filtering."""
         if not self.extension_data:
             self.extension_data = get_extension_data()
-    
-    def find_files(self, directories: List[str], recursive: bool = True,
-                  file_pattern: Optional[str] = None, substrings: Optional[List[str]] = None,
-                  regex: Optional[str] = None, extensions: Optional[List[str]] = None,
-                  file_types: Optional[List[str]] = None, fs_filter: Optional[FileSystemFilter] = None,
-                  include_dirs: bool = False, follow_symlinks: bool = False,
-                  min_depth: Optional[int] = None, max_depth: Optional[int] = None) -> Iterator[str]:
+
+    def find_files(
+        self,
+        directories: List[str],
+        recursive: bool = True,
+        file_pattern: Optional[str] = None,
+        substrings: Optional[List[str]] = None,
+        regex: Optional[str] = None,
+        extensions: Optional[List[str]] = None,
+        file_types: Optional[List[str]] = None,
+        fs_filter: Optional[FileSystemFilter] = None,
+        include_dirs: bool = False,
+        follow_symlinks: bool = False,
+        min_depth: Optional[int] = None,
+        max_depth: Optional[int] = None,
+    ) -> Iterator[str]:
         """
         Enhanced file finder with filtering capabilities.
-        
+
         Args:
             directories: List of directories to search
             recursive: Whether to search recursively
@@ -101,39 +110,49 @@ class EnhancedFileFinder:
             fs_filter: FileSystemFilter instance for advanced filtering
             include_dirs: Whether to include directories in results
             follow_symlinks: Whether to follow symbolic links
-            
+
         Yields:
             str: File paths matching all criteria
         """
         # Normalize inputs
         substrings = substrings or []
         if isinstance(extensions, str):
-            extensions = [ext.strip() for ext in extensions.split(',') if ext.strip()]
+            extensions = [ext.strip() for ext in extensions.split(",") if ext.strip()]
         else:
             extensions = extensions or []
         if isinstance(file_types, str):
-            file_types = [ft.strip() for ft in file_types.split(',') if ft.strip()]
+            file_types = [ft.strip() for ft in file_types.split(",") if ft.strip()]
         else:
             file_types = file_types or []
-        
+
         if file_types:
             self.load_extension_data()
-        
+
         # Process each directory
         for directory in directories:
             dir_path = Path(directory)
             if not dir_path.exists():
                 log_info(f"Directory not found: {directory}")
                 continue
-            
+
             if not dir_path.is_dir():
                 log_info(f"Not a directory: {directory}")
                 continue
-            
+
             yield from self._search_directory(
-                dir_path, recursive, file_pattern, substrings, regex,
-                extensions, file_types, fs_filter, include_dirs, follow_symlinks,
-                0, min_depth=min_depth, max_depth=max_depth
+                dir_path,
+                recursive,
+                file_pattern,
+                substrings,
+                regex,
+                extensions,
+                file_types,
+                fs_filter,
+                include_dirs,
+                follow_symlinks,
+                0,
+                min_depth=min_depth,
+                max_depth=max_depth,
             )
 
     def _should_emit(self, item: Path, include_dirs: bool) -> bool:
@@ -141,26 +160,38 @@ class EnhancedFileFinder:
 
         if item.is_dir():
             if include_dirs:
-                self.stats['directories_found'] += 1
+                self.stats["directories_found"] += 1
                 return True
             return False
 
         if item.is_symlink():
-            self.stats['symlinks_found'] += 1
+            self.stats["symlinks_found"] += 1
         else:
-            self.stats['files_found'] += 1
+            self.stats["files_found"] += 1
 
         return True
 
-    def _search_directory(self, directory: Path, recursive: bool, file_pattern: Optional[str],
-                         substrings: List[str], regex: Optional[str], extensions: List[str],
-                         file_types: List[str], fs_filter: Optional[FileSystemFilter],
-                         include_dirs: bool, follow_symlinks: bool, depth: int,
-                         *, min_depth: Optional[int] = None, max_depth: Optional[int] = None) -> Iterator[str]:
+    def _search_directory(
+        self,
+        directory: Path,
+        recursive: bool,
+        file_pattern: Optional[str],
+        substrings: List[str],
+        regex: Optional[str],
+        extensions: List[str],
+        file_types: List[str],
+        fs_filter: Optional[FileSystemFilter],
+        include_dirs: bool,
+        follow_symlinks: bool,
+        depth: int,
+        *,
+        min_depth: Optional[int] = None,
+        max_depth: Optional[int] = None,
+    ) -> Iterator[str]:
         """Search a single directory."""
         try:
-            self.stats['directories_searched'] += 1
-            
+            self.stats["directories_searched"] += 1
+
             for item in directory.iterdir():
                 # Skip broken symlinks
                 if item.is_symlink() and not item.exists():
@@ -172,8 +203,15 @@ class EnhancedFileFinder:
                     continue
 
                 # Check if item matches criteria and depth constraints
-                if self._matches_criteria(item, file_pattern, substrings, regex,
-                                        extensions, file_types, fs_filter):
+                if self._matches_criteria(
+                    item,
+                    file_pattern,
+                    substrings,
+                    regex,
+                    extensions,
+                    file_types,
+                    fs_filter,
+                ):
                     meets_min_depth = True
                     if min_depth is not None:
                         meets_min_depth = current_depth >= max(min_depth, 0)
@@ -192,65 +230,84 @@ class EnhancedFileFinder:
                     if fs_filter and not fs_filter.should_descend(item, directory):
                         continue
                     yield from self._search_directory(
-                        item, recursive, file_pattern, substrings, regex,
-                        extensions, file_types, fs_filter, include_dirs, follow_symlinks,
-                        current_depth, min_depth=min_depth, max_depth=max_depth
+                        item,
+                        recursive,
+                        file_pattern,
+                        substrings,
+                        regex,
+                        extensions,
+                        file_types,
+                        fs_filter,
+                        include_dirs,
+                        follow_symlinks,
+                        current_depth,
+                        min_depth=min_depth,
+                        max_depth=max_depth,
                     )
-                    
+
         except PermissionError:
             log_debug(f"Permission denied: {directory}")
-            self.stats['permission_errors'] += 1
+            self.stats["permission_errors"] += 1
         except Exception as e:
             log_debug(f"Error searching {directory}: {e}")
-            self.stats['other_errors'] += 1
-    
-    def _matches_criteria(self, path: Path, file_pattern: Optional[str], substrings: List[str],
-                         regex: Optional[str], extensions: List[str], file_types: List[str],
-                         fs_filter: Optional[FileSystemFilter]) -> bool:
+            self.stats["other_errors"] += 1
+
+    def _matches_criteria(
+        self,
+        path: Path,
+        file_pattern: Optional[str],
+        substrings: List[str],
+        regex: Optional[str],
+        extensions: List[str],
+        file_types: List[str],
+        fs_filter: Optional[FileSystemFilter],
+    ) -> bool:
         """Check if a path matches all specified criteria."""
         filename = path.name
-        
+
         # File pattern check
         if file_pattern and not fnmatch.fnmatch(filename, file_pattern):
             return False
-        
+
         # Substring check
         if substrings and not any(sub in filename for sub in substrings):
             return False
-        
+
         # Regex check
         if regex and not re.search(regex, filename):
             return False
-        
+
         # Extension check
         if extensions:
             file_ext = path.suffix.lower()
-            normalized_extensions = [ext if ext.startswith('.') else f'.{ext}' for ext in extensions]
+            normalized_extensions = [
+                ext if ext.startswith(".") else f".{ext}" for ext in extensions
+            ]
             if file_ext not in normalized_extensions:
                 return False
-        
+
         # File type check
         if file_types and path.is_file():
             if not self._matches_file_type(path, file_types):
                 return False
-        
+
         # Advanced filter check
         if fs_filter:
             # For fs_filter, we need a base path - use the path's parent
             base_path = path.parent
             if not fs_filter.should_include(path, base_path):
                 return False
-        
+
         return True
-    
+
     def _matches_file_type(self, path: Path, file_types: List[str]) -> bool:
         """Check if file matches any of the specified file types."""
         if not self.extension_data or not path.is_file():
             return False
-        
+
         file_ext = path.suffix.lower()
-        ext_map = self.extension_data.get('extensions', {})
-        type_map_raw = self.extension_data.get('types', {})
+        ext_map = self.extension_data.get("extensions", {})
+        type_map_raw = self.extension_data.get("types", {})
         type_map = {k.lower(): v for k, v in type_map_raw.items()}
         target_types = [ft.lower() for ft in file_types]
 
@@ -261,31 +318,40 @@ class EnhancedFileFinder:
             while current:
                 if current in target_types:
                     return True
-                parent = type_map.get(current, {}).get('parent')
+                parent = type_map.get(current, {}).get("parent")
                 current = parent.lower() if isinstance(parent, str) else None
             return False
 
         # Fall back to scanning requested types for matching extensions
         for file_type_name in target_types:
             type_info = type_map.get(file_type_name)
-            if type_info and 'extensions' in type_info:
-                if file_ext in [ext.lower() for ext in type_info['extensions']]:
+            if type_info and "extensions" in type_info:
+                if file_ext in [ext.lower() for ext in type_info["extensions"]]:
                     return True
 
         return False
-    
+
     def print_stats(self):
         """Print search statistics."""
         print(f"\n📊 Search Statistics:", file=sys.stderr)
-        print(f"   Directories searched: {self.stats['directories_searched']}", file=sys.stderr)
+        print(
+            f"   Directories searched: {self.stats['directories_searched']}",
+            file=sys.stderr,
+        )
         print(f"   Files found: {self.stats['files_found']}", file=sys.stderr)
-        if self.stats['directories_found'] > 0:
-            print(f"   Directories found: {self.stats['directories_found']}", file=sys.stderr)
-        if self.stats['symlinks_found'] > 0:
+        if self.stats["directories_found"] > 0:
+            print(
+                f"   Directories found: {self.stats['directories_found']}",
+                file=sys.stderr,
+            )
+        if self.stats["symlinks_found"] > 0:
             print(f"   Symlinks found: {self.stats['symlinks_found']}", file=sys.stderr)
-        if self.stats['permission_errors'] > 0:
-            print(f"   Permission errors: {self.stats['permission_errors']}", file=sys.stderr)
-        if self.stats['other_errors'] > 0:
+        if self.stats["permission_errors"] > 0:
+            print(
+                f"   Permission errors: {self.stats['permission_errors']}",
+                file=sys.stderr,
+            )
+        if self.stats["other_errors"] > 0:
             print(f"   Other errors: {self.stats['other_errors']}", file=sys.stderr)
 
 
@@ -295,15 +361,15 @@ def list_available_types():
     if not extension_data:
         print("Could not load extension data.")
         return
-    
-    types = extension_data.get('types', {})
+
+    types = extension_data.get("types", {})
     if types:
         print("Available file type categories:")
         for type_name in sorted(types.keys()):
             type_info = types[type_name]
-            extensions = type_info.get('extensions', [])
-            ext_preview = ', '.join(extensions)
-            #ext_preview = ', '.join(extensions[:5])
+            extensions = type_info.get("extensions", [])
+            ext_preview = ", ".join(extensions)
+            # ext_preview = ', '.join(extensions[:5])
             # if len(extensions) > 5:
             #     ext_preview += f", ... ({len(extensions)} total)"
             print(f"  {type_name:15} {ext_preview}")
@@ -364,53 +430,61 @@ def create_filter_from_args(args) -> Optional[FileSystemFilter]:
     # Check if any filter arguments are provided
     filter_args = [
         args.filter_file,
-        args.size_gt, args.size_lt, args.size_eq,
-        args.modified_after, args.modified_before,
-        args.created_after, args.created_before,
-        args.file_pattern_filter, args.dir_pattern_filter,
-        args.pattern_filter, args.pattern_ignore,
-        args.file_ignore, args.dir_ignore,
-        args.ignore_filter, args.filter_ignore,
-        args.type_filter, args.extension_filter,
-        args.git_ignore_filter
+        args.size_gt,
+        args.size_lt,
+        args.size_eq,
+        args.modified_after,
+        args.modified_before,
+        args.created_after,
+        args.created_before,
+        args.file_pattern_filter,
+        args.dir_pattern_filter,
+        args.pattern_filter,
+        args.pattern_ignore,
+        args.file_ignore,
+        args.dir_ignore,
+        args.ignore_filter,
+        args.filter_ignore,
+        args.type_filter,
+        args.extension_filter,
+        args.git_ignore_filter,
     ]
-    
+
     if not any(filter_args):
         return None
-    
+
     fs_filter = FileSystemFilter()
-    
+
     # Load filter configuration file if specified
     if args.filter_file:
         yaml_module = _get_yaml_module()
         if yaml_module is None:
-            log_info(
-                "Ignoring --filter-file because PyYAML is not available.")
+            log_info("Ignoring --filter-file because PyYAML is not available.")
         else:
             try:
-                with open(args.filter_file, 'r', encoding='utf-8') as f:
+                with open(args.filter_file, "r", encoding="utf-8") as f:
                     config = yaml_module.safe_load(f) or {}
                 apply_config_to_filter(fs_filter, config)
             except Exception as e:
                 log_info(f"Could not load filter file {args.filter_file}: {e}")
-    
+
     # Apply command line filter arguments
     if args.size_gt:
-        fs_filter.add_size_filter('gt', args.size_gt)
+        fs_filter.add_size_filter("gt", args.size_gt)
     if args.size_lt:
-        fs_filter.add_size_filter('lt', args.size_lt)
+        fs_filter.add_size_filter("lt", args.size_lt)
     if args.size_eq:
-        fs_filter.add_size_filter('eq', args.size_eq)
-    
+        fs_filter.add_size_filter("eq", args.size_eq)
+
     if args.modified_after:
-        fs_filter.add_date_filter('after', args.modified_after, 'modified')
+        fs_filter.add_date_filter("after", args.modified_after, "modified")
     if args.modified_before:
-        fs_filter.add_date_filter('before', args.modified_before, 'modified')
+        fs_filter.add_date_filter("before", args.modified_before, "modified")
     if args.created_after:
-        fs_filter.add_date_filter('after', args.created_after, 'created')
+        fs_filter.add_date_filter("after", args.created_after, "created")
     if args.created_before:
-        fs_filter.add_date_filter('before', args.created_before, 'created')
-    
+        fs_filter.add_date_filter("before", args.created_before, "created")
+
     if args.pattern_filter:
         fs_filter.add_file_pattern(args.pattern_filter)
         fs_filter.add_dir_pattern(args.pattern_filter)
@@ -421,34 +495,34 @@ def create_filter_from_args(args) -> Optional[FileSystemFilter]:
 
     for pattern in args.file_pattern_filter:
         fs_filter.add_file_pattern(pattern)
-    
+
     for pattern in args.dir_pattern_filter:
         fs_filter.add_dir_pattern(pattern)
-    
+
     if args.ignore_filter:
         fs_filter.add_file_ignore_pattern(args.ignore_filter)
         fs_filter.add_dir_ignore_pattern(args.ignore_filter)
 
-    for pattern in getattr(args, 'filter_ignore', []):
+    for pattern in getattr(args, "filter_ignore", []):
         fs_filter.add_file_ignore_pattern(pattern)
         fs_filter.add_dir_ignore_pattern(pattern)
 
     for pattern in args.file_ignore:
         fs_filter.add_file_ignore_pattern(pattern)
-    
+
     for pattern in args.dir_ignore:
         fs_filter.add_dir_ignore_pattern(pattern)
-    
+
     for file_type in args.type_filter:
         fs_filter.add_type_filter(file_type)
-    
+
     for ext in args.extension_filter:
         fs_filter.add_extension_filter(ext)
-    
+
     if args.git_ignore_filter:
         # Will be set up later with actual directories
         pass
-    
+
     return fs_filter
 
 
@@ -472,99 +546,219 @@ class _DepthAction(argparse.Action):
     def __call__(self, parser, namespace, values, option_string=None):
         setattr(namespace, self.dest, values)
 
-        if (namespace.min_depth is not None and
-                namespace.max_depth is not None and
-                namespace.min_depth > namespace.max_depth):
+        if (
+            namespace.min_depth is not None
+            and namespace.max_depth is not None
+            and namespace.min_depth > namespace.max_depth
+        ):
             parser.error("--min-depth cannot be greater than --max-depth")
 
 
 def add_args(parser: argparse.ArgumentParser) -> None:
     """Register command line arguments for this module."""
     # Basic search parameters
-    parser.add_argument('directories', nargs='*', default=['.'],
-                       help='Directories to search (default: current directory)')
-    parser.add_argument('-r', '--recursive', dest='recursive', action='store_true',
-                       help='Search recursively in subdirectories')
-    parser.add_argument('--no-recursive', dest='recursive', action='store_false',
-                       help='Disable recursive search')
+    parser.add_argument(
+        "directories",
+        nargs="*",
+        default=["."],
+        help="Directories to search (default: current directory)",
+    )
+    parser.add_argument(
+        "-r",
+        "--recursive",
+        dest="recursive",
+        action="store_true",
+        help="Search recursively in subdirectories",
+    )
+    parser.add_argument(
+        "--no-recursive",
+        dest="recursive",
+        action="store_false",
+        help="Disable recursive search",
+    )
     parser.set_defaults(recursive=True)
-    parser.add_argument('--max-depth', type=_non_negative_int, action=_DepthAction, metavar='N',
-                        help=('Limit search to N levels below the starting directories. '
-                              'Entries at depth N are included, but traversal stops before '
-                              'descending further.'))
-    parser.add_argument('--min-depth', type=_non_negative_int, action=_DepthAction, metavar='N',
-                        help=('Only return results at depth N or greater. Depth 0 corresponds '
-                              'to the immediate children of the starting directories; the '
-                              'starting directories themselves are never emitted.'))
-    parser.add_argument('--follow-symlinks', action='store_true',
-                       help='Follow symbolic links during search')
-    parser.add_argument('--include-dirs', action='store_true',
-                       help='Include directories in search results')
-    
+    parser.add_argument(
+        "--max-depth",
+        type=_non_negative_int,
+        action=_DepthAction,
+        metavar="N",
+        help=(
+            "Limit search to N levels below the starting directories. "
+            "Entries at depth N are included, but traversal stops before "
+            "descending further."
+        ),
+    )
+    parser.add_argument(
+        "--min-depth",
+        type=_non_negative_int,
+        action=_DepthAction,
+        metavar="N",
+        help=(
+            "Only return results at depth N or greater. Depth 0 corresponds "
+            "to the immediate children of the starting directories; the "
+            "starting directories themselves are never emitted."
+        ),
+    )
+    parser.add_argument(
+        "--follow-symlinks",
+        action="store_true",
+        help="Follow symbolic links during search",
+    )
+    parser.add_argument(
+        "--include-dirs",
+        action="store_true",
+        help="Include directories in search results",
+    )
+
     # Legacy search parameters (for backward compatibility)
-    parser.add_argument('pattern', nargs='?', default=None,
-                       help='Glob pattern to search for (e.g., "*lib*")')
-    parser.add_argument('--substr', '-s', action='append', default=[],
-                       help='Substrings to match in filenames (can be repeated)')
-    parser.add_argument('--regex', help='Regular expression pattern for filenames')
-    parser.add_argument('--ext', help='Comma-separated list of file extensions')
-    parser.add_argument('--type', help='Comma-separated list of file type categories')
-    
+    parser.add_argument(
+        "pattern",
+        nargs="?",
+        default=None,
+        help='Glob pattern to search for (e.g., "*lib*")',
+    )
+    parser.add_argument(
+        "--substr",
+        "-s",
+        action="append",
+        default=[],
+        help="Substrings to match in filenames (can be repeated)",
+    )
+    parser.add_argument("--regex", help="Regular expression pattern for filenames")
+    parser.add_argument("--ext", help="Comma-separated list of file extensions")
+    parser.add_argument("--type", help="Comma-separated list of file type categories")
+
     # Enhanced filtering via fsFilters integration
-    parser.add_argument('--filter-file', '-fc', help='YAML filter configuration file')
-    
+    parser.add_argument("--filter-file", "-fc", help="YAML filter configuration file")
+
     # Size filters
-    parser.add_argument('--size-gt', help='Size greater than (e.g., 100K, 1M)')
-    parser.add_argument('--size-lt', help='Size less than')
-    parser.add_argument('--size-eq', help='Size equal to')
-    
+    parser.add_argument("--size-gt", help="Size greater than (e.g., 100K, 1M)")
+    parser.add_argument("--size-lt", help="Size less than")
+    parser.add_argument("--size-eq", help="Size equal to")
+
     # Date filters
-    parser.add_argument('--modified-after', help='Modified after date (YYYY-MM-DD or 7d)')
-    parser.add_argument('--modified-before', help='Modified before date')
-    parser.add_argument('--created-after', help='Created after date')
-    parser.add_argument('--created-before', help='Created before date')
-    
+    parser.add_argument(
+        "--modified-after", help="Modified after date (YYYY-MM-DD or 7d)"
+    )
+    parser.add_argument("--modified-before", help="Modified before date")
+    parser.add_argument("--created-after", help="Created after date")
+    parser.add_argument("--created-before", help="Created before date")
+
     # Pattern filters (enhanced)
-    parser.add_argument('--file-pattern', '-fp', dest='file_pattern_filter', action='append', default=[],
-                       help='File name patterns to include (can be repeated)')
-    parser.add_argument('--dir-pattern', '-dp', dest='dir_pattern_filter', action='append', default=[],
-                       help='Directory name patterns to include (can be repeated)')
-    parser.add_argument('--pattern-filter', '-pf', dest='pattern_filter',
-                       help='Pattern for both files and directories')
-    parser.add_argument('--pattern-ignore', '-pi', dest='pattern_ignore', action='append', default=[],
-                       help='Patterns to ignore for both files and directories (can be repeated)')
-    parser.add_argument('--file-ignore', '-fi', action='append', default=[],
-                       help='File patterns to ignore (can be repeated)')
-    parser.add_argument('--dir-ignore', '-di', action='append', default=[],
-                       help='Directory patterns to ignore (can be repeated)')
-    parser.add_argument('--ignore-filter', '-if', dest='ignore_filter',
-                       help='Ignore pattern for both files and directories')
-    parser.add_argument('--filter-ignore', action='append', default=[],
-                       help='Alias for --ignore-filter (repeatable)')
-    
+    parser.add_argument(
+        "--file-pattern",
+        "-fp",
+        dest="file_pattern_filter",
+        action="append",
+        default=[],
+        help="File name patterns to include (can be repeated)",
+    )
+    parser.add_argument(
+        "--dir-pattern",
+        "-dp",
+        dest="dir_pattern_filter",
+        action="append",
+        default=[],
+        help="Directory name patterns to include (can be repeated)",
+    )
+    parser.add_argument(
+        "--pattern-filter",
+        "-pf",
+        dest="pattern_filter",
+        help="Pattern for both files and directories",
+    )
+    parser.add_argument(
+        "--pattern-ignore",
+        "-pi",
+        dest="pattern_ignore",
+        action="append",
+        default=[],
+        help="Patterns to ignore for both files and directories (can be repeated)",
+    )
+    parser.add_argument(
+        "--file-ignore",
+        "-fi",
+        action="append",
+        default=[],
+        help="File patterns to ignore (can be repeated)",
+    )
+    parser.add_argument(
+        "--dir-ignore",
+        "-di",
+        action="append",
+        default=[],
+        help="Directory patterns to ignore (can be repeated)",
+    )
+    parser.add_argument(
+        "--ignore-filter",
+        "-if",
+        dest="ignore_filter",
+        help="Ignore pattern for both files and directories",
+    )
+    parser.add_argument(
+        "--filter-ignore",
+        action="append",
+        default=[],
+        help="Alias for --ignore-filter (repeatable)",
+    )
+
     # Type and extension filters (enhanced)
-    parser.add_argument('--type-filter', '-tf', dest='type_filter', action='append', default=[],
-                       help='File types to include (can be repeated)')
-    parser.add_argument('--extension-filter', '-ef', dest='extension_filter', action='append', default=[],
-                       help='File extensions to include (can be repeated)')
-    
+    parser.add_argument(
+        "--type-filter",
+        "-tf",
+        dest="type_filter",
+        action="append",
+        default=[],
+        help="File types to include (can be repeated)",
+    )
+    parser.add_argument(
+        "--extension-filter",
+        "-ef",
+        dest="extension_filter",
+        action="append",
+        default=[],
+        help="File extensions to include (can be repeated)",
+    )
+
     # Git integration
-    parser.add_argument('--git-ignore', '-g', dest='git_ignore_filter', action='store_true',
-                       help='Use .gitignore files for filtering')
-    
+    parser.add_argument(
+        "--git-ignore",
+        "-g",
+        dest="git_ignore_filter",
+        action="store_true",
+        help="Use .gitignore files for filtering",
+    )
+
     # Output options
-    parser.add_argument('--show-stats', action='store_true',
-                       help='Show search statistics')
-    parser.add_argument('--dry-run', action='store_true',
-                       help='Show what directories would be searched without searching')
-    
+    parser.add_argument(
+        "--show-stats", action="store_true", help="Show search statistics"
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what directories would be searched without searching",
+    )
+    parser.add_argument(
+        "--quiet",
+        "-q",
+        action="store_true",
+        help="Suppress commentary; only emit matched paths",
+    )
+
     # Information options
-    parser.add_argument('--list-types', action='store_true',
-                       help='List available file type categories and exit')
-    parser.add_argument('--help-examples', action='store_true',
-                       help='Show usage examples and exit')
-    parser.add_argument('--help-verbose', action='store_true',
-                       help='Show detailed help with all options and exit')
+    parser.add_argument(
+        "--list-types",
+        action="store_true",
+        help="List available file type categories and exit",
+    )
+    parser.add_argument(
+        "--help-examples", action="store_true", help="Show usage examples and exit"
+    )
+    parser.add_argument(
+        "--help-verbose",
+        action="store_true",
+        help="Show detailed help with all options and exit",
+    )
 
 
 register_arguments(add_args)
@@ -572,7 +766,9 @@ register_arguments(add_args)
 
 def parse_arguments():
     """Parse command line arguments."""
-    args, _ = parse_known_args(description='Enhanced file finding with comprehensive filtering.')
+    args, _ = parse_known_args(
+        description="Enhanced file finding with comprehensive filtering."
+    )
     return args
 
 
@@ -715,6 +911,7 @@ INFORMATION AND HELP OPTIONS:
     --list-types          List all available file type categories
     --show-stats          Display search statistics after completion
     --dry-run            Show what directories would be searched
+    --quiet, -q          Suppress commentary; emit only matched paths
     --help-examples      Show usage examples
     --help-verbose       Show this detailed help
 
@@ -757,9 +954,11 @@ def _get_display_root(directory: Path) -> str:
     try:
         home_dir = Path.home().resolve()
         resolved_dir = directory.expanduser().resolve()
-        if home_dir == resolved_dir or str(resolved_dir).startswith(str(home_dir) + os.sep):
+        if home_dir == resolved_dir or str(resolved_dir).startswith(
+            str(home_dir) + os.sep
+        ):
             rel_path = resolved_dir.relative_to(home_dir)
-            return str(Path('~') / rel_path).replace("\\", "/")
+            return str(Path("~") / rel_path).replace("\\", "/")
         if directory.is_absolute():
             return str(resolved_dir)
         return str(directory)
@@ -794,6 +993,9 @@ def process_find_pipeline(args):
         show_verbose_help()
         return
 
+    if args.quiet:
+        args.show_stats = False
+
     # Validate directories
     search_dirs: List[str] = []
     roots: dict = {}
@@ -808,30 +1010,31 @@ def process_find_pipeline(args):
     if not search_dirs:
         print("❌ No valid directories to search.", file=sys.stderr)
         return
-    
+
     if args.dry_run:
-        print("DRY RUN: Would search the following directories:", file=sys.stderr)
-        mode = "recursively" if args.recursive else "non-recursively"
-        for directory in search_dirs:
-            print(f"  - {directory} ({mode})", file=sys.stderr)
+        if not args.quiet:
+            print("DRY RUN: Would search the following directories:", file=sys.stderr)
+            mode = "recursively" if args.recursive else "non-recursively"
+            for directory in search_dirs:
+                print(f"  - {directory} ({mode})", file=sys.stderr)
         return
-    
+
     # Create enhanced file finder
     finder = EnhancedFileFinder()
-    
+
     # Create filter from enhanced arguments
     fs_filter = create_filter_from_args(args)
-    
+
     # Set up git ignore if requested
     if args.git_ignore_filter and fs_filter:
         base_paths = [Path(d) for d in search_dirs]
         fs_filter.enable_gitignore(base_paths)
-    
+
     # Parse legacy arguments
     substrings = args.substr if args.substr else []
-    extensions = args.ext.split(',') if args.ext else []
-    file_types = args.type.split(',') if args.type else []
-    
+    extensions = args.ext.split(",") if args.ext else []
+    file_types = args.type.split(",") if args.type else []
+
     # Perform search
     try:
         results = list(
@@ -851,30 +1054,35 @@ def process_find_pipeline(args):
             )
         )
 
-        formatted_results = [
-            _format_result(Path(r), roots) for r in results
-        ]
+        formatted_results = [_format_result(Path(r), roots) for r in results]
 
         for result in formatted_results:
             print(result)
 
         # Show statistics if requested
-        if args.show_stats:
+        if args.show_stats and not args.quiet:
             finder.print_stats()
-        
+
         # Success message
         total_found = len(formatted_results)
         search_mode = "recursive" if args.recursive else "non-recursive"
         dirs_searched = len(search_dirs)
-        
-        if total_found > 0:
-            print(f"✅ Found {total_found} item{'s' if total_found != 1 else ''} "
-                  f"in {dirs_searched} director{'ies' if dirs_searched != 1 else 'y'} "
-                  f"({search_mode}).", file=sys.stderr)
-        else:
-            print(f"ℹ️ No items found matching criteria in {dirs_searched} "
-                  f"director{'ies' if dirs_searched != 1 else 'y'}.", file=sys.stderr)
-            
+
+        if not args.quiet:
+            if total_found > 0:
+                print(
+                    f"✅ Found {total_found} item{'s' if total_found != 1 else ''} "
+                    f"in {dirs_searched} director{'ies' if dirs_searched != 1 else 'y'} "
+                    f"({search_mode}).",
+                    file=sys.stderr,
+                )
+            else:
+                print(
+                    f"ℹ️ No items found matching criteria in {dirs_searched} "
+                    f"director{'ies' if dirs_searched != 1 else 'y'}.",
+                    file=sys.stderr,
+                )
+
     except KeyboardInterrupt:
         print(f"\n❌ Search interrupted by user.", file=sys.stderr)
     except Exception as e:
@@ -884,7 +1092,7 @@ def process_find_pipeline(args):
 def main():
     """Main entry point."""
     args = parse_arguments()
-    
+
     # Handle no arguments case - show basic help
     if len(sys.argv) == 1:
         print("fsFind.py - Enhanced File Finding Utility")
@@ -901,7 +1109,7 @@ def main():
         print("  fsFind.py --help-verbose       # Comprehensive help")
         print("  fsFind.py --list-types         # Show available file types")
         return
-    
+
     process_find_pipeline(args)
 
 

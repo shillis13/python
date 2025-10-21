@@ -40,7 +40,9 @@ def main() -> None:
 
     if args.command == "send":
         attachments = [Path(p) for p in args.attach] if args.attach else None
-        msg_id = send_email(auth, args.to, args.subject, args.body, attachments, dry_run=args.dry_run)
+        msg_id = send_email(
+            auth, args.to, args.subject, args.body, attachments, dry_run=args.dry_run
+        )
         log_info(f"Message ID: {msg_id}")
     elif args.command == "search":
         results = search_emails(auth, args.query)

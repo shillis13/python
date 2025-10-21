@@ -18,7 +18,9 @@ def _build_service(auth: GmailAuth):
     return build("gmail", "v1", credentials=creds)
 
 
-def search_emails(auth: GmailAuth, query: str, since: Optional[datetime] = None) -> List[Dict]:
+def search_emails(
+    auth: GmailAuth, query: str, since: Optional[datetime] = None
+) -> List[Dict]:
     """Search the inbox using Gmail query syntax."""
     service = _build_service(auth)
     if since:
@@ -33,7 +35,9 @@ def search_emails(auth: GmailAuth, query: str, since: Optional[datetime] = None)
 def get_email_body(auth: GmailAuth, msg_id: str) -> str:
     """Return the plain text or HTML body of a message."""
     service = _build_service(auth)
-    msg = service.users().messages().get(userId="me", id=msg_id, format="full").execute()
+    msg = (
+        service.users().messages().get(userId="me", id=msg_id, format="full").execute()
+    )
     payload = msg.get("payload", {})
     body = _extract_body(payload)
     return body
@@ -58,10 +62,14 @@ def _extract_body(payload: Dict) -> str:
     return ""
 
 
-def get_email_attachments(auth: GmailAuth, msg_id: str, download_dir: Path = Path("tmp")) -> List[Path]:
+def get_email_attachments(
+    auth: GmailAuth, msg_id: str, download_dir: Path = Path("tmp")
+) -> List[Path]:
     """Download attachments for the specified message."""
     service = _build_service(auth)
-    msg = service.users().messages().get(userId="me", id=msg_id, format="full").execute()
+    msg = (
+        service.users().messages().get(userId="me", id=msg_id, format="full").execute()
+    )
     parts = msg.get("payload", {}).get("parts", [])
     attachment_paths: List[Path] = []
 

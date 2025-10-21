@@ -1,4 +1,5 @@
 """Compatibility layer exposing filtering helpers under a stable name."""
+
 from datetime import datetime
 from pathlib import Path
 
@@ -17,7 +18,9 @@ from .fsFilters import (
 )
 
 
-def load_config_file(config_path: str, config_name: str | None = None) -> Dict[str, Any]:
+def load_config_file(
+    config_path: str, config_name: str | None = None
+) -> Dict[str, Any]:
     """Wrapper around :func:`fsFilters.load_config_file` for backward compatibility."""
 
     return _load_config_file(config_path, config_name)
@@ -47,8 +50,13 @@ class DateFilter(_DateFilter):
     """
 
     @staticmethod
-    def parse_date(date_str: str, datetime_module: type[datetime] | None = None) -> datetime:
-        return _DateFilter.parse_date(date_str, datetime if datetime_module is None else datetime_module)
+    def parse_date(
+        date_str: str, datetime_module: type[datetime] | None = None
+    ) -> datetime:
+        return _DateFilter.parse_date(
+            date_str, datetime if datetime_module is None else datetime_module
+        )
+
 
 __all__ = [
     "SizeFilter",

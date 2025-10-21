@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-""" _summary_
+"""_summary_
 
 Returns:
     _type_: _description_
@@ -71,7 +71,7 @@ def download_file(filename):
     try:
         r = requests.get(url)
         r.raise_for_status()
-        with open(dest_path, 'wb') as f:
+        with open(dest_path, "wb") as f:
             f.write(r.content)
         return dest_path
     except Exception as e:
@@ -80,12 +80,13 @@ def download_file(filename):
 
 
 def log_action(filename, reason="general", title=""):
-    with open(LOG_FILE, 'a') as log:
+    with open(LOG_FILE, "a") as log:
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         log.write(f"{timestamp} | {reason} | {filename} | {title}\n")
 
 
 # --- Manifest and Sync Utilities ---
+
 
 def generate_manifest(directory):
     """
@@ -105,7 +106,9 @@ def generate_manifest(directory):
                     file_hash = hashlib.sha256(f.read()).hexdigest()
                     manifest[relpath] = {
                         "sha256": file_hash,
-                        "last_modified": datetime.fromtimestamp(os.path.getmtime(fpath)).strftime("%Y-%m-%d %H:%M:%S")
+                        "last_modified": datetime.fromtimestamp(
+                            os.path.getmtime(fpath)
+                        ).strftime("%Y-%m-%d %H:%M:%S"),
                     }
             except Exception as e:
                 print(f"Error hashing {relpath}: {e}")
@@ -122,9 +125,13 @@ def compare_manifest(manifest, directory):
     local_manifest = generate_manifest(directory)
     to_download = []
     for fname, remote_entry in manifest.items():
-        remote_hash = remote_entry["sha256"] if isinstance(remote_entry, dict) else remote_entry
+        remote_hash = (
+            remote_entry["sha256"] if isinstance(remote_entry, dict) else remote_entry
+        )
         local_entry = local_manifest.get(fname)
-        local_hash = local_entry["sha256"] if isinstance(local_entry, dict) else local_entry
+        local_hash = (
+            local_entry["sha256"] if isinstance(local_entry, dict) else local_entry
+        )
         if local_hash != remote_hash:
             to_download.append(fname)
     to_delete = [fname for fname in local_manifest if fname not in manifest]
@@ -220,7 +227,9 @@ def sync_two_way():
         from_file = os.path.join(from_dir, fname)
         to_hash = entry.get("sha256") if isinstance(entry, dict) else entry
         from_entry = from_manifest_files.get(fname)
-        from_hash = from_entry.get("sha256") if isinstance(from_entry, dict) else from_entry
+        from_hash = (
+            from_entry.get("sha256") if isinstance(from_entry, dict) else from_entry
+        )
 
         if to_hash != from_hash:
             if os.path.exists(to_file):
@@ -230,11 +239,15 @@ def sync_two_way():
                 copied += 1
 
     print(f"Two-way sync complete. {copied} files updated across both directories.")
-    log_action("two_way_sync_summary", reason="summary", title=f"Total files synced: {copied}")
+    log_action(
+        "two_way_sync_summary", reason="summary", title=f"Total files synced: {copied}"
+    )
 
 
 def pull_mode():
-    print("Paste the ChatGPT reply containing the file link(s). End input with an empty line:")
+    print(
+        "Paste the ChatGPT reply containing the file link(s). End input with an empty line:"
+    )
     lines = []
     while True:
         line = input()
@@ -260,23 +273,32 @@ def pull_mode():
 
 def write_manifest(directory, out_path):
     from collections import OrderedDict
+
     manifest = generate_manifest(directory)
     manifest_with_meta = OrderedDict()
     manifest_with_meta["_meta_"] = {
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "source": os.path.basename(directory)
+        "source": os.path.basename(directory),
     }
     for key in sorted(manifest.keys()):
         manifest_with_meta[key] = manifest[key]
     with open(out_path, "w") as f:
-        yaml.dump(manifest_with_meta, f, default_flow_style=False, sort_keys=False, Dumper=yaml.SafeDumper)
+        yaml.dump(
+            manifest_with_meta,
+            f,
+            default_flow_style=False,
+            sort_keys=False,
+            Dumper=yaml.SafeDumper,
+        )
     return manifest_with_meta
 
 
 def generate_manifest_for_chatty():
     out_path = os.path.join(TO_CHATTY_DIR, "chatty_manifest.yml")
     manifest = write_manifest(TO_CHATTY_DIR, out_path)
-    print(f"Manifest written to {out_path} with {len(manifest) - 1} entries (plus metadata).")
+    print(
+        f"Manifest written to {out_path} with {len(manifest) - 1} entries (plus metadata)."
+    )
 
 
 def simulate_chatty_reply():
@@ -308,7 +330,10 @@ def simulate_chatty_reply():
             print(f"Missing source file: {src}")
 
     print(f"Simulated Chatty reply: copied {copied} files to From_Chatty/")
-    log_action("simulate_chatty_reply_summary", reason="summary", title=f"Copied: {copied}")
+    log_action(
+        "simulate_chatty_reply_summary", reason="summary", title=f"Copied: {copied}"
+    )
+
 
 def pull_files_from_request(request_path):
     """
@@ -351,10 +376,16 @@ def pull_files_from_request(request_path):
         os.makedirs(os.path.dirname(dest_path), exist_ok=True)
         shutil.copy2(local_path, dest_path)
         pulled.append(relpath)
-        log_action(relpath, reason="validated:hash_match", title="pull_files_from_request")
+        log_action(
+            relpath, reason="validated:hash_match", title="pull_files_from_request"
+        )
 
     print(f"Pulled {len(pulled)} files into received/")
-    log_action("pull_files_summary", reason="summary", title=f"Pulled: {len(pulled)}, Missing: {len(missing)}, Hash Mismatch: {len(mismatched)}")
+    log_action(
+        "pull_files_summary",
+        reason="summary",
+        title=f"Pulled: {len(pulled)}, Missing: {len(missing)}, Hash Mismatch: {len(mismatched)}",
+    )
     if missing:
         print(f"Missing {len(missing)} files:")
         for f in missing:
@@ -373,21 +404,60 @@ def send_via_endpoint(files, endpoint="default", subject="FILE transfer", body="
 def receive_from_endpoint(subject_filter, endpoint="default", download_dir="received"):
     transport = get_transport(endpoint)
     return transport.receive_files(subject_filter, download_dir)
-            
-            
+
+
 def main():
     ensure_dirs()
-    parser = argparse.ArgumentParser(description="FILE - Flirtatious Intelligent Logistical Entity")
-    parser.add_argument("--pull", action="store_true", help="Download file(s) from pasted ChatGPT response")
-    parser.add_argument("--sync-from-chatty", action="store_true", help="Sync files from From_Chatty/ using manifest")
-    parser.add_argument("--generate-manifest", action="store_true", help="Generate a manifest from To_Chatty/")
-    parser.add_argument("--pull-files", metavar="REQFILE", help="Pull files listed in request manifest file")
-    parser.add_argument("--update-manifest", action="store_true", help="Re-generate and update the chatty_manifest.yml in To_Chatty/")
-    parser.add_argument("--sync-two-way", action="store_true", help="Perform a bidirectional sync between To_Chatty and From_Chatty")
-    parser.add_argument("--send-via", nargs='+', metavar='FILE', help="Send given files via configured transport")
-    parser.add_argument("--receive-subject", metavar='FILTER', help="Receive files from transport using subject filter")
-    parser.add_argument("--endpoint", default="default", help="Endpoint name from config")
-    parser.add_argument("--subject", default="FILE transfer", help="Email subject when sending files")
+    parser = argparse.ArgumentParser(
+        description="FILE - Flirtatious Intelligent Logistical Entity"
+    )
+    parser.add_argument(
+        "--pull",
+        action="store_true",
+        help="Download file(s) from pasted ChatGPT response",
+    )
+    parser.add_argument(
+        "--sync-from-chatty",
+        action="store_true",
+        help="Sync files from From_Chatty/ using manifest",
+    )
+    parser.add_argument(
+        "--generate-manifest",
+        action="store_true",
+        help="Generate a manifest from To_Chatty/",
+    )
+    parser.add_argument(
+        "--pull-files",
+        metavar="REQFILE",
+        help="Pull files listed in request manifest file",
+    )
+    parser.add_argument(
+        "--update-manifest",
+        action="store_true",
+        help="Re-generate and update the chatty_manifest.yml in To_Chatty/",
+    )
+    parser.add_argument(
+        "--sync-two-way",
+        action="store_true",
+        help="Perform a bidirectional sync between To_Chatty and From_Chatty",
+    )
+    parser.add_argument(
+        "--send-via",
+        nargs="+",
+        metavar="FILE",
+        help="Send given files via configured transport",
+    )
+    parser.add_argument(
+        "--receive-subject",
+        metavar="FILTER",
+        help="Receive files from transport using subject filter",
+    )
+    parser.add_argument(
+        "--endpoint", default="default", help="Endpoint name from config"
+    )
+    parser.add_argument(
+        "--subject", default="FILE transfer", help="Email subject when sending files"
+    )
     args = parser.parse_args()
 
     if args.pull:
@@ -407,7 +477,9 @@ def main():
     elif args.sync_two_way:
         sync_two_way()
     else:
-        print("No mode selected. Use --pull to fetch files or --sync-from-chatty to sync.")
+        print(
+            "No mode selected. Use --pull to fetch files or --sync-from-chatty to sync."
+        )
 
 
 if __name__ == "__main__":

@@ -92,82 +92,80 @@ Args:
 Returns:
     Dict[str, Any]: Parsed chat data structure
 """
+
+
 def parse_test_markdown(content: str):
-    
+
     # Split by the separator pattern
-    sections = re.split(r'(?:^|\n)---\s*\n\s*You asked:', content, flags=re.MULTILINE)
-    
+    sections = re.split(r"(?:^|\n)---\s*\n\s*You asked:", content, flags=re.MULTILINE)
+
     messages = []
-    
+
     for i, section in enumerate(sections):
         if not section.strip():
             continue
-            
+
         # Add back "You asked:" for non-first sections
         if i > 0:
             section = "You asked:" + section
-        
+
         # Parse the section
-        lines = section.split('\n')
-        message = {
-            "index": i,
-            "role": None,
-            "content": "",
-            "metadata": {}
-        }
-        
+        lines = section.split("\n")
+        message = {"index": i, "role": None, "content": "", "metadata": {}}
+
         content_started = False
         content_lines = []
-        
+
         for line_num, line in enumerate(lines):
             line = line.strip()
-            
+
             if not content_started and not line:
                 continue
-                
+
             if line.startswith("You asked:"):
                 message["role"] = "user"
                 content_started = False
                 continue
-                
+
             if line in ["----------", "* * *"]:
                 content_started = True
                 continue
-                
+
             if line in ["Edit", "Retry"] and line_num >= len(lines) - 5:
                 break
-                
+
             if content_started and not message["role"]:
                 message["role"] = "assistant"
-                
+
             if content_started:
                 content_lines.append(line)
-        
+
         if not message["role"] and content_lines:
             message["role"] = "user"
-        
-        parsed_content = '\n'.join(content_lines).strip()
+
+        parsed_content = "\n".join(content_lines).strip()
         message["content"] = parsed_content
-        
+
         # Handle P marker
         if message["content"].startswith("P\n") or message["content"].startswith("P "):
             message["metadata"]["has_p_marker"] = True
-            cleaned_content = re.sub(r'^P\s*\n?\s*', '', message["content"])
+            cleaned_content = re.sub(r"^P\s*\n?\s*", "", message["content"])
             message["content"] = cleaned_content
-        
+
         if message["content"]:
             messages.append(message)
-    
+
     result_data = {
         "metadata": {
             "source": "test_conversion",
             "conversion_date": datetime.now().isoformat(),
-            "total_messages": len(messages)
+            "total_messages": len(messages),
         },
-        "messages": messages
+        "messages": messages,
     }
-    
+
     return result_data
+
 
 # Test the parser
 test_result = parse_test_markdown(test_markdown)

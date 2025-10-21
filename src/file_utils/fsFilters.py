@@ -46,78 +46,80 @@ setup_logging(level=logging.ERROR)
 
 class SizeFilter:
     """Handles size-based filtering with operators."""
-    
+
     @staticmethod
     def parse_size(size_str: str) -> int:
         """Parse size string like '100K', '1.5M', '2G' to bytes."""
         if not size_str:
             return 0
-            
+
         size_str = size_str.strip().upper()
-        
+
         # Extract number and unit
-        match = re.match(r'^(\d+(?:\.\d+)?)\s*([KMGT]?)B?$', size_str)
+        match = re.match(r"^(\d+(?:\.\d+)?)\s*([KMGT]?)B?$", size_str)
         if not match:
             try:
                 return int(size_str)  # Plain number
             except ValueError:
                 raise ValueError(f"Invalid size format: {size_str}")
-        
+
         number, unit = match.groups()
         number = float(number)
-        
-        multipliers = {'': 1, 'K': 1024, 'M': 1024**2, 'G': 1024**3, 'T': 1024**4}
+
+        multipliers = {"": 1, "K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4}
         return int(number * multipliers.get(unit, 1))
-    
+
     @staticmethod
     def create_filter(operator: str, value: str) -> Callable[[Path], bool]:
         """Create size filter function."""
         size_bytes = SizeFilter.parse_size(value)
-        
+
         def size_filter(path: Path) -> bool:
             try:
                 if not path.is_file():
                     return True  # Directories always pass size filters
                 file_size = path.stat().st_size
-                
-                if operator == 'gt':
+
+                if operator == "gt":
                     return file_size > size_bytes
-                elif operator == 'lt':
+                elif operator == "lt":
                     return file_size < size_bytes
-                elif operator == 'eq':
+                elif operator == "eq":
                     return file_size == size_bytes
-                elif operator == 'ge':
+                elif operator == "ge":
                     return file_size >= size_bytes
-                elif operator == 'le':
+                elif operator == "le":
                     return file_size <= size_bytes
-                elif operator == 'ne':
+                elif operator == "ne":
                     return file_size != size_bytes
                 else:
                     return True
             except (OSError, PermissionError):
                 return True  # Skip inaccessible files
-        
+
         return size_filter
 
 
 class DateFilter:
     """Handles date-based filtering."""
-    
+
     @staticmethod
-    def parse_date(date_str: str, datetime_module: Type[_datetime] | None = None) -> _datetime:
+    def parse_date(
+        date_str: str, datetime_module: Type[_datetime] | None = None
+    ) -> _datetime:
         """Parse ``date_str`` into a :class:`datetime.datetime`.
 
         ``datetime_module`` defaults to the module-level :mod:`datetime`
         reference which tests may patch for deterministic behaviour.
         """
         formats = [
-            '%Y-%m-%d',
-            '%Y-%m-%d %H:%M',
-            '%Y-%m-%d %H:%M:%S',
-            '%Y/%m/%d',
-            '%m/%d/%Y',
+            "%Y-%m-%d",
+            "%Y-%m-%d %H:%M",
+            "%Y-%m-%d %H:%M:%S",
+            "%Y/%m/%d",
+            "%m/%d/%Y",
         ]
-        
+
         dt = datetime_module or datetime
 
         for fmt in formats:
@@ -125,72 +127,74 @@ class DateFilter:
                 return dt.strptime(date_str, fmt)
             except ValueError:
                 continue
-        
+
         # Try relative dates like "7d", "2w", "1m"
-        match = re.match(r'^(\d+)([dwmy])$', date_str.lower())
+        match = re.match(r"^(\d+)([dwmy])$", date_str.lower())
         if match:
             number, unit = match.groups()
             number = int(number)
             now = dt.now()
-            
-            if unit == 'd':
+
+            if unit == "d":
                 return now - timedelta(days=number)
-            elif unit == 'w':
+            elif unit == "w":
                 return now - timedelta(weeks=number)
-            elif unit == 'm':
+            elif unit == "m":
                 return now - timedelta(days=number * 30)  # Approximate
-            elif unit == 'y':
+            elif unit == "y":
                 return now - timedelta(days=number * 365)  # Approximate
-        
+
         raise ValueError(f"Invalid date format: {date_str}")
-    
+
     @staticmethod
-    def create_filter(operator: str, value: str, date_type: str = 'modified') -> Callable[[Path], bool]:
+    def create_filter(
+        operator: str, value: str, date_type: str = "modified"
+    ) -> Callable[[Path], bool]:
         """Create date filter function."""
         target_date = DateFilter.parse_date(value)
         target_timestamp = target_date.timestamp()
-        
+
         def date_filter(path: Path) -> bool:
             try:
                 stat_info = path.stat()
-                
-                if date_type == 'modified':
+
+                if date_type == "modified":
                     file_timestamp = stat_info.st_mtime
-                elif date_type == 'created':
+                elif date_type == "created":
                     file_timestamp = stat_info.st_ctime
-                elif date_type == 'accessed':
+                elif date_type == "accessed":
                     file_timestamp = stat_info.st_atime
                 else:
                     return True
-                
-                if operator == 'gt' or operator == 'after':
+
+                if operator == "gt" or operator == "after":
                     return file_timestamp > target_timestamp
-                elif operator == 'lt' or operator == 'before':
+                elif operator == "lt" or operator == "before":
                     return file_timestamp < target_timestamp
-                elif operator == 'eq':
+                elif operator == "eq":
                     # Same day
                     return abs(file_timestamp - target_timestamp) < 86400
-                elif operator == 'ge':
+                elif operator == "ge":
                     return file_timestamp >= target_timestamp
-                elif operator == 'le':
+                elif operator == "le":
                     return file_timestamp <= target_timestamp
-                elif operator == 'ne':
+                elif operator == "ne":
                     return abs(file_timestamp - target_timestamp) >= 86400
                 else:
                     return True
             except (OSError, PermissionError):
                 return True
-        
+
         return date_filter
 
 
 class GitIgnoreFilter:
     """Handles .gitignore file parsing and filtering."""
-    
+
     def __init__(self, search_paths: List[Path]):
         self.ignore_patterns = []
         self.load_gitignore_files(search_paths)
-    
+
     def load_gitignore_files(self, search_paths: List[Path]):
         """Load .gitignore files from search paths."""
         gitignore_files = set()
@@ -210,63 +214,67 @@ class GitIgnoreFilter:
             # ordering allows tests to use mocked ``Path`` objects whose
             # ``parent`` attribute may point to themselves.
             while True:
-                gitignore_path = current / '.gitignore'
+                gitignore_path = current / ".gitignore"
                 if gitignore_path.exists():
                     gitignore_files.add(gitignore_path)
                 parent = current.parent
                 if parent == current:
                     break
                 current = parent
-        
+
         for gitignore_file in gitignore_files:
             self.load_gitignore_file(gitignore_file)
-    
+
     def load_gitignore_file(self, gitignore_path: Path):
         """Load patterns from a single .gitignore file."""
         try:
-            with open(gitignore_path, 'r', encoding='utf-8') as f:
+            with open(gitignore_path, "r", encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
-                    if line and not line.startswith('#'):
+                    if line and not line.startswith("#"):
                         self.ignore_patterns.append(line)
         except (OSError, UnicodeDecodeError) as e:
             log_debug(f"Could not read {gitignore_path}: {e}")
-    
+
     def should_ignore(self, path: Path, base_path: Path) -> bool:
         """Check if path should be ignored based on gitignore patterns."""
         try:
             rel_path = path.relative_to(base_path)
-            path_str = str(rel_path).replace('\\', '/')  # Use forward slashes
-            
+            path_str = str(rel_path).replace("\\", "/")  # Use forward slashes
+
             for pattern in self.ignore_patterns:
                 if self.matches_gitignore_pattern(path_str, pattern):
                     return True
             return False
         except ValueError:
             return False  # Path not relative to base
-    
+
     def matches_gitignore_pattern(self, path: str, pattern: str) -> bool:
         """Check if path matches gitignore pattern."""
         # Handle directory patterns ending with /
-        if pattern.endswith('/'):
+        if pattern.endswith("/"):
             pattern = pattern[:-1]
             # Only match directories
-            return fnmatch.fnmatch(path, pattern) or fnmatch.fnmatch(path, pattern + '/*')
-        
+            return fnmatch.fnmatch(path, pattern) or fnmatch.fnmatch(
+                path, pattern + "/*"
+            )
+
         # Handle patterns starting with /
-        if pattern.startswith('/'):
+        if pattern.startswith("/"):
             pattern = pattern[1:]
             return fnmatch.fnmatch(path, pattern)
-        
+
         # Handle wildcards and directory matching
-        return (fnmatch.fnmatch(path, pattern) or 
-                fnmatch.fnmatch(path, '*/' + pattern) or
-                any(fnmatch.fnmatch(part, pattern) for part in path.split('/')))
+        return (
+            fnmatch.fnmatch(path, pattern)
+            or fnmatch.fnmatch(path, "*/" + pattern)
+            or any(fnmatch.fnmatch(part, pattern) for part in path.split("/"))
+        )
 
 
 class FileSystemFilter:
     """Main filtering class that combines all filter types."""
-    
+
     def __init__(self):
         self.size_filters = []
         self.date_filters = []
@@ -283,7 +291,7 @@ class FileSystemFilter:
         self.skip_empty = False
         self.show_empty = False
         self.extension_data = None
-    
+
     def load_extension_data(self):
         """Load file extension data for type filtering."""
         if not self.extension_data:
@@ -294,27 +302,27 @@ class FileSystemFilter:
             except Exception:  # pragma: no cover
                 from file_utils.lib_extensions import get_extension_data as _get_ext
             self.extension_data = _get_ext()
-    
+
     def add_size_filter(self, operator: str, value: str):
         """Add size-based filter."""
         self.size_filters.append(SizeFilter.create_filter(operator, value))
-    
-    def add_date_filter(self, operator: str, value: str, date_type: str = 'modified'):
+
+    def add_date_filter(self, operator: str, value: str, date_type: str = "modified"):
         """Add date-based filter."""
         self.date_filters.append(DateFilter.create_filter(operator, value, date_type))
-    
+
     def add_file_pattern(self, pattern: str):
         """Add file name pattern."""
         self.file_patterns.append(self._normalize_pattern(pattern))
-    
+
     def add_dir_pattern(self, pattern: str):
         """Add directory name pattern."""
         self.dir_patterns.append(self._normalize_pattern(pattern))
-    
+
     def add_file_ignore_pattern(self, pattern: str):
         """Add file ignore pattern."""
         self.file_ignore_patterns.append(self._normalize_pattern(pattern))
-    
+
     def add_dir_ignore_pattern(self, pattern: str):
         """Add directory ignore pattern."""
         self.dir_ignore_patterns.append(self._normalize_pattern(pattern))
@@ -346,10 +354,16 @@ class FileSystemFilter:
         if not path.is_dir():
             return True
 
-        if self.dir_ignore_patterns and self.matches_patterns(path, self.dir_ignore_patterns):
+        if self.dir_ignore_patterns and self.matches_patterns(
+            path, self.dir_ignore_patterns
+        ):
             return False
 
-        if self.gitignore_filter and base_path and self.gitignore_filter.should_ignore(path, base_path):
+        if (
+            self.gitignore_filter
+            and base_path
+            and self.gitignore_filter.should_ignore(path, base_path)
+        ):
             return False
 
         return True
@@ -358,35 +372,35 @@ class FileSystemFilter:
         """Add file type filter."""
         self.load_extension_data()
         self.type_filters.append(file_type.lower())
-    
+
     def add_extension_filter(self, extension: str):
         """Add file extension filter."""
-        if not extension.startswith('.'):
-            extension = '.' + extension
+        if not extension.startswith("."):
+            extension = "." + extension
         self.extension_filters.append(extension.lower())
-    
+
     def enable_gitignore(self, search_paths: List[Path]):
         """Enable git ignore filtering."""
         self.gitignore_filter = GitIgnoreFilter(search_paths)
-    
+
     def load_ignore_file(self, ignore_file_path: str):
         """Load custom ignore file."""
         ignore_path = Path(ignore_file_path)
         if ignore_path.exists():
             try:
-                with open(ignore_path, 'r', encoding='utf-8') as f:
+                with open(ignore_path, "r", encoding="utf-8") as f:
                     for line in f:
                         line = line.strip()
-                        if line and not line.startswith('#'):
+                        if line and not line.startswith("#"):
                             self.file_ignore_patterns.append(line)
             except (OSError, UnicodeDecodeError) as e:
                 log_info(f"Could not read ignore file {ignore_path}: {e}")
-    
+
     def matches_patterns(self, path: Path, patterns: List[str]) -> bool:
         """Check if path matches any of the given patterns."""
         if not patterns:
             return True
-        
+
         name = path.name
         path_str = str(path)
         posix_path = path_str.replace("\\", "/")
@@ -398,8 +412,8 @@ class FileSystemFilter:
             if path.is_dir():
                 if not path_str.endswith(os.sep):
                     candidates.add(path_str + os.sep)
-                if not posix_path.endswith('/'):
-                    candidates.add(posix_path + '/')
+                if not posix_path.endswith("/"):
+                    candidates.add(posix_path + "/")
         except OSError:
             # Some tests provide mocked Path objects which may raise when
             # ``is_dir`` is called.  In those cases we simply fall back to the
@@ -417,7 +431,7 @@ class FileSystemFilter:
                 home_variant = f"~/{relative}" if relative else "~"
                 candidates.add(home_variant)
                 if resolved.is_dir():
-                    candidates.add(home_variant.rstrip('/') + '/')
+                    candidates.add(home_variant.rstrip("/") + "/")
         except Exception:
             pass
 
@@ -430,31 +444,31 @@ class FileSystemFilter:
             ):
                 return True
         return False
-    
+
     def matches_file_type(self, path: Path) -> bool:
         """Check if file matches type filters."""
         if not self.type_filters or not path.is_file():
             return True
-        
+
         if not self.extension_data:
             return True
-        
+
         file_ext = path.suffix.lower()
-        file_type = self.extension_data.get('extensions', {}).get(file_ext)
-        
+        file_type = self.extension_data.get("extensions", {}).get(file_ext)
+
         if file_type:
             return file_type.lower() in self.type_filters
-        
+
         return False
-    
+
     def matches_extension(self, path: Path) -> bool:
         """Check if file matches extension filters."""
         if not self.extension_filters or not path.is_file():
             return True
-        
+
         file_ext = path.suffix.lower()
         return file_ext in self.extension_filters
-    
+
     def should_include(
         self,
         path: Path,
@@ -475,31 +489,37 @@ class FileSystemFilter:
         for size_filter in self.size_filters:
             if not size_filter(path):
                 return self.inverse if apply_inverse else False
-        
+
         # Apply date filters
         for date_filter in self.date_filters:
             if not date_filter(path):
                 return self.inverse if apply_inverse else False
-        
+
         # Apply gitignore filter
         if self.gitignore_filter and base_path:
             if self.gitignore_filter.should_ignore(path, base_path):
                 return self.inverse if apply_inverse else False
-        
+
         # Apply pattern filters based on file/directory type
         if path.is_dir():
             # Directory patterns
             if self.dir_patterns and not self.matches_patterns(path, self.dir_patterns):
                 return self.inverse if apply_inverse else False
-            if self.dir_ignore_patterns and self.matches_patterns(path, self.dir_ignore_patterns):
+            if self.dir_ignore_patterns and self.matches_patterns(
+                path, self.dir_ignore_patterns
+            ):
                 return self.inverse if apply_inverse else False
         else:
             # File patterns
-            if self.file_patterns and not self.matches_patterns(path, self.file_patterns):
+            if self.file_patterns and not self.matches_patterns(
+                path, self.file_patterns
+            ):
                 return self.inverse if apply_inverse else False
-            if self.file_ignore_patterns and self.matches_patterns(path, self.file_ignore_patterns):
+            if self.file_ignore_patterns and self.matches_patterns(
+                path, self.file_ignore_patterns
+            ):
                 return self.inverse if apply_inverse else False
-            
+
             # Type and extension filters for files
             if self.type_filters and not self.matches_file_type(path):
                 return self.inverse if apply_inverse else False
@@ -507,17 +527,19 @@ class FileSystemFilter:
                 return self.inverse if apply_inverse else False
 
         return (not self.inverse) if apply_inverse else True
-    
-    def filter_paths(self, paths: List[str], base_paths: List[Path] = None) -> List[str]:
+
+    def filter_paths(
+        self, paths: List[str], base_paths: List[Path] = None
+    ) -> List[str]:
         """Filter list of paths and return those that pass all filters."""
         if not base_paths:
             base_paths = [Path.cwd()]
-        
+
         filtered_paths = []
-        
+
         for path_str in paths:
             path = Path(path_str)
-            
+
             # Find appropriate base path
             base_path = base_paths[0]
             for bp in base_paths:
@@ -527,7 +549,7 @@ class FileSystemFilter:
                     break
                 except ValueError:
                     continue
-            
+
             include = self.should_include(path, base_path, apply_inverse=False)
 
             if self.inverse:
@@ -535,11 +557,13 @@ class FileSystemFilter:
 
             if include:
                 filtered_paths.append(path_str)
-        
+
         return filtered_paths
 
 
-def load_config_file(config_path: str, config_name: str | None = None) -> Dict[str, Any]:
+def load_config_file(
+    config_path: str, config_name: str | None = None
+) -> Dict[str, Any]:
     """Load filter configuration from YAML file.
 
     ``config_path`` may optionally include a ``":"``-delimited section name
@@ -554,7 +578,7 @@ def load_config_file(config_path: str, config_name: str | None = None) -> Dict[s
         config_path, _, config_name = config_path.partition(":")
 
     try:
-        with open(config_path, 'r', encoding='utf-8') as f:
+        with open(config_path, "r", encoding="utf-8") as f:
             config = yaml.safe_load(f) or {}
             if config_name and isinstance(config, dict):
                 return config.get(config_name, {})
@@ -573,95 +597,171 @@ def apply_config_to_filter(fs_filter: FileSystemFilter, config: Dict[str, Any]):
     """Apply configuration dictionary to filter object."""
     # Size filters
     for key, value in config.items():
-        if key.startswith('size_') and value:
+        if key.startswith("size_") and value:
             operator = key[5:]  # Remove 'size_' prefix
             fs_filter.add_size_filter(operator, str(value))
-    
+
     # Date filters
     for key, value in config.items():
-        if key.startswith('modified_') and value:
+        if key.startswith("modified_") and value:
             operator = key[9:]  # Remove 'modified_' prefix
-            fs_filter.add_date_filter(operator, str(value), 'modified')
-        elif key.startswith('created_') and value:
+            fs_filter.add_date_filter(operator, str(value), "modified")
+        elif key.startswith("created_") and value:
             operator = key[8:]  # Remove 'created_' prefix
-            fs_filter.add_date_filter(operator, str(value), 'created')
-    
+            fs_filter.add_date_filter(operator, str(value), "created")
+
     # Pattern filters
-    for pattern in config.get('file_patterns', []):
+    for pattern in config.get("file_patterns", []):
         fs_filter.add_file_pattern(pattern)
-    
-    for pattern in config.get('dir_patterns', []):
+
+    for pattern in config.get("dir_patterns", []):
         fs_filter.add_dir_pattern(pattern)
-    
-    for pattern in config.get('file_ignore_patterns', []):
+
+    for pattern in config.get("file_ignore_patterns", []):
         fs_filter.add_file_ignore_pattern(pattern)
-    
-    for pattern in config.get('dir_ignore_patterns', []):
+
+    for pattern in config.get("dir_ignore_patterns", []):
         fs_filter.add_dir_ignore_pattern(pattern)
-    
+
     # Type and extension filters
-    for file_type in config.get('types', []):
+    for file_type in config.get("types", []):
         fs_filter.add_type_filter(file_type)
-    
-    for ext in config.get('extensions', []):
+
+    for ext in config.get("extensions", []):
         fs_filter.add_extension_filter(ext)
-    
+
     # Special options
-    if config.get('inverse'):
+    if config.get("inverse"):
         fs_filter.inverse = True
-    if config.get('skip_empty'):
+    if config.get("skip_empty"):
         fs_filter.skip_empty = True
-    if config.get('show_empty'):
+    if config.get("show_empty"):
         fs_filter.show_empty = True
 
 
 def add_args(parser: argparse.ArgumentParser) -> None:
     """Register command line arguments for this module."""
-    parser.add_argument('paths', nargs='*', help="Paths to filter (default: stdin or current directory)")
-    parser.add_argument('--from-file', '-ff', help="Read paths from file")
-    
+    parser.add_argument(
+        "paths", nargs="*", help="Paths to filter (default: stdin or current directory)"
+    )
+    parser.add_argument("--from-file", "-ff", help="Read paths from file")
+
     # Size filters
-    parser.add_argument('--size-gt', help="Size greater than (e.g., 100K, 1M)")
-    parser.add_argument('--size-lt', help="Size less than")
-    parser.add_argument('--size-eq', help="Size equal to")
-    parser.add_argument('--size-ge', help="Size greater than or equal")
-    parser.add_argument('--size-le', help="Size less than or equal")
-    parser.add_argument('--size-ne', help="Size not equal")
-    
+    parser.add_argument("--size-gt", help="Size greater than (e.g., 100K, 1M)")
+    parser.add_argument("--size-lt", help="Size less than")
+    parser.add_argument("--size-eq", help="Size equal to")
+    parser.add_argument("--size-ge", help="Size greater than or equal")
+    parser.add_argument("--size-le", help="Size less than or equal")
+    parser.add_argument("--size-ne", help="Size not equal")
+
     # Date filters
-    parser.add_argument('--modified-after', help="Modified after date (YYYY-MM-DD or 7d)")
-    parser.add_argument('--modified-before', help="Modified before date")
-    parser.add_argument('--created-after', help="Created after date")
-    parser.add_argument('--created-before', help="Created before date")
-    
+    parser.add_argument(
+        "--modified-after", help="Modified after date (YYYY-MM-DD or 7d)"
+    )
+    parser.add_argument("--modified-before", help="Modified before date")
+    parser.add_argument("--created-after", help="Created after date")
+    parser.add_argument("--created-before", help="Created before date")
+
     # Pattern filters
-    parser.add_argument('--file-pattern', '-fp', action='append', default=[], help="File name patterns to include")
-    parser.add_argument('--dir-pattern', '-dp', action='append', default=[], help="Directory name patterns to include")
-    parser.add_argument('--pattern', '-p', action='append', default=[], help="Pattern for both files and directories")
-    parser.add_argument('--file-ignore', '-fi', action='append', default=[], help="File patterns to ignore")
-    parser.add_argument('--dir-ignore', '-di', action='append', default=[], help="Directory patterns to ignore")
-    parser.add_argument('--ignore', '-i', action='append', default=[], help="Ignore pattern for both files and directories")
-    
+    parser.add_argument(
+        "--file-pattern",
+        "-fp",
+        action="append",
+        default=[],
+        help="File name patterns to include",
+    )
+    parser.add_argument(
+        "--dir-pattern",
+        "-dp",
+        action="append",
+        default=[],
+        help="Directory name patterns to include",
+    )
+    parser.add_argument(
+        "--pattern",
+        "-p",
+        action="append",
+        default=[],
+        help="Pattern for both files and directories",
+    )
+    parser.add_argument(
+        "--file-ignore",
+        "-fi",
+        action="append",
+        default=[],
+        help="File patterns to ignore",
+    )
+    parser.add_argument(
+        "--dir-ignore",
+        "-di",
+        action="append",
+        default=[],
+        help="Directory patterns to ignore",
+    )
+    parser.add_argument(
+        "--ignore",
+        "-i",
+        action="append",
+        default=[],
+        help="Ignore pattern for both files and directories",
+    )
+
     # Type and extension filters
-    parser.add_argument('--type', '-t', action='append', default=[], help="File types to include (e.g., image, video)")
-    parser.add_argument('--extension', '-e', action='append', default=[], help="File extensions to include")
-    
+    parser.add_argument(
+        "--type",
+        "-t",
+        action="append",
+        default=[],
+        help="File types to include (e.g., image, video)",
+    )
+    parser.add_argument(
+        "--extension",
+        "-e",
+        action="append",
+        default=[],
+        help="File extensions to include",
+    )
+
     # Git ignore support
-    parser.add_argument('--git-ignore', '-g', action='store_true', help="Use .gitignore files")
-    parser.add_argument('--ignore-file', help="Custom ignore file to use")
-    
+    parser.add_argument(
+        "--git-ignore", "-g", action="store_true", help="Use .gitignore files"
+    )
+    parser.add_argument("--ignore-file", help="Custom ignore file to use")
+
     # Empty directory handling
-    parser.add_argument('--skip-empty', action='store_true', help="Skip empty directories")
-    parser.add_argument('--show-empty', action='store_true', help="Show only empty directories")
-    
+    parser.add_argument(
+        "--skip-empty", action="store_true", help="Skip empty directories"
+    )
+    parser.add_argument(
+        "--show-empty", action="store_true", help="Show only empty directories"
+    )
+
     # Special options
-    parser.add_argument('--inverse', action='store_true', help="Invert filter results")
-    parser.add_argument('--config', '-c', help="YAML configuration file optionally followed by ':section'")
-    parser.add_argument('--dry-run', action='store_true', help="Show what would be filtered without outputting results")
-    
+    parser.add_argument("--inverse", action="store_true", help="Invert filter results")
+    parser.add_argument(
+        "--config",
+        "-c",
+        help="YAML configuration file optionally followed by ':section'",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would be filtered without outputting results",
+    )
+    parser.add_argument(
+        "--quiet",
+        "-q",
+        action="store_true",
+        help="Suppress commentary; only emit filtered paths",
+    )
+
     # Help options
-    parser.add_argument('--help-examples', action='store_true', help="Show usage examples")
-    parser.add_argument('--help-verbose', action='store_true', help="Show detailed help")
+    parser.add_argument(
+        "--help-examples", action="store_true", help="Show usage examples"
+    )
+    parser.add_argument(
+        "--help-verbose", action="store_true", help="Show detailed help"
+    )
 
 
 _args_registered = False
@@ -787,6 +887,7 @@ SPECIAL OPTIONS:
     --inverse                          Invert all filter results
     --config FILE[:SECTION]            Load filters from YAML configuration
     --dry-run                          Show filtering stats without output
+    --quiet, -q                        Suppress commentary; emit only filtered paths
 
 CONFIGURATION FILE FORMAT (YAML):
     size_gt: "1M"
@@ -863,82 +964,82 @@ def process_filters_pipeline(args):
     if args.help_examples:
         show_examples()
         return
-    
+
     if args.help_verbose:
         show_verbose_help()
         return
-    
+
     # Get input paths
     input_paths, dry_run_detected = get_file_paths_from_input(args)
-    
+
     if not input_paths and not args.paths:
         # Default to current directory
         input_paths = [str(Path.cwd())]
     elif args.paths:
         input_paths.extend(args.paths)
-    
+
     if dry_run_detected:
         args.dry_run = True
-    
+
     # Create filter
     fs_filter = FileSystemFilter()
-    
+
     # Load configuration file if specified
     if args.config:
         config = load_config_file(args.config)
         apply_config_to_filter(fs_filter, config)
-    
+
     # Apply command line arguments
     if args.size_gt:
-        fs_filter.add_size_filter('gt', args.size_gt)
+        fs_filter.add_size_filter("gt", args.size_gt)
     if args.size_lt:
-        fs_filter.add_size_filter('lt', args.size_lt)
+        fs_filter.add_size_filter("lt", args.size_lt)
     if args.size_eq:
-        fs_filter.add_size_filter('eq', args.size_eq)
+        fs_filter.add_size_filter("eq", args.size_eq)
     if args.size_ge:
-        fs_filter.add_size_filter('ge', args.size_ge)
+        fs_filter.add_size_filter("ge", args.size_ge)
     if args.size_le:
-        fs_filter.add_size_filter('le', args.size_le)
+        fs_filter.add_size_filter("le", args.size_le)
     if args.size_ne:
-        fs_filter.add_size_filter('ne', args.size_ne)
-    
+        fs_filter.add_size_filter("ne", args.size_ne)
+
     if args.modified_after:
-        fs_filter.add_date_filter('after', args.modified_after, 'modified')
+        fs_filter.add_date_filter("after", args.modified_after, "modified")
     if args.modified_before:
-        fs_filter.add_date_filter('before', args.modified_before, 'modified')
+        fs_filter.add_date_filter("before", args.modified_before, "modified")
     if args.created_after:
-        fs_filter.add_date_filter('after', args.created_after, 'created')
+        fs_filter.add_date_filter("after", args.created_after, "created")
     if args.created_before:
-        fs_filter.add_date_filter('before', args.created_before, 'created')
-    
+        fs_filter.add_date_filter("before", args.created_before, "created")
+
     # Pattern handling
     for pattern in args.pattern:
         fs_filter.add_file_pattern(pattern)
         fs_filter.add_dir_pattern(pattern)
-    
+
     for pattern in args.file_pattern:
         fs_filter.add_file_pattern(pattern)
-    
+
     for pattern in args.dir_pattern:
         fs_filter.add_dir_pattern(pattern)
-    
+
     for pattern in args.ignore:
         fs_filter.add_file_ignore_pattern(pattern)
         fs_filter.add_dir_ignore_pattern(pattern)
-    
+
     for pattern in args.file_ignore:
         fs_filter.add_file_ignore_pattern(pattern)
-    
+
     for pattern in args.dir_ignore:
         fs_filter.add_dir_ignore_pattern(pattern)
-    
+
     # Type and extension filters
     for file_type in args.type:
         fs_filter.add_type_filter(file_type)
-    
+
     for ext in args.extension:
         fs_filter.add_extension_filter(ext)
-    
+
     # Git ignore
     if args.git_ignore:
         base_paths = _determine_base_paths(input_paths)
@@ -946,7 +1047,7 @@ def process_filters_pipeline(args):
 
     if args.ignore_file:
         fs_filter.load_ignore_file(args.ignore_file)
-    
+
     # Special options
     if args.inverse:
         fs_filter.inverse = True
@@ -954,32 +1055,39 @@ def process_filters_pipeline(args):
         fs_filter.skip_empty = True
     if args.show_empty:
         fs_filter.show_empty = True
-    
+
     # Process filtering
     base_paths = _determine_base_paths(input_paths)
     filtered_paths = fs_filter.filter_paths(input_paths, base_paths)
-    
+
     if args.dry_run:
-        print(f"📊 Filter Results:", file=sys.stderr)
-        print(f"   Input paths: {len(input_paths)}", file=sys.stderr)
-        print(f"   Filtered paths: {len(filtered_paths)}", file=sys.stderr)
-        print(f"   Removed: {len(input_paths) - len(filtered_paths)}", file=sys.stderr)
+        if not args.quiet:
+            print(f"📊 Filter Results:", file=sys.stderr)
+            print(f"   Input paths: {len(input_paths)}", file=sys.stderr)
+            print(f"   Filtered paths: {len(filtered_paths)}", file=sys.stderr)
+            print(
+                f"   Removed: {len(input_paths) - len(filtered_paths)}", file=sys.stderr
+            )
         return
-    
+
     # Output results
     for path in filtered_paths:
         print(path)
-    
-    if filtered_paths:
-        print(f"✅ Filtered {len(input_paths)} paths to {len(filtered_paths)} results.", file=sys.stderr)
-    else:
-        print("ℹ️ No paths matched the specified filters.", file=sys.stderr)
+
+    if not args.quiet:
+        if filtered_paths:
+            print(
+                f"✅ Filtered {len(input_paths)} paths to {len(filtered_paths)} results.",
+                file=sys.stderr,
+            )
+        else:
+            print("ℹ️ No paths matched the specified filters.", file=sys.stderr)
 
 
 def main():
     """Main entry point."""
     args = parse_arguments()
-    
+
     # Handle no arguments case
     if len(sys.argv) == 1:
         print("fsFilters.py - File System Filtering Utility")
@@ -988,7 +1096,7 @@ def main():
         print("For examples: fsFilters.py --help-examples")
         print("For detailed help: fsFilters.py --help-verbose")
         return
-    
+
     process_filters_pipeline(args)
 
 

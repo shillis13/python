@@ -12,25 +12,27 @@ from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Union
 
+
 # Assume yaml_helpers.py is in the same directory or accessible in the path
 # For self-containment, we'll include the necessary helper functions.
 # Load a YAML file and handle errors.
 def load_yaml(filepath: Union[str, Path]) -> Optional[Dict[str, Any]]:
     """Loads a YAML file and handles errors."""
     try:
-        with open(filepath, 'r', encoding='utf-8') as f:
+        with open(filepath, "r", encoding="utf-8") as f:
             return yaml.safe_load(f)
     except FileNotFoundError:
-        return None # Return None to signify we need to create it
+        return None  # Return None to signify we need to create it
     except yaml.YAMLError as e:
         print(f"Error parsing YAML file: {e}")
         return None
+
 
 # Save data to a YAML file.
 def save_yaml(data: Dict[str, Any], filepath: Union[str, Path]) -> None:
     """Saves data to a YAML file."""
     try:
-        with open(filepath, 'w', encoding='utf-8') as f:
+        with open(filepath, "w", encoding="utf-8") as f:
             yaml.dump(data, f, default_flow_style=False, indent=2, sort_keys=False)
     except IOError as e:
         print(f"Error writing to file '{filepath}': {e}")
@@ -50,20 +52,22 @@ class ChatIndexManager:
         self.filepath = Path(index_filepath)
         self.index_data = load_yaml(self.filepath)
         if not self.index_data:
-            print(f"Index file not found or empty. Initializing new index at {self.filepath}")
+            print(
+                f"Index file not found or empty. Initializing new index at {self.filepath}"
+            )
             self.index_data = self._initialize_new_index()
 
     def _initialize_new_index(self) -> Dict[str, Any]:
         """Creates the structure for a new, empty chat index."""
-        now_iso = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+        now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         return {
             "metadata": {
                 "last_updated": now_iso,
                 "version": 1,
                 "total_conversations": 0,
-                "format_version": "1.1"
+                "format_version": "1.1",
             },
-            "conversations": []
+            "conversations": [],
         }
 
     def _add_or_update_entry(self, new_entry: Dict[str, Any]):
@@ -78,8 +82,15 @@ class ChatIndexManager:
             print("Error: Entry to be added is missing a 'conversation_id'.")
             return
 
-        now_iso = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
-        existing_entry = next((item for item in self.index_data["conversations"] if item["conversation_id"] == conv_id), None)
+        now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        existing_entry = next(
+            (
+                item
+                for item in self.index_data["conversations"]
+                if item["conversation_id"] == conv_id
+            ),
+            None,
+        )
 
         if existing_entry:
             print(f"Updating existing index entry for conversation: {conv_id}")
@@ -101,7 +112,14 @@ class ChatIndexManager:
         self.index_data["metadata"]["version"] += 1
         self.save()
 
-    def add_from_cli(self, history_filepath: Union[str, Path], title: str, abstract: str, key_insights: List[str], tags: List[str]):
+    def add_from_cli(
+        self,
+        history_filepath: Union[str, Path],
+        title: str,
+        abstract: str,
+        key_insights: List[str],
+        tags: List[str],
+    ):
         """
         Builds an entry from CLI arguments and adds it to the index.
         This is a convenience wrapper around _add_or_update_entry.
@@ -112,7 +130,7 @@ class ChatIndexManager:
             return
 
         history_meta = history_data.get("metadata", {})
-        now_iso = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+        now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
         entry_to_add = {
             "conversation_id": history_meta.get("conversation_id"),
@@ -122,7 +140,7 @@ class ChatIndexManager:
             "start_date": history_meta.get("created", now_iso),
             "tags": sorted(list(set(tags))),
             "file_path": str(history_filepath),
-            "message_count": history_meta.get("total_messages", 0)
+            "message_count": history_meta.get("total_messages", 0),
         }
         self._add_or_update_entry(entry_to_add)
 
@@ -135,7 +153,7 @@ class ChatIndexManager:
         if not entry_data:
             print(f"Error: Could not load entry file {entry_filepath}")
             return
-        
+
         # If the file contains a list of entries, process the first one.
         if isinstance(entry_data, list):
             if not entry_data:
@@ -154,10 +172,15 @@ class ChatIndexManager:
         query = query.lower()
         results = []
         for entry in self.index_data.get("conversations", []):
-            if query in entry.get("title", "").lower() or \
-               query in entry.get("abstract", "").lower() or \
-               any(query in insight.lower() for insight in entry.get("key_insights", [])) or \
-               any(query in tag.lower() for tag in entry.get("tags", [])):
+            if (
+                query in entry.get("title", "").lower()
+                or query in entry.get("abstract", "").lower()
+                or any(
+                    query in insight.lower()
+                    for insight in entry.get("key_insights", [])
+                )
+                or any(query in tag.lower() for tag in entry.get("tags", []))
+            ):
                 if entry not in results:
                     results.append(entry)
         return results
@@ -167,27 +190,49 @@ class ChatIndexManager:
         save_yaml(self.index_data, self.filepath)
         print(f"✅ Chat index saved to {self.filepath}")
 
+
 # Command-line interface
-if __name__ == '__main__':
+if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Manage the master chat index.")
     parser.add_argument("index_file", help="Path to the master chat_index.yml file.")
-    
+
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # 'add-from-cli' command
-    add_cli_parser = subparsers.add_parser("add-from-cli", help="Build and add an entry from command-line arguments.")
-    add_cli_parser.add_argument("history_file", help="Path to the chat_history.yml file to index.")
-    add_cli_parser.add_argument("--title", required=True, help="A descriptive title for the conversation.")
-    add_cli_parser.add_argument("--abstract", required=True, help="A paragraph summary of the conversation.")
-    add_cli_parser.add_argument("--insights", nargs='+', default=[], help="A list of key insights or take-aways.")
-    add_cli_parser.add_argument("--tags", nargs='+', default=[], help="A list of tags for searching.")
+    add_cli_parser = subparsers.add_parser(
+        "add-from-cli", help="Build and add an entry from command-line arguments."
+    )
+    add_cli_parser.add_argument(
+        "history_file", help="Path to the chat_history.yml file to index."
+    )
+    add_cli_parser.add_argument(
+        "--title", required=True, help="A descriptive title for the conversation."
+    )
+    add_cli_parser.add_argument(
+        "--abstract", required=True, help="A paragraph summary of the conversation."
+    )
+    add_cli_parser.add_argument(
+        "--insights",
+        nargs="+",
+        default=[],
+        help="A list of key insights or take-aways.",
+    )
+    add_cli_parser.add_argument(
+        "--tags", nargs="+", default=[], help="A list of tags for searching."
+    )
 
     # 'add-from-file' command
-    add_file_parser = subparsers.add_parser("add-from-file", help="Add a pre-formatted YAML entry from a file.")
-    add_file_parser.add_argument("entry_file", help="Path to the YAML file containing the single entry to add.")
+    add_file_parser = subparsers.add_parser(
+        "add-from-file", help="Add a pre-formatted YAML entry from a file."
+    )
+    add_file_parser.add_argument(
+        "entry_file", help="Path to the YAML file containing the single entry to add."
+    )
 
     # 'search' command
-    search_parser = subparsers.add_parser("search", help="Search the index for conversations.")
+    search_parser = subparsers.add_parser(
+        "search", help="Search the index for conversations."
+    )
     search_parser.add_argument("query", help="The term to search for.")
 
     args = parser.parse_args()
@@ -199,7 +244,7 @@ if __name__ == '__main__':
             title=args.title,
             abstract=args.abstract,
             key_insights=args.insights,
-            tags=args.tags
+            tags=args.tags,
         )
     elif args.command == "add-from-file":
         manager.add_from_file(args.entry_file)

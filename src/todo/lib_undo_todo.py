@@ -3,11 +3,11 @@
 lib_undo.py
 -----------
 
-This module is a placeholder for implementing a transactional undo functionality 
+This module is a placeholder for implementing a transactional undo functionality
 for file operations in the context of a file management toolkit.
 
-The key concept is to use a combination of context managers and decorators to 
-track and reverse file operations (like renaming, moving, and deleting) as part 
+The key concept is to use a combination of context managers and decorators to
+track and reverse file operations (like renaming, moving, and deleting) as part
 of transactional blocks.
 
 Features and Ideas:
@@ -71,4 +71,3 @@ This module is currently a placeholder and will be developed and refined further
 based on specific requirements and use cases.
 
 """
-

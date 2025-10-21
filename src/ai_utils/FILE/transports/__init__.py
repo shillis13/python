@@ -14,11 +14,15 @@ class Transport(ABC):
     """Abstract transport class used for sending and receiving files."""
 
     @abstractmethod
-    def send_files(self, files: list[str], subject: str, body: str = "", **kwargs) -> None:
+    def send_files(
+        self, files: list[str], subject: str, body: str = "", **kwargs
+    ) -> None:
         """Send a list of files."""
 
     @abstractmethod
-    def receive_files(self, subject_filter: str, download_dir: str, **kwargs) -> list[str]:
+    def receive_files(
+        self, subject_filter: str, download_dir: str, **kwargs
+    ) -> list[str]:
         """Retrieve files matching a subject filter and return paths to downloaded files."""
 
 
@@ -52,7 +56,9 @@ class EmailTransport(Transport):
         smtp.starttls()
         return smtp
 
-    def send_files(self, files: list[str], subject: str, body: str = "", embed: bool = False) -> None:
+    def send_files(
+        self, files: list[str], subject: str, body: str = "", embed: bool = False
+    ) -> None:
         msg = EmailMessage()
         msg["From"] = self.username
         msg["To"] = self.to_addr

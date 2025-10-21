@@ -11,10 +11,12 @@ def setup_logging(level=logging.INFO):
     Example:
         setup_logging(logging.DEBUG)
     """
-    logging.basicConfig(level=level,
-                        format='%(asctime)s : %(filename)s : %(funcName)s : %(lineno)d : %(levelname)s : %(message)s')
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s : %(filename)s : %(funcName)s : %(lineno)d : %(levelname)s : %(message)s",
+    )
 
-    '''
+    """
     # if we wanted to use a custom logger, this is how we'd do it
 
     # Create logger
@@ -34,8 +36,7 @@ def setup_logging(level=logging.INFO):
     # Add ch to logger
     logger.addHandler(ch)
     return logger
-    '''
-
+    """
 
 
 @contextmanager
@@ -67,12 +68,17 @@ def log_function(func):
         def add(a, b):
             return a + b
     """
+
     @wraps(func)
     def wrapper(*args, **kwargs):
-        logging.debug(f"Function {func.__name__} called with args: {args} and kwargs: {kwargs}", stacklevel=4)
+        logging.debug(
+            f"Function {func.__name__} called with args: {args} and kwargs: {kwargs}",
+            stacklevel=4,
+        )
         result = func(*args, **kwargs)
         logging.debug(f"Function {func.__name__} returned {result}", stacklevel=4)
         return result
+
     return wrapper
 
 
@@ -85,6 +91,7 @@ def handle_non_string_inputs(func):
         # Convert all key-value pairs in kwargs to strings
         str_kwargs = {k: str(v) for k, v in kwargs.items()}
         return func(*str_args, **str_kwargs)
+
     return wrapper
 
 
@@ -137,5 +144,3 @@ def log_out(message):
         message (str): The message to output.
     """
     print(message)
-
-

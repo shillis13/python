@@ -24,7 +24,9 @@ class GmailAuth:
             return self.creds
 
         if self.token_path.exists():
-            self.creds = Credentials.from_authorized_user_file(str(self.token_path), SCOPES)
+            self.creds = Credentials.from_authorized_user_file(
+                str(self.token_path), SCOPES
+            )
 
         if not self.creds or not self.creds.valid:
             if self.creds and self.creds.expired and self.creds.refresh_token:
@@ -32,8 +34,12 @@ class GmailAuth:
                 self.creds.refresh(Request())
             else:
                 if not self.credentials_path.exists():
-                    raise FileNotFoundError(f"Missing credentials.json at {self.credentials_path}")
-                flow = InstalledAppFlow.from_client_secrets_file(str(self.credentials_path), SCOPES)
+                    raise FileNotFoundError(
+                        f"Missing credentials.json at {self.credentials_path}"
+                    )
+                flow = InstalledAppFlow.from_client_secrets_file(
+                    str(self.credentials_path), SCOPES
+                )
                 self.creds = flow.run_local_server(port=0)
             self.token_path.write_text(self.creds.to_json())
         return self.creds

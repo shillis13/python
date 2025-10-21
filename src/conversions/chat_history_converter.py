@@ -40,22 +40,29 @@ Args:
 Returns:
     None. Prints status to stdout/stderr and writes files.
 """
+
+
 def run_chat_conversion(args):
     # --- Parsing Logic ---
     metadata, messages = {}, []
-    input_ext = os.path.splitext(args.input_file)[1].lower().replace('.', '')
-    if input_ext == 'yaml': input_ext = 'yml'
+    input_ext = os.path.splitext(args.input_file)[1].lower().replace(".", "")
+    if input_ext == "yaml":
+        input_ext = "yml"
 
-    if input_ext == 'md':
+    if input_ext == "md":
         metadata, messages = converter.parse_markdown_chat(args.input_file)
-    elif input_ext in ['json', 'yml']:
+    elif input_ext in ["json", "yml"]:
         content = utils.read_file_content(args.input_file)
-        data = utils.load_json_from_string(content) if input_ext == 'json' else utils.load_yaml_from_string(content)
+        data = (
+            utils.load_json_from_string(content)
+            if input_ext == "json"
+            else utils.load_yaml_from_string(content)
+        )
         if "error" in data:
-            metadata = {"error": data['error']}
+            metadata = {"error": data["error"]}
         else:
-            metadata = data.get('metadata', {})
-            messages = data.get('messages', [])
+            metadata = data.get("metadata", {})
+            messages = data.get("messages", [])
     else:
         print(f"Error: Invalid chat file format '{input_ext}'.", file=sys.stderr)
         sys.exit(1)
@@ -74,14 +81,18 @@ def run_chat_conversion(args):
 
     # --- Writer Selection ---
     output_content = ""
-    if args.format == 'html':
+    if args.format == "html":
         output_content = converter.to_html_chat(metadata, messages, DEFAULT_CSS)
-    elif args.format == 'md':
+    elif args.format == "md":
         output_content = converter.to_markdown_chat(metadata, messages)
-    elif args.format == 'json':
-        output_content = utils.to_json_string({"metadata": metadata, "messages": messages})
-    elif args.format == 'yml':
-        output_content = utils.to_yaml_string({"metadata": metadata, "messages": messages})
+    elif args.format == "json":
+        output_content = utils.to_json_string(
+            {"metadata": metadata, "messages": messages}
+        )
+    elif args.format == "yml":
+        output_content = utils.to_yaml_string(
+            {"metadata": metadata, "messages": messages}
+        )
     else:
         print(f"Error: Unsupported output format '{args.format}'.", file=sys.stderr)
         sys.exit(1)
@@ -96,6 +107,8 @@ def run_chat_conversion(args):
 """
 Main entry point for running this script directly.
 """
+
+
 def main():
     parser = argparse.ArgumentParser(description="Standalone Chat History Converter.")
     parser.add_argument("input_file")
@@ -106,9 +119,9 @@ def main():
 
     # Simple defaulting for standalone mode
     if not args.format and args.output:
-        args.format = os.path.splitext(args.output)[1].lower().replace('.', '')
+        args.format = os.path.splitext(args.output)[1].lower().replace(".", "")
     elif not args.format:
-        args.format = 'html'
+        args.format = "html"
 
     if not args.output:
         base_name = os.path.splitext(args.input_file)[0]
@@ -119,4 +132,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

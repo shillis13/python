@@ -33,9 +33,12 @@ Args:
 Returns:
     None. Prints status to stdout/stderr and writes files.
 """
+
+
 def run_doc_conversion(args):
-    input_ext = os.path.splitext(args.input_file)[1].lower().replace('.', '')
-    if input_ext == 'yaml': input_ext = 'yml'
+    input_ext = os.path.splitext(args.input_file)[1].lower().replace(".", "")
+    if input_ext == "yaml":
+        input_ext = "yml"
 
     # --- Parsing Logic ---
     metadata, content = converter.parse_document(args.input_file, input_ext)
@@ -43,19 +46,27 @@ def run_doc_conversion(args):
         print(f"Error parsing document: {metadata['error']}", file=sys.stderr)
         sys.exit(1)
 
-    if 'title' not in metadata:
-        metadata['title'] = os.path.splitext(os.path.basename(args.input_file))[0].replace('_', ' ')
+    if "title" not in metadata:
+        metadata["title"] = os.path.splitext(os.path.basename(args.input_file))[
+            0
+        ].replace("_", " ")
 
     # --- Writer Selection ---
     output_content = ""
-    if args.format == 'html':
-        output_content = converter.to_html_document(metadata, content, DEFAULT_CSS, include_toc=not args.no_toc)
-    elif args.format == 'md':
+    if args.format == "html":
+        output_content = converter.to_html_document(
+            metadata, content, DEFAULT_CSS, include_toc=not args.no_toc
+        )
+    elif args.format == "md":
         output_content = content
-    elif args.format == 'json':
-        output_content = utils.to_json_string({"metadata": metadata, "content": content})
-    elif args.format == 'yml':
-        output_content = utils.to_yaml_string({"metadata": metadata, "content": content})
+    elif args.format == "json":
+        output_content = utils.to_json_string(
+            {"metadata": metadata, "content": content}
+        )
+    elif args.format == "yml":
+        output_content = utils.to_yaml_string(
+            {"metadata": metadata, "content": content}
+        )
     else:
         print(f"Error: Unsupported output format '{args.format}'.", file=sys.stderr)
         sys.exit(1)
@@ -66,9 +77,12 @@ def run_doc_conversion(args):
     else:
         print(f"Successfully converted document to '{args.output}'")
 
+
 """
 Main entry point for running this script directly.
 """
+
+
 def main():
     parser = argparse.ArgumentParser(description="Standalone Document Converter.")
     parser.add_argument("input_file")
@@ -79,9 +93,9 @@ def main():
 
     # Simple defaulting for standalone mode
     if not args.format and args.output:
-        args.format = os.path.splitext(args.output)[1].lower().replace('.', '')
+        args.format = os.path.splitext(args.output)[1].lower().replace(".", "")
     elif not args.format:
-        args.format = 'html'
+        args.format = "html"
 
     if not args.output:
         base_name = os.path.splitext(args.input_file)[0]
@@ -89,6 +103,6 @@ def main():
 
     run_doc_conversion(args)
 
+
 if __name__ == "__main__":
     main()
-

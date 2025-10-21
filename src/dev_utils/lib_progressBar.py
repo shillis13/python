@@ -1,19 +1,22 @@
-""" 
+"""
 File: lib_progressBar.py
 
 """
+
 import time
 from functools import wraps
 from contextlib import contextmanager
 
 try:
     from tqdm import tqdm
+
     tqdm_available = True
 except ImportError:
     tqdm = None
     tqdm_available = False
 
 progress_bar_enabled = True
+
 
 def enable_progress_bars():
     """
@@ -22,6 +25,7 @@ def enable_progress_bars():
     global progress_bar_enabled
     progress_bar_enabled = True
 
+
 def disable_progress_bars():
     """
     Disable progress bars globally.
@@ -29,7 +33,9 @@ def disable_progress_bars():
     global progress_bar_enabled
     progress_bar_enabled = False
 
+
 progress_stack = []
+
 
 @contextmanager
 def ProgressBarContext(total, desc="Progress"):
@@ -51,6 +57,7 @@ def ProgressBarContext(total, desc="Progress"):
     else:
         yield None
 
+
 def progress_bar(total, desc="Progress"):
     """
     Decorator for adding a progress bar to a function.
@@ -59,6 +66,7 @@ def progress_bar(total, desc="Progress"):
         total (int): Total number of iterations.
         desc (str): Description for the progress bar.
     """
+
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -70,8 +78,11 @@ def progress_bar(total, desc="Progress"):
                 return result
             else:
                 return func(*args, **kwargs)
+
         return wrapper
+
     return decorator
+
 
 def recursive_progress_bar(total, desc="Recursive Progress"):
     """
@@ -81,6 +92,7 @@ def recursive_progress_bar(total, desc="Recursive Progress"):
         total (int): Total number of iterations.
         desc (str): Description for the progress bar.
     """
+
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -94,13 +106,15 @@ def recursive_progress_bar(total, desc="Recursive Progress"):
                 else:
                     pbar = progress_stack[-1]
                     pbar.total += 2  # Increase the overall total by 2
-                    pbar.update(1)   # Increase progress by 1 for the call
+                    pbar.update(1)  # Increase progress by 1 for the call
                     result = func(*args, **kwargs)
-                    pbar.update(1)   # Increase progress by 1 for the return
+                    pbar.update(1)  # Increase progress by 1 for the return
                     return result
             else:
                 return func(*args, **kwargs)
+
         return wrapper
+
     return decorator
 
 
@@ -108,6 +122,7 @@ def recursive_progress_bar(total, desc="Recursive Progress"):
 # **************************************
 # * Testing methods
 # **************************************
+
 
 @progress_bar(total=3, desc="Parent Function Progress")
 def parent_function():
@@ -118,6 +133,7 @@ def parent_function():
     step2()
     step3()
 
+
 @progress_bar(total=2, desc="Step 1 Progress")
 def step1():
     """
@@ -126,12 +142,14 @@ def step1():
     for _ in range(2):
         time.sleep(1)
 
+
 @progress_bar(total=1, desc="Step 2 Progress")
 def step2():
     """
     Example step function to demonstrate progress bar.
     """
     time.sleep(1)
+
 
 @progress_bar(total=4, desc="Step 3 Progress")
 def step3():
@@ -140,6 +158,7 @@ def step3():
     """
     for _ in range(4):
         time.sleep(0.5)
+
 
 @recursive_progress_bar(total=1, desc="Recursive Function Progress")
 def recursive_function(n):
@@ -154,6 +173,7 @@ def recursive_function(n):
     time.sleep(0.5)
     recursive_function(n - 1)
     time.sleep(0.5)
+
 
 def test_example_function_with_progress():
     """
@@ -215,6 +235,6 @@ def main():
     else:
         print("tqdm is not available or progress bars are disabled.")
 
+
 if __name__ == "__main__":
     main()
-

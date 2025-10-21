@@ -5,6 +5,7 @@ from contextlib import contextmanager
 # Assuming a global variable or another way to determine if it's a dry-run
 # lib_dry_run = False  # This should be set based on command-line arguments
 
+
 def dry_run_decorator(custom_message=None):
     """
     A decorator for simulating actions in dry-run mode with customizable messages.
@@ -14,24 +15,32 @@ def dry_run_decorator(custom_message=None):
     Returns:
         A decorated function that prints the custom dry-run message instead of executing.
     """
+
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            dry_run_flag = get_attr(args, kwargs, 'dry_run', False)
+            dry_run_flag = get_attr(args, kwargs, "dry_run", False)
             print_args()
             print_kwargs()
             if dry_run_flag:
-                message = custom_message(*args, **kwargs) if callable(custom_message) else "Dry run enabled, action is simulated."
+                message = (
+                    custom_message(*args, **kwargs)
+                    if callable(custom_message)
+                    else "Dry run enabled, action is simulated."
+                )
                 print(f"Dry run: {message}")
             else:
                 return func(*args, **kwargs)
+
         return wrapper
+
     return decorator
 
 
 def get_kwarg(kwargs, key, default=None):
     """Safely get a keyword argument."""
     return kwargs.get(key, default)
+
 
 def get_attr(args, kwargs, attribute, default=None):
     # First, try to find the attribute in kwargs directly
@@ -45,23 +54,24 @@ def get_attr(args, kwargs, attribute, default=None):
 
     return default
 
+
 def print_args(*args):
     print("Positional arguments (*args):")
     for i, arg in enumerate(args):
         print(f"  Arg {i + 1}: {arg} (Type: {type(arg)})")
 
-def print_kwargs( **kwargs):
+
+def print_kwargs(**kwargs):
     print("Keyword arguments (**kwargs):")
     for key, value in kwargs.items():
         print(f"  {key} = {value} (Type: {type(value)})")
-
 
 
 #####################################
 # Example Usages
 #####################################
 
-'''
+"""
 # Custom message function for renaming
 def eg_rename_message(old_path, new_path, **kwargs):
     return f"Dry-run: Renaming '{old_path}' to '{new_path}'"
@@ -85,7 +95,8 @@ def eg_delete_file(file_path):
 def eg_delete_file(file_path):
     # Perform delete action
     pass
-'''
+"""
+
 
 #####################################
 # Dry-run context manager for blocks of code
@@ -103,6 +114,7 @@ def dry_run_context(dry_run_enabled):
         else:
             print("Operation executed.")
 
+
 # Example usage of the dry-run utilities in other scripts
 if __name__ == "__main__":
     # This flag would typically come from parsing command-line arguments
@@ -118,4 +130,3 @@ if __name__ == "__main__":
     # Using the context manager
     with dry_run_context(dry_run_enabled=dry_run_flag):
         print("This block simulates file operations.")
-

@@ -7,7 +7,7 @@ import nltk
 import itertools
 import argparse
 
-nltk.download('words')
+nltk.download("words")
 from nltk.corpus import words
 
 word_list = words.words()
@@ -30,12 +30,21 @@ def create_random_word(separator, include_special_chars=False):
     """
     word = separator.join(random.choices(word_list, k=random.randint(1, 3))).lower()
     if include_special_chars:
-        special_chars = ''.join(random.choices(string.punctuation, k=random.randint(1, 3)))
+        special_chars = "".join(
+            random.choices(string.punctuation, k=random.randint(1, 3))
+        )
         word += special_chars
     return word
 
 
-def create_dir_structure(topDir, maxDepth, filesPerDir, subDirsPerDir, extensions, include_special_chars=False):
+def create_dir_structure(
+    topDir,
+    maxDepth,
+    filesPerDir,
+    subDirsPerDir,
+    extensions,
+    include_special_chars=False,
+):
     """
     Creates a directory structure for testing.
 
@@ -58,9 +67,11 @@ def create_dir_structure(topDir, maxDepth, filesPerDir, subDirsPerDir, extension
     for i in range(filesPerDir):
         separator = next(separators)  # Get the next separator from the cycle
         extension = extensions[extension_index % len(extensions)]
-        basename = create_random_word(separator, include_special_chars)  # Use the selected separator
+        basename = create_random_word(
+            separator, include_special_chars
+        )  # Use the selected separator
         file_path = os.path.join(topDir, f"{basename}_{i}{extension}")
-        with open(file_path, 'w') as f:
+        with open(file_path, "w") as f:
             f.write("Test content\n")
         extension_index += 1
 
@@ -71,10 +82,19 @@ def create_dir_structure(topDir, maxDepth, filesPerDir, subDirsPerDir, extension
     # For each subdirectory, also select a separator and create a random name
     for i in range(subDirsPerDir):
         separator = next(separators)  # Get the next separator for the subdir name
-        subdirName = create_random_word(separator, include_special_chars)  # Use the selected separator
+        subdirName = create_random_word(
+            separator, include_special_chars
+        )  # Use the selected separator
         new_dir = os.path.join(topDir, f"{subdirName}_{i}")
         os.makedirs(new_dir, exist_ok=True)
-        create_dir_structure(new_dir, maxDepth - 1, filesPerDir, subDirsPerDir, extensions, include_special_chars)
+        create_dir_structure(
+            new_dir,
+            maxDepth - 1,
+            filesPerDir,
+            subDirsPerDir,
+            extensions,
+            include_special_chars,
+        )
 
 
 def main():
@@ -90,21 +110,63 @@ def main():
 
     Note: This script uses the NLTK words list to generate random file and directory names.
     """
-    parser = argparse.ArgumentParser(description='Generate a test directory structure with random files and directories.')
-    parser.add_argument('--topDir', '-td', required=True, help='The top directory under which the structure will be created.')
-    parser.add_argument('--maxDepth', '-md', type=int, required=True, help='The maximum depth of directories to create.')
-    parser.add_argument('--filesPerDir', '-nf', type=int, required=True, help='The number of files to create in each directory.')
-    parser.add_argument('--subDirsPerDir', '-nd', type=int, required=True, help='The number of subdirectories to create in each directory.')
-    parser.add_argument('--extensions', '-e', nargs='+', required=True, help='A list of file extensions to use for the created files. Provide each extension starting with a dot, separated by spaces.')
-    parser.add_argument('--special-chars', '-sc', action='store_true', help='Include special characters in filenames.')
+    parser = argparse.ArgumentParser(
+        description="Generate a test directory structure with random files and directories."
+    )
+    parser.add_argument(
+        "--topDir",
+        "-td",
+        required=True,
+        help="The top directory under which the structure will be created.",
+    )
+    parser.add_argument(
+        "--maxDepth",
+        "-md",
+        type=int,
+        required=True,
+        help="The maximum depth of directories to create.",
+    )
+    parser.add_argument(
+        "--filesPerDir",
+        "-nf",
+        type=int,
+        required=True,
+        help="The number of files to create in each directory.",
+    )
+    parser.add_argument(
+        "--subDirsPerDir",
+        "-nd",
+        type=int,
+        required=True,
+        help="The number of subdirectories to create in each directory.",
+    )
+    parser.add_argument(
+        "--extensions",
+        "-e",
+        nargs="+",
+        required=True,
+        help="A list of file extensions to use for the created files. Provide each extension starting with a dot, separated by spaces.",
+    )
+    parser.add_argument(
+        "--special-chars",
+        "-sc",
+        action="store_true",
+        help="Include special characters in filenames.",
+    )
 
     args, _ = parser.parse_known_args()
     # args = parser.parse_args()
 
     # Call the create_dir_structure function with the parsed arguments
-    create_dir_structure(args.topDir, args.maxDepth, args.filesPerDir, args.subDirsPerDir, args.extensions, args.special_chars)
+    create_dir_structure(
+        args.topDir,
+        args.maxDepth,
+        args.filesPerDir,
+        args.subDirsPerDir,
+        args.extensions,
+        args.special_chars,
+    )
 
 
 if __name__ == "__main__":
     main()
-

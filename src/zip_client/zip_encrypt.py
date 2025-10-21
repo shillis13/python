@@ -1,4 +1,5 @@
 """Utility for zipping files or directories with optional encryption."""
+
 from __future__ import annotations
 
 import fnmatch
@@ -25,7 +26,9 @@ def _next_available_name(path: Path) -> Path:
 def _load_gitignore(src: Path) -> Iterable[str]:
     gitignore = src / ".gitignore"
     if gitignore.is_file():
-        return [line.strip() for line in gitignore.read_text().splitlines() if line.strip()]
+        return [
+            line.strip() for line in gitignore.read_text().splitlines() if line.strip()
+        ]
     return []
 
 

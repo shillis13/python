@@ -1,7 +1,9 @@
-""" 
+"""
 File: lib_treeFcns.py
 """
+
 import pandas as pd
+
 pd.options.mode.chained_assignment = None  # default='warn'
 
 """
@@ -15,6 +17,8 @@ Parameters:
 Returns: list - A list of root nodes.
 ********************************************************************
 """
+
+
 def Fcn_FindRootNodes(parent_child_table, parent_key="ParentKey", child_key="ChildKey"):
     # Extract Parent and Child columns
     parent_keys = parent_child_table[parent_key].dropna().unique()
@@ -22,8 +26,9 @@ def Fcn_FindRootNodes(parent_child_table, parent_key="ParentKey", child_key="Chi
 
     # Identify root nodes
     root_nodes = list(set(parent_keys) - set(child_keys))
-    
+
     return root_nodes
+
 
 # Example usage
 """
@@ -48,9 +53,17 @@ Parameters:
 Returns: int - The maximum depth of the hierarchical trees.
 ********************************************************************
 """
-def Fcn_CalculateMaxDepth(parent_child_table, parent_key="ParentKey", child_key="ChildKey"):
+
+
+def Fcn_CalculateMaxDepth(
+    parent_child_table, parent_key="ParentKey", child_key="ChildKey"
+):
     def calculate_depth(node, depth=0):
-        children = parent_child_table[parent_child_table[parent_key] == node][child_key].dropna().unique()
+        children = (
+            parent_child_table[parent_child_table[parent_key] == node][child_key]
+            .dropna()
+            .unique()
+        )
         if len(children) == 0:
             return depth
         else:
@@ -66,6 +79,7 @@ def Fcn_CalculateMaxDepth(parent_child_table, parent_key="ParentKey", child_key=
     max_depth = max(depths) if depths else 0
 
     return max_depth
+
 
 # Example usage
 """
@@ -122,6 +136,8 @@ In this example, the function identifies multiple circular dependencies:
 - A -> B -> D -> F -> A
 - A -> C -> E -> G -> B
 """
+
+
 def Fcn_FindCircularDependencies(df):
     def find_circular_paths(graph, start_node, visited=None, path=None):
         if visited is None:
@@ -136,7 +152,9 @@ def Fcn_FindCircularDependencies(df):
 
         for neighbor in graph.get(start_node, []):
             if neighbor not in visited:
-                circular_paths.extend(find_circular_paths(graph, neighbor, visited.copy(), path.copy()))
+                circular_paths.extend(
+                    find_circular_paths(graph, neighbor, visited.copy(), path.copy())
+                )
             elif neighbor in path:
                 cycle_start_index = path.index(neighbor)
                 circular_paths.append(path[cycle_start_index:] + [neighbor])
@@ -145,8 +163,8 @@ def Fcn_FindCircularDependencies(df):
 
     graph = {}
     for _, row in df.iterrows():
-        parent = row['ParentKey']
-        child = row['ChildKey']
+        parent = row["ParentKey"]
+        child = row["ChildKey"]
         if parent not in graph:
             graph[parent] = []
         graph[parent].append(child)
@@ -158,17 +176,17 @@ def Fcn_FindCircularDependencies(df):
     circular_df_rows = []
     for path in all_circular_paths:
         for i in range(len(path) - 1):
-            circular_df_rows.append({'ParentKey': path[i], 'ChildKey': path[i + 1]})
+            circular_df_rows.append({"ParentKey": path[i], "ChildKey": path[i + 1]})
 
     circular_df = pd.DataFrame(circular_df_rows)
-    circular_df = circular_df.drop_duplicates(subset=['ParentKey', 'ChildKey'])
+    circular_df = circular_df.drop_duplicates(subset=["ParentKey", "ChildKey"])
 
     return circular_df
 
 
 def Fcn_FindCircularDependencies2(df):
     def find_cycles(df):
-        graph = df.groupby('ParentKey')['ChildKey'].apply(list).to_dict()
+        graph = df.groupby("ParentKey")["ChildKey"].apply(list).to_dict()
         visited = set()
         stack = set()
         circular_nodes = set()
@@ -191,7 +209,10 @@ def Fcn_FindCircularDependencies2(df):
         return circular_nodes
 
     circular_nodes = find_cycles(df)
-    return df[df['ParentKey'].isin(circular_nodes) | df['ChildKey'].isin(circular_nodes)]
+    return df[
+        df["ParentKey"].isin(circular_nodes) | df["ChildKey"].isin(circular_nodes)
+    ]
+
 
 """
 # Example usage
@@ -203,4 +224,3 @@ ParentChildTable = pd.DataFrame({
 circular_dependencies = Fcn_FindCircularDependencies(ParentChildTable)
 print(circular_dependencies)
 """
-

@@ -19,8 +19,10 @@ Raises:
     KeyError: If the key_path does not resolve to a valid location.
     TypeError: If the key_path resolves to a non-list item.
 """
+
+
 def add_yaml_item(data, key_path, value):
-    keys = key_path.split('.')
+    keys = key_path.split(".")
     current_level = data
 
     for k in keys:
@@ -34,16 +36,24 @@ def add_yaml_item(data, key_path, value):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Add an item to a list within the YAML, archiving the parent state.")
+    parser = argparse.ArgumentParser(
+        description="Add an item to a list within the YAML, archiving the parent state."
+    )
     parser.add_argument("filepath", help="Path to the YAML file.")
-    parser.add_argument("--key", required=True, help="The key of the list to add to (e.g., 'rules.data').")
-    parser.add_argument("--value", required=True, help="The new value to append to the list.")
+    parser.add_argument(
+        "--key",
+        required=True,
+        help="The key of the list to add to (e.g., 'rules.data').",
+    )
+    parser.add_argument(
+        "--value", required=True, help="The new value to append to the list."
+    )
     args = parser.parse_args()
 
     try:
         data = load_yaml(args.filepath)
 
-        parent_key = args.key.split('.')[0]
+        parent_key = args.key.split(".")[0]
         data = archive_and_update_metadata(data, parent_key)
 
         data = add_yaml_item(data, args.key, args.value)
@@ -52,13 +62,14 @@ def main():
         print(f"✅ Successfully added item to '{args.key}' in '{args.filepath}'.")
 
     except (KeyError, TypeError) as e:
-        print(f"Error: Could not resolve key '{args.key}'. Details: {e}", file=sys.stderr)
+        print(
+            f"Error: Could not resolve key '{args.key}'. Details: {e}", file=sys.stderr
+        )
         sys.exit(1)
     except Exception as e:
         print(f"An unexpected error occurred: {e}", file=sys.stderr)
         sys.exit(1)
 
+
 if __name__ == "__main__":
     main()
-
-

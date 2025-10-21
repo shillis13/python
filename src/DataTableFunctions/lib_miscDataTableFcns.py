@@ -61,7 +61,11 @@ False
 >>> dataframes_equal(df5, df6, ignoreColumnOrder=True)
 True
 """
-def dataframes_equal(df1, df2, ignoreIndex=True, ignoreRowOrder=True, ignoreColumnOrder=True):
+
+
+def dataframes_equal(
+    df1, df2, ignoreIndex=True, ignoreRowOrder=True, ignoreColumnOrder=True
+):
     # If ignoring index, reset both DataFrames' indexes
     if ignoreIndex:
         df1 = df1.reset_index(drop=True)
@@ -84,8 +88,8 @@ def dataframes_equal(df1, df2, ignoreIndex=True, ignoreRowOrder=True, ignoreColu
     # Use equals() to compare the data
     return df1.equals(df2)
 
+
 # Example usage:
 # df1 = pd.DataFrame({'A': [3, 2, 1], 'B': [6, 5, 4]})
 # df2 = pd.DataFrame({'A': [1, 2, 3], 'B': [4, 5, 6]})
 # print(dataframes_equal(df1, df2))  # Output: True
-
