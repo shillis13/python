@@ -1,5 +1,4 @@
 # lib_doc_converter.py
-import markdown2
 import conversion_utils as utils
 import yaml
 
@@ -105,10 +104,9 @@ def to_html_document(metadata, content, css_content, include_toc=True):
 
         if isinstance(doc, str):  # Handle Markdown content
             # (Logic for markdown remains the same)
-            markdowner = markdown2.Markdown(
-                extras=["toc", "tables", "fenced-code-blocks", "strike"]
+            html_part = utils.convert_markdown_to_html(
+                doc, extras=["toc", "tables", "fenced-code-blocks", "strike"]
             )
-            html_part = markdowner.convert(doc)
             final_html_content += f'<div class="content">{html_part}</div>'
         elif isinstance(doc, dict):  # Handle structured data
             html_part = _format_yaml_to_html(doc)  # Assumes _format_yaml_to_html exists

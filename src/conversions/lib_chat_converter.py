@@ -1,6 +1,5 @@
 # lib_chat_converter.py
 import re
-import markdown2
 from datetime import datetime
 import conversion_utils as utils
 
@@ -103,12 +102,12 @@ Returns:
 
 def to_html_chat(metadata, messages, css_content):
     title = metadata.get("title", "Chat History")
-    markdowner = markdown2.Markdown(extras=["tables", "fenced-code-blocks", "strike"])
-
     message_html_parts = []
     for msg in messages:
         role = msg.get("role", "user")
-        content = markdowner.convert(msg["content"])
+        content = utils.convert_markdown_to_html(
+            msg["content"], extras=["tables", "fenced-code-blocks", "strike"]
+        )
         message_html_parts.append(
             f"""
         <div class="message {role}">

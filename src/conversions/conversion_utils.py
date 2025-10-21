@@ -2,6 +2,17 @@
 import json
 import yaml
 import os
+import re
+from html import escape
+
+try:
+    import markdown2  # type: ignore
+except ImportError:  # pragma: no cover - optional dependency
+    markdown2 = None
+
+# Cache Markdown converter instances by their extras tuple so that repeated
+# conversions avoid recreating converter objects.
+_MARKDOWNER_CACHE = {}
 
 
 """
@@ -116,3 +127,111 @@ def load_yaml_from_string(content):
 
 def to_yaml_string(data):
     return yaml.dump(data, sort_keys=False)
+
+
+def _fallback_markdown_to_html(text):
+    """Convert Markdown text to HTML using a very small subset of rules.
+
+    This helper is used when the optional ``markdown2`` dependency is not
+    available.  It keeps the formatting readable by:
+
+    * escaping HTML characters to avoid unsafe output,
+    * preserving blank lines as paragraph breaks, and
+    * supporting simple triple backtick code fences.
+    """
+
+    lines = text.splitlines()
+    html_parts = []
+    paragraph_lines = []
+    code_lines = []
+    in_code_block = False
+
+    def flush_paragraph():
+        if paragraph_lines:
+            html_parts.append(
+                "<p>" + "<br />".join(paragraph_lines) + "</p>"
+            )
+            paragraph_lines.clear()
+
+    def flush_code_block():
+        if code_lines:
+            html_parts.append(
+                "<pre><code>" + "\n".join(code_lines) + "</code></pre>"
+            )
+            code_lines.clear()
+
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            if in_code_block:
+                flush_code_block()
+                in_code_block = False
+            else:
+                flush_paragraph()
+                in_code_block = True
+            continue
+
+        if in_code_block:
+            code_lines.append(escape(line))
+            continue
+
+        if stripped == "":
+            flush_paragraph()
+        else:
+            paragraph_lines.append(_apply_inline_formatting(escape(line)))
+
+    if in_code_block:
+        flush_code_block()
+    flush_paragraph()
+
+    if not html_parts:
+        return "<p></p>"
+
+    return "\n".join(html_parts)
+
+
+def _apply_inline_formatting(escaped_text):
+    """Apply minimal inline Markdown formatting to escaped text."""
+
+    patterns = [
+        (r"\*\*(.+?)\*\*", r"<strong>\1</strong>"),
+        (r"__(.+?)__", r"<strong>\1</strong>"),
+        (r"`([^`]+)`", r"<code>\1</code>"),
+        (r"\*(.+?)\*", r"<em>\1</em>"),
+        (r"_(.+?)_", r"<em>\1</em>"),
+    ]
+
+    for pattern, replacement in patterns:
+        escaped_text = re.sub(pattern, replacement, escaped_text)
+
+    return escaped_text
+
+
+def convert_markdown_to_html(text, extras=None):
+    """Convert Markdown text into HTML.
+
+    Parameters
+    ----------
+    text:
+        The Markdown content to convert.
+    extras:
+        Optional list of ``markdown2`` extras.  They are ignored when the
+        dependency is unavailable.
+
+    Returns
+    -------
+    str
+        The rendered HTML string.
+    """
+
+    extras = extras or []
+
+    if markdown2 is not None:
+        extras_key = tuple(sorted(extras))
+        markdowner = _MARKDOWNER_CACHE.get(extras_key)
+        if markdowner is None:
+            markdowner = markdown2.Markdown(extras=list(extras_key))
+            _MARKDOWNER_CACHE[extras_key] = markdowner
+        return markdowner.convert(text)
+
+    return _fallback_markdown_to_html(text)
