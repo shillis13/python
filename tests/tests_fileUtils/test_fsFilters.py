@@ -209,23 +209,15 @@ class TestGitIgnoreFilter:
         git_filter = GitIgnoreFilter([])
         assert git_filter.ignore_patterns == []
     
-    @patch('file_utils.lib_filters.Path')
-    def test_load_gitignore_files(self, mock_path_class):
-        """Test loading .gitignore files from search paths."""
-        # Mock path structure
-        mock_path = Mock()
-        mock_path.resolve.return_value = mock_path
-        mock_path.parent = mock_path
-        mock_path.__truediv__ = Mock(return_value=mock_path)
-        mock_path.exists.return_value = True
-        mock_path_class.return_value = mock_path
-        
-        # Mock reading .gitignore content
-        with patch('builtins.open', mock_open(read_data="*.pyc\n__pycache__/\n")):
-            git_filter = GitIgnoreFilter([Path("/test")])
-            
-        expected_patterns = ["*.pyc", "__pycache__/"]
-        assert git_filter.ignore_patterns == expected_patterns
+    def test_load_gitignore_files(self, tmp_path):
+        """Loading .gitignore files records their patterns."""
+        repo = tmp_path / 'repo'
+        repo.mkdir()
+        (repo / '.gitignore').write_text('*.pyc\n__pycache__/\n')
+
+        git_filter = GitIgnoreFilter([repo])
+
+        assert git_filter.ignore_patterns == ['*.pyc', '__pycache__/']
     
     def test_matches_gitignore_pattern_simple(self):
         """Test matching simple gitignore patterns."""
@@ -241,29 +233,39 @@ class TestGitIgnoreFilter:
         result = git_filter.matches_gitignore_pattern("__pycache__", "__pycache__/")
         assert result is True
     
-    def test_should_ignore_matches_pattern(self):
-        """Test should_ignore method with matching pattern."""
-        git_filter = GitIgnoreFilter([])
-        git_filter.ignore_patterns = ["*.pyc", "__pycache__/"]
-        
-        mock_path = Mock()
-        mock_path.relative_to.return_value = Path("test.pyc")
-        mock_base = Mock()
-        
-        result = git_filter.should_ignore(mock_path, mock_base)
+    def test_should_ignore_matches_pattern(self, tmp_path):
+        """gitignore patterns exclude matching files."""
+        repo = tmp_path / 'repo'
+        repo.mkdir()
+        (repo / '.git').mkdir()
+        (repo / '.gitignore').write_text('*.pyc\n')
+        pyc_file = repo / 'cache.pyc'
+        pyc_file.write_text('compiled')
+
+        git_filter = GitIgnoreFilter([repo])
+        result = git_filter.should_ignore(pyc_file, repo)
+
         assert result is True
-    
-    def test_should_ignore_no_match(self):
-        """Test should_ignore method with no matching pattern."""
-        git_filter = GitIgnoreFilter([])
-        git_filter.ignore_patterns = ["*.pyc", "__pycache__/"]
-        
-        mock_path = Mock()
-        mock_path.relative_to.return_value = Path("test.py")
-        mock_base = Mock()
-        
-        result = git_filter.should_ignore(mock_path, mock_base)
-        assert result is False
+
+    def test_should_ignore_honours_negation(self, tmp_path):
+        """Child .gitignore entries override parent rules."""
+        repo = tmp_path / 'repo'
+        repo.mkdir()
+        (repo / '.git').mkdir()
+        (repo / '.gitignore').write_text('*.log\n')
+        nested = repo / 'nested'
+        nested.mkdir()
+        (nested / '.gitignore').write_text('!keep.log\nsecret.log\n')
+
+        keep = nested / 'keep.log'
+        keep.write_text('keep me')
+        drop = nested / 'drop.log'
+        drop.write_text('drop me')
+
+        git_filter = GitIgnoreFilter([repo])
+
+        assert git_filter.should_ignore(drop, repo) is True
+        assert git_filter.should_ignore(keep, repo) is False
 
 
 class TestFileSystemFilter:
@@ -628,12 +630,16 @@ class TestErrorHandling:
         with pytest.raises(ValueError):
             DateFilter.create_filter('after', 'invalid_date', 'modified')
     
-    def test_gitignore_filter_with_permission_error(self):
+    def test_gitignore_filter_with_permission_error(self, tmp_path):
         """Test GitIgnoreFilter handling permission errors."""
+        repo = tmp_path / 'repo'
+        repo.mkdir()
+        (repo / '.gitignore').write_text('*.tmp\n')
+
         with patch('builtins.open', side_effect=PermissionError("Access denied")):
-            # Should not raise exception
-            git_filter = GitIgnoreFilter([Path('/test')])
-            assert git_filter.ignore_patterns == []
+            git_filter = GitIgnoreFilter([repo])
+
+        assert git_filter.ignore_patterns == []
     
     def test_filesystem_filter_with_nonexistent_path(self):
         """Test FileSystemFilter with nonexistent paths."""

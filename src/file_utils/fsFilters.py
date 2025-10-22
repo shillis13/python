@@ -188,83 +188,253 @@ class DateFilter:
         return date_filter
 
 
+class _GitIgnoreRule:
+    """Representation of a single ``.gitignore`` rule."""
+
+    def __init__(self, pattern: str, base_dir: Path):
+        self.base_dir = base_dir.resolve()
+        self.original = pattern
+        text = pattern
+
+        if text.startswith("!"):
+            self.negated = True
+            text = text[1:]
+        else:
+            self.negated = False
+
+        if text.startswith("/"):
+            self.anchor = True
+            text = text[1:]
+        else:
+            self.anchor = False
+
+        if text.endswith("/"):
+            self.directory_only = True
+            text = text[:-1]
+        else:
+            self.directory_only = False
+
+        self.pattern = text or "*"
+
+    def matches(self, path: Path, is_dir: bool) -> bool:
+        """Return ``True`` if ``path`` matches this rule."""
+
+        try:
+            relative = path.relative_to(self.base_dir)
+        except ValueError:
+            return False
+
+        rel_str = relative.as_posix()
+        if not rel_str:
+            rel_str = path.name
+
+        if self.directory_only and not is_dir:
+            target = f"{self.pattern.rstrip('/')}/"
+            candidate = rel_str if rel_str.endswith('/') else f"{rel_str}/"
+            if candidate.startswith(target):
+                return True
+            if not self.anchor:
+                parts = rel_str.split("/")
+                for index in range(1, len(parts)):
+                    suffix = "/".join(parts[index:])
+                    candidate = suffix if suffix.endswith('/') else f"{suffix}/"
+                    if candidate.startswith(target):
+                        return True
+            return False
+
+        candidates = [rel_str]
+        if is_dir and not rel_str.endswith("/"):
+            candidates.append(rel_str + "/")
+
+        if not self.anchor:
+            # Non-anchored patterns may match any suffix component as well as
+            # the basename.  This mirrors Git's behaviour sufficiently for the
+            # project test-suite without pulling in heavy dependencies.
+            basename = relative.name if hasattr(relative, "name") else path.name
+            candidates.append(basename)
+            parts = rel_str.split("/")
+            for index in range(1, len(parts)):
+                suffix = "/".join(parts[index:])
+                if suffix:
+                    candidates.append(suffix)
+
+        for candidate in candidates:
+            if fnmatch.fnmatchcase(candidate, self.pattern):
+                return True
+        return False
+
+
 class GitIgnoreFilter:
-    """Handles .gitignore file parsing and filtering."""
+    """Handle stacked ``.gitignore`` evaluation."""
 
     def __init__(self, search_paths: List[Path]):
-        self.ignore_patterns = []
+        self.ignore_patterns: List[str] = []
+        self._rules_by_dir: Dict[Path, List[_GitIgnoreRule]] = {}
+        self._stack_cache: Dict[tuple[Path, Path], List[_GitIgnoreRule]] = {}
+        self._root_cache: Dict[Path, Path] = {}
         self.load_gitignore_files(search_paths)
 
-    def load_gitignore_files(self, search_paths: List[Path]):
-        """Load .gitignore files from search paths."""
-        gitignore_files = set()
+    def _clean_pattern(self, raw_line: str) -> str | None:
+        line = raw_line.rstrip("\n\r")
+        if not line:
+            return None
+        if line.startswith("\\") and len(line) > 1 and line[1] in ("#", "!"):
+            line = line[1:]
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            return None
+        return stripped
 
-        # ``Path`` is imported here so tests can patch
-        # ``file_utils.lib_filters.Path`` and have that stub picked up.
-        try:  # pragma: no cover - defensive import
-            from .lib_filters import Path as _Path
-        except Exception:  # pragma: no cover
-            from pathlib import Path as _Path
+    def _load_rules_for_directory(self, directory: Path) -> List[_GitIgnoreRule]:
+        directory = directory.resolve()
+        if directory in self._rules_by_dir:
+            return self._rules_by_dir[directory]
+
+        rules: List[_GitIgnoreRule] = []
+        gitignore_path = directory / ".gitignore"
+        if gitignore_path.exists():
+            try:
+                with open(gitignore_path, "r", encoding="utf-8") as handle:
+                    for raw_line in handle:
+                        cleaned = self._clean_pattern(raw_line)
+                        if cleaned is None:
+                            continue
+                        rule = _GitIgnoreRule(cleaned, directory)
+                        rules.append(rule)
+                        self.ignore_patterns.append(cleaned)
+            except (OSError, UnicodeDecodeError) as exc:
+                log_debug(f"Could not read {gitignore_path}: {exc}")
+
+        self._rules_by_dir[directory] = rules
+        return rules
+
+    def _discover_root(self, path: Path) -> Path:
+        current = path.resolve()
+        visited: List[Path] = []
+
+        while True:
+            if current in self._root_cache:
+                root = self._root_cache[current]
+                break
+
+            git_dir = current / ".git"
+            if git_dir.exists():
+                root = current
+                break
+
+            parent = current.parent
+            visited.append(current)
+            if parent == current:
+                root = current
+                break
+            current = parent
+
+        for entry in visited:
+            self._root_cache[entry] = root
+        self._root_cache[current] = root
+        return root
+
+    def load_gitignore_files(self, search_paths: List[Path]):
+        """Prime caches for the supplied ``search_paths``."""
 
         for path in search_paths:
-            current = _Path(path).resolve()
+            resolved = Path(path).resolve()
+            root = self._discover_root(resolved)
 
-            # Walk up the tree, examining the current directory before
-            # deciding whether we've reached the filesystem root.  This
-            # ordering allows tests to use mocked ``Path`` objects whose
-            # ``parent`` attribute may point to themselves.
+            current = resolved
             while True:
-                gitignore_path = current / ".gitignore"
-                if gitignore_path.exists():
-                    gitignore_files.add(gitignore_path)
+                self._load_rules_for_directory(current)
+                self._root_cache[current] = root
+                if current == root:
+                    break
                 parent = current.parent
                 if parent == current:
                     break
                 current = parent
 
-        for gitignore_file in gitignore_files:
-            self.load_gitignore_file(gitignore_file)
+    def root_for(self, path: Path) -> Path:
+        """Return the repository root for ``path``."""
+
+        base = path.parent if path.is_file() else path
+        return self._discover_root(base)
+
+    def _stack_for(self, directory: Path, root: Path) -> List[_GitIgnoreRule]:
+        directory = directory.resolve()
+        root = root.resolve()
+        key = (root, directory)
+        if key in self._stack_cache:
+            return self._stack_cache[key]
+
+        stack: List[_GitIgnoreRule] = []
+        chain: List[Path] = []
+        current = directory
+        while True:
+            chain.append(current)
+            if current == root:
+                break
+            parent = current.parent
+            if parent == current:
+                break
+            current = parent
+
+        for entry in reversed(chain):
+            stack.extend(self._load_rules_for_directory(entry))
+
+        self._stack_cache[key] = stack
+        return stack
 
     def load_gitignore_file(self, gitignore_path: Path):
-        """Load patterns from a single .gitignore file."""
-        try:
-            with open(gitignore_path, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if line and not line.startswith("#"):
-                        self.ignore_patterns.append(line)
-        except (OSError, UnicodeDecodeError) as e:
-            log_debug(f"Could not read {gitignore_path}: {e}")
+        """Load a specific ``.gitignore`` file and refresh caches."""
 
-    def should_ignore(self, path: Path, base_path: Path) -> bool:
-        """Check if path should be ignored based on gitignore patterns."""
-        try:
-            rel_path = path.relative_to(base_path)
-            path_str = str(rel_path).replace("\\", "/")  # Use forward slashes
+        directory = Path(gitignore_path).resolve().parent
+        if directory in self._rules_by_dir:
+            del self._rules_by_dir[directory]
+        if (root := self._root_cache.get(directory)) is not None:
+            self._stack_cache.pop((root, directory), None)
+        self._load_rules_for_directory(directory)
 
-            for pattern in self.ignore_patterns:
-                if self.matches_gitignore_pattern(path_str, pattern):
-                    return True
+    def should_ignore(self, path: Path, root_path: Path | None) -> bool:
+        """Return ``True`` if ``path`` is ignored by stacked rules."""
+
+        try:
+            resolved_path = path.resolve()
+        except Exception:
+            resolved_path = path
+
+        root = root_path or self.root_for(resolved_path)
+        if root is None:
             return False
+
+        try:
+            resolved_path.relative_to(root)
         except ValueError:
-            return False  # Path not relative to base
+            return False
+
+        parent_dir = resolved_path.parent if resolved_path != root else resolved_path
+        rules = self._stack_for(parent_dir, root)
+
+        try:
+            is_dir = resolved_path.is_dir()
+        except OSError:
+            is_dir = False
+
+        ignored = False
+        for rule in rules:
+            if rule.matches(resolved_path, is_dir):
+                ignored = not rule.negated
+        return ignored
 
     def matches_gitignore_pattern(self, path: str, pattern: str) -> bool:
-        """Check if path matches gitignore pattern."""
-        # Handle directory patterns ending with /
+        """Compatibility helper retained for legacy unit tests."""
+
         if pattern.endswith("/"):
             pattern = pattern[:-1]
-            # Only match directories
-            return fnmatch.fnmatch(path, pattern) or fnmatch.fnmatch(
-                path, pattern + "/*"
-            )
+            return fnmatch.fnmatch(path, pattern) or fnmatch.fnmatch(path, pattern + "/*")
 
-        # Handle patterns starting with /
         if pattern.startswith("/"):
             pattern = pattern[1:]
             return fnmatch.fnmatch(path, pattern)
 
-        # Handle wildcards and directory matching
         return (
             fnmatch.fnmatch(path, pattern)
             or fnmatch.fnmatch(path, "*/" + pattern)
@@ -348,7 +518,13 @@ class FileSystemFilter:
 
         return normalized
 
-    def should_descend(self, path: Path, base_path: Path | None = None) -> bool:
+    def should_descend(
+        self,
+        path: Path,
+        base_path: Path | None = None,
+        *,
+        root_path: Path | None = None,
+    ) -> bool:
         """Return ``True`` if traversal should continue into ``path``."""
 
         if not path.is_dir():
@@ -359,12 +535,12 @@ class FileSystemFilter:
         ):
             return False
 
-        if (
-            self.gitignore_filter
-            and base_path
-            and self.gitignore_filter.should_ignore(path, base_path)
-        ):
-            return False
+        if self.gitignore_filter:
+            ignore_root = root_path
+            if ignore_root is None and base_path is not None:
+                ignore_root = self.gitignore_filter.root_for(base_path)
+            if ignore_root and self.gitignore_filter.should_ignore(path, ignore_root):
+                return False
 
         return True
 
@@ -474,6 +650,7 @@ class FileSystemFilter:
         path: Path,
         base_path: Path | None = None,
         *,
+        root_path: Path | None = None,
         apply_inverse: bool = True,
     ) -> bool:
         """Determine if ``path`` should be included based on all filters.
@@ -496,12 +673,21 @@ class FileSystemFilter:
                 return self.inverse if apply_inverse else False
 
         # Apply gitignore filter
-        if self.gitignore_filter and base_path:
-            if self.gitignore_filter.should_ignore(path, base_path):
+        if self.gitignore_filter:
+            ignore_root = root_path
+            if ignore_root is None:
+                candidate = base_path if base_path is not None else path
+                ignore_root = self.gitignore_filter.root_for(candidate)
+            if ignore_root and self.gitignore_filter.should_ignore(path, ignore_root):
                 return self.inverse if apply_inverse else False
 
         # Apply pattern filters based on file/directory type
-        if path.is_dir():
+        try:
+            is_directory = path.is_dir()
+        except OSError:
+            is_directory = False
+
+        if is_directory:
             # Directory patterns
             if self.dir_patterns and not self.matches_patterns(path, self.dir_patterns):
                 return self.inverse if apply_inverse else False
@@ -510,6 +696,16 @@ class FileSystemFilter:
             ):
                 return self.inverse if apply_inverse else False
         else:
+            parent_dir = path.parent
+            if self.dir_patterns and not self.matches_patterns(
+                parent_dir, self.dir_patterns
+            ):
+                return self.inverse if apply_inverse else False
+            if self.dir_ignore_patterns and self.matches_patterns(
+                parent_dir, self.dir_ignore_patterns
+            ):
+                return self.inverse if apply_inverse else False
+
             # File patterns
             if self.file_patterns and not self.matches_patterns(
                 path, self.file_patterns

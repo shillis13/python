@@ -25,6 +25,7 @@ import logging
 import os
 import re
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Set, Optional, Callable, Iterator
 
@@ -38,6 +39,12 @@ setup_logging(level=logging.ERROR)
 
 _YAML_MODULE = None
 _YAML_CHECKED = False
+
+
+@dataclass
+class _TraversalState:
+    matched_files: bool = False
+    matched_dirs: bool = False
 
 
 def _get_yaml_module():
@@ -91,7 +98,8 @@ class EnhancedFileFinder:
         extensions: Optional[List[str]] = None,
         file_types: Optional[List[str]] = None,
         fs_filter: Optional[FileSystemFilter] = None,
-        include_dirs: bool = False,
+        include_dirs: bool = True,
+        include_files: bool = True,
         follow_symlinks: bool = False,
         min_depth: Optional[int] = None,
         max_depth: Optional[int] = None,
@@ -109,6 +117,7 @@ class EnhancedFileFinder:
             file_types: List of file type categories
             fs_filter: FileSystemFilter instance for advanced filtering
             include_dirs: Whether to include directories in results
+            include_files: Whether to include files in results
             follow_symlinks: Whether to follow symbolic links
 
         Yields:
@@ -139,8 +148,16 @@ class EnhancedFileFinder:
                 log_info(f"Not a directory: {directory}")
                 continue
 
+            root_path = dir_path
+            if fs_filter and fs_filter.gitignore_filter:
+                try:
+                    root_path = fs_filter.gitignore_filter.root_for(dir_path)
+                except Exception:
+                    root_path = dir_path
+
             yield from self._search_directory(
                 dir_path,
+                root_path,
                 recursive,
                 file_pattern,
                 substrings,
@@ -149,13 +166,16 @@ class EnhancedFileFinder:
                 file_types,
                 fs_filter,
                 include_dirs,
+                include_files,
                 follow_symlinks,
                 0,
                 min_depth=min_depth,
                 max_depth=max_depth,
             )
 
-    def _should_emit(self, item: Path, include_dirs: bool) -> bool:
+    def _should_emit(
+        self, item: Path, include_dirs: bool, include_files: bool
+    ) -> bool:
         """Update statistics and determine if a matched item should be emitted."""
 
         if item.is_dir():
@@ -166,14 +186,15 @@ class EnhancedFileFinder:
 
         if item.is_symlink():
             self.stats["symlinks_found"] += 1
-        else:
+        elif include_files:
             self.stats["files_found"] += 1
 
-        return True
+        return include_files
 
     def _search_directory(
         self,
         directory: Path,
+        root_path: Path,
         recursive: bool,
         file_pattern: Optional[str],
         substrings: List[str],
@@ -182,6 +203,7 @@ class EnhancedFileFinder:
         file_types: List[str],
         fs_filter: Optional[FileSystemFilter],
         include_dirs: bool,
+        include_files: bool,
         follow_symlinks: bool,
         depth: int,
         *,
@@ -189,21 +211,38 @@ class EnhancedFileFinder:
         max_depth: Optional[int] = None,
     ) -> Iterator[str]:
         """Search a single directory."""
+
+        state = _TraversalState()
+
         try:
             self.stats["directories_searched"] += 1
 
             for item in directory.iterdir():
-                # Skip broken symlinks
                 if item.is_symlink() and not item.exists():
                     continue
 
                 current_depth = depth + 1
-
                 if max_depth is not None and current_depth > max_depth:
                     continue
 
-                # Check if item matches criteria and depth constraints
-                if self._matches_criteria(
+                try:
+                    is_dir = item.is_dir()
+                except OSError:
+                    is_dir = False
+                is_symlink = item.is_symlink()
+
+                allow_descend = (
+                    recursive and is_dir and (follow_symlinks or not is_symlink)
+                )
+                if allow_descend:
+                    if max_depth is not None and current_depth >= max_depth:
+                        allow_descend = False
+                    elif fs_filter and not fs_filter.should_descend(
+                        item, directory, root_path=root_path
+                    ):
+                        allow_descend = False
+
+                matches = self._matches_criteria(
                     item,
                     file_pattern,
                     substrings,
@@ -211,26 +250,31 @@ class EnhancedFileFinder:
                     extensions,
                     file_types,
                     fs_filter,
-                ):
-                    meets_min_depth = True
-                    if min_depth is not None:
-                        meets_min_depth = current_depth >= max(min_depth, 0)
+                    root_path,
+                )
 
-                    if meets_min_depth and self._should_emit(item, include_dirs):
+                meets_min_depth = True
+                if min_depth is not None:
+                    meets_min_depth = current_depth >= max(min_depth, 0)
+
+                emitted = False
+                if matches:
+                    if is_dir:
+                        state.matched_dirs = True
+                    else:
+                        state.matched_files = True
+
+                    if meets_min_depth and self._should_emit(
+                        item, include_dirs, include_files
+                    ):
                         yield str(item)
+                        emitted = True
 
-                # Recurse into directories
-                if (
-                    recursive
-                    and item.is_dir()
-                    and (follow_symlinks or not item.is_symlink())
-                ):
-                    if max_depth is not None and current_depth >= max_depth:
-                        continue
-                    if fs_filter and not fs_filter.should_descend(item, directory):
-                        continue
-                    yield from self._search_directory(
+                child_state = None
+                if allow_descend:
+                    child_state = yield from self._search_directory(
                         item,
+                        root_path,
                         recursive,
                         file_pattern,
                         substrings,
@@ -239,18 +283,46 @@ class EnhancedFileFinder:
                         file_types,
                         fs_filter,
                         include_dirs,
+                        include_files,
                         follow_symlinks,
                         current_depth,
                         min_depth=min_depth,
                         max_depth=max_depth,
                     )
 
+                    state.matched_files = (
+                        state.matched_files or child_state.matched_files
+                    )
+                    state.matched_dirs = (
+                        state.matched_dirs or child_state.matched_dirs
+                    )
+
+                    if (
+                        is_dir
+                        and not emitted
+                        and include_dirs
+                        and not include_files
+                        and child_state.matched_files
+                        and meets_min_depth
+                    ):
+                        if self._should_emit(item, include_dirs, include_files):
+                            yield str(item)
+                            emitted = True
+                            state.matched_dirs = True
+
+                if is_dir and (matches or emitted):
+                    state.matched_dirs = True
+
+            return state
+
         except PermissionError:
             log_debug(f"Permission denied: {directory}")
             self.stats["permission_errors"] += 1
+            return state
         except Exception as e:
             log_debug(f"Error searching {directory}: {e}")
             self.stats["other_errors"] += 1
+            return state
 
     def _matches_criteria(
         self,
@@ -261,6 +333,7 @@ class EnhancedFileFinder:
         extensions: List[str],
         file_types: List[str],
         fs_filter: Optional[FileSystemFilter],
+        root_path: Path,
     ) -> bool:
         """Check if a path matches all specified criteria."""
         filename = path.name
@@ -293,9 +366,8 @@ class EnhancedFileFinder:
 
         # Advanced filter check
         if fs_filter:
-            # For fs_filter, we need a base path - use the path's parent
             base_path = path.parent
-            if not fs_filter.should_include(path, base_path):
+            if not fs_filter.should_include(path, base_path, root_path=root_path):
                 return False
 
         return True
@@ -604,10 +676,26 @@ def add_args(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Follow symbolic links during search",
     )
+    parser.set_defaults(include_dirs=True, include_files=True)
     parser.add_argument(
         "--include-dirs",
+        dest="include_dirs",
         action="store_true",
-        help="Include directories in search results",
+        help="Include directories in search results (default)",
+    )
+    parser.add_argument(
+        "--no-dirs",
+        "-nd",
+        dest="include_dirs",
+        action="store_false",
+        help="Exclude directories from search results",
+    )
+    parser.add_argument(
+        "--no-files",
+        "-nf",
+        dest="include_files",
+        action="store_false",
+        help="Exclude files from search results",
     )
 
     # Legacy search parameters (for backward compatibility)
@@ -622,9 +710,15 @@ def add_args(parser: argparse.ArgumentParser) -> None:
         "-s",
         action="append",
         default=[],
-        help="Substrings to match in filenames (can be repeated)",
+        help="Case-sensitive substrings that must appear in names (repeatable)",
     )
-    parser.add_argument("--regex", help="Regular expression pattern for filenames")
+    parser.add_argument(
+        "--regex",
+        help=(
+            "Python regular expression applied to names (use ^ $ for anchors; "
+            "supports . ^ $ * + ? [] () | {})"
+        ),
+    )
     parser.add_argument("--ext", help="Comma-separated list of file extensions")
     parser.add_argument("--type", help="Comma-separated list of file type categories")
 
@@ -782,7 +876,7 @@ Basic File Finding:
   fsFind.py . --recursive                  # Recursive search
   fsFind.py . --max-depth 2                # Include depth-2 entries, skip deeper levels
   fsFind.py . --min-depth 1                # Depth 0 = immediate children of the start dirs
-  fsFind.py /project --include-dirs         # Include directories in results
+  fsFind.py /project --no-files             # Show only directories
   fsFind.py . "*.py" --recursive           # Find Python files recursively
 
 Legacy Pattern Matching:
@@ -845,7 +939,9 @@ OVERVIEW:
 BASIC SEARCH OPTIONS:
     directories           Directories to search (default: current directory)
     -r, --recursive       Search subdirectories recursively
-    --include-dirs        Include directories in results (default: files only)
+    --include-dirs        Include directories in results (default behaviour)
+    --no-dirs, -nd        Exclude directories from the printed results
+    --no-files, -nf       Exclude files from the printed results
     --follow-symlinks     Follow symbolic links during traversal
     --max-depth N         Limit search to N levels below the starting points (depth N is included)
     --min-depth N         Only return results at depth N or deeper (depth 0 = children of the start dirs)
@@ -855,8 +951,8 @@ BASIC SEARCH OPTIONS:
 
 LEGACY PATTERN MATCHING:
     pattern               Glob pattern (e.g., "*.py", "*test*")
-    --substr TEXT         Substring to match in filenames (repeatable)
-    --regex PATTERN       Regular expression for filename matching
+    --substr TEXT         Case-sensitive substring match on names (repeatable)
+    --regex PATTERN       Python regular expression (supports . ^ $ * + ? [] () | {} and anchors)
     --ext EXTENSIONS      Comma-separated extensions (py,js,txt)
     --type TYPES          Comma-separated type categories (image,video,audio)
 
@@ -1048,6 +1144,7 @@ def process_find_pipeline(args):
                 file_types=file_types,
                 fs_filter=fs_filter,
                 include_dirs=args.include_dirs,
+                include_files=args.include_files,
                 follow_symlinks=args.follow_symlinks,
                 min_depth=args.min_depth,
                 max_depth=args.max_depth,

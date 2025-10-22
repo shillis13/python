@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.abspath('src'))
 sys.path.insert(0, os.path.abspath('src/file_utils'))
 
 from file_utils.lib_extensions import ExtensionInfo
+from file_utils.fsFilters import FileSystemFilter
 import dev_utils
 from dev_utils import lib_logging
 
@@ -94,10 +95,18 @@ def test_min_depth_cannot_exceed_max_depth():
         parse_args('--max-depth', '1', '--min-depth', '3')
 
 
-def test_follow_symlinks_and_include_dirs_options():
-    args = parse_args('--follow-symlinks', '--include-dirs')
+def test_output_flag_defaults_and_toggles():
+    args = parse_args('--follow-symlinks')
     assert args.follow_symlinks is True
     assert args.include_dirs is True
+    assert args.include_files is True
+
+    args = parse_args('--no-files')
+    assert args.include_files is False
+    assert args.include_dirs is True
+
+    args = parse_args('--no-dirs')
+    assert args.include_dirs is False
 
 
 def test_pattern_and_substring_options():
@@ -120,6 +129,74 @@ def test_pattern_argument_forwarded_to_finder(tmp_path):
     finder.assert_called_once()
     _, kwargs = finder.call_args
     assert kwargs['file_pattern'] == '*.py'
+    assert kwargs['include_dirs'] is True
+    assert kwargs['include_files'] is True
+
+
+def test_find_files_includes_dirs_by_default(tmp_path):
+    root = tmp_path / 'workspace'
+    package = root / 'pkg'
+    package.mkdir(parents=True)
+    (package / 'module.py').write_text('print("hi")')
+
+    finder = findFiles.EnhancedFileFinder()
+    results = {
+        Path(result).relative_to(root)
+        for result in finder.find_files([str(root)])
+    }
+
+    assert Path('pkg') in results
+    assert Path('pkg/module.py') in results
+
+
+def test_no_files_emits_matching_directories(tmp_path):
+    root = tmp_path / 'project'
+    matched = root / 'matched'
+    matched.mkdir(parents=True)
+    (matched / 'keep.py').write_text('print(42)')
+    skipped = root / 'skipped'
+    skipped.mkdir()
+    (skipped / 'ignore.txt').write_text('nope')
+
+    finder = findFiles.EnhancedFileFinder()
+    results = {
+        Path(result).relative_to(root)
+        for result in finder.find_files(
+            [str(root)],
+            file_pattern='*.py',
+            include_dirs=True,
+            include_files=False,
+        )
+    }
+
+    assert Path('matched') in results
+    assert Path('matched/keep.py') not in results
+    assert Path('skipped') not in results
+
+
+def test_dir_filters_apply_to_files(tmp_path):
+    root = tmp_path / 'repo'
+    src_dir = root / 'src'
+    src_dir.mkdir(parents=True)
+    docs_dir = root / 'docs'
+    docs_dir.mkdir()
+    (src_dir / 'keep.txt').write_text('keep')
+    (docs_dir / 'drop.txt').write_text('drop')
+
+    fs_filter = FileSystemFilter()
+    fs_filter.add_dir_pattern('src')
+
+    finder = findFiles.EnhancedFileFinder()
+    results = {
+        Path(result).relative_to(root)
+        for result in finder.find_files(
+            [str(root)],
+            fs_filter=fs_filter,
+            include_dirs=False,
+        )
+    }
+
+    assert results == {Path('src/keep.txt')}
 
 
 def test_regex_extension_and_type_options():
