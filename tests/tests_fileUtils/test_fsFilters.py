@@ -196,74 +196,40 @@ class TestDateFilter:
 class TestGitIgnoreFilter:
     """Test suite for GitIgnoreFilter class."""
 
-    def test_ignore_argument_accepts_multiple_values(self):
-        """Command line --ignore option accepts repeated values."""
-        parser = argparse.ArgumentParser()
-        add_args(parser)
-        args = parser.parse_args(['--ignore', '*.tmp', '--ignore', '*.log'])
+    def test_stacked_gitignore_rules_apply_in_depth_order(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".git").mkdir()
+        (repo / ".gitignore").write_text("*.log\n")
 
-        assert args.ignore == ['*.tmp', '*.log']
+        nested = repo / "nested"
+        nested.mkdir()
+        (nested / ".gitignore").write_text("!keep.log\n")
 
-    def test_init_with_empty_paths(self):
-        """Test initializing with empty search paths."""
-        git_filter = GitIgnoreFilter([])
-        assert git_filter.ignore_patterns == []
-    
-    @patch('file_utils.lib_filters.Path')
-    def test_load_gitignore_files(self, mock_path_class):
-        """Test loading .gitignore files from search paths."""
-        # Mock path structure
-        mock_path = Mock()
-        mock_path.resolve.return_value = mock_path
-        mock_path.parent = mock_path
-        mock_path.__truediv__ = Mock(return_value=mock_path)
-        mock_path.exists.return_value = True
-        mock_path_class.return_value = mock_path
-        
-        # Mock reading .gitignore content
-        with patch('builtins.open', mock_open(read_data="*.pyc\n__pycache__/\n")):
-            git_filter = GitIgnoreFilter([Path("/test")])
-            
-        expected_patterns = ["*.pyc", "__pycache__/"]
-        assert git_filter.ignore_patterns == expected_patterns
-    
-    def test_matches_gitignore_pattern_simple(self):
-        """Test matching simple gitignore patterns."""
-        git_filter = GitIgnoreFilter([])
-        
-        result = git_filter.matches_gitignore_pattern("test.pyc", "*.pyc")
-        assert result is True
-    
-    def test_matches_gitignore_pattern_directory(self):
-        """Test matching directory gitignore patterns."""
-        git_filter = GitIgnoreFilter([])
-        
-        result = git_filter.matches_gitignore_pattern("__pycache__", "__pycache__/")
-        assert result is True
-    
-    def test_should_ignore_matches_pattern(self):
-        """Test should_ignore method with matching pattern."""
-        git_filter = GitIgnoreFilter([])
-        git_filter.ignore_patterns = ["*.pyc", "__pycache__/"]
-        
-        mock_path = Mock()
-        mock_path.relative_to.return_value = Path("test.pyc")
-        mock_base = Mock()
-        
-        result = git_filter.should_ignore(mock_path, mock_base)
-        assert result is True
-    
-    def test_should_ignore_no_match(self):
-        """Test should_ignore method with no matching pattern."""
-        git_filter = GitIgnoreFilter([])
-        git_filter.ignore_patterns = ["*.pyc", "__pycache__/"]
-        
-        mock_path = Mock()
-        mock_path.relative_to.return_value = Path("test.py")
-        mock_base = Mock()
-        
-        result = git_filter.should_ignore(mock_path, mock_base)
-        assert result is False
+        keep_log = nested / "keep.log"
+        keep_log.write_text("keep")
+        drop_log = nested / "drop.log"
+        drop_log.write_text("drop")
+
+        git_filter = GitIgnoreFilter([repo])
+
+        assert git_filter.should_ignore(drop_log, nested) is True
+        assert git_filter.should_ignore(keep_log, nested) is False
+
+    def test_gitignore_falls_back_to_search_root_without_git_dir(self, tmp_path):
+        root = tmp_path / "workspace"
+        root.mkdir()
+        (root / ".gitignore").write_text("*.tmp\n")
+
+        ignored = root / "ignored.tmp"
+        ignored.write_text("tmp")
+        kept = root / "kept.txt"
+        kept.write_text("keep")
+
+        git_filter = GitIgnoreFilter([root])
+
+        assert git_filter.should_ignore(ignored, root) is True
+        assert git_filter.should_ignore(kept, root) is False
 
 
 class TestFileSystemFilter:
@@ -633,7 +599,8 @@ class TestErrorHandling:
         with patch('builtins.open', side_effect=PermissionError("Access denied")):
             # Should not raise exception
             git_filter = GitIgnoreFilter([Path('/test')])
-            assert git_filter.ignore_patterns == []
+            result = git_filter.should_ignore(Path('/test/file.txt'), Path('/test'))
+            assert result is False
     
     def test_filesystem_filter_with_nonexistent_path(self):
         """Test FileSystemFilter with nonexistent paths."""

@@ -29,6 +29,7 @@ import re
 import stat
 import sys
 import yaml
+from dataclasses import dataclass
 from datetime import datetime as _datetime, timedelta
 
 # Exposed for testing; allows patching via ``file_utils.fsFilters.datetime``
@@ -188,88 +189,180 @@ class DateFilter:
         return date_filter
 
 
+@dataclass(frozen=True)
+class _GitIgnoreRule:
+    """Representation of a single ``.gitignore`` rule."""
+
+    pattern: str
+    negated: bool
+    directory_only: bool
+    anchored: bool
+    base_dir: Path
+
+    def matches(self, path: Path) -> bool:
+        """Return ``True`` if ``path`` is matched by this rule."""
+
+        try:
+            relative_path = path.resolve().relative_to(self.base_dir.resolve())
+        except (ValueError, OSError):
+            return False
+
+        rel_posix = relative_path.as_posix()
+
+        if self.directory_only:
+            if self.anchored or "/" in self.pattern:
+                pattern = self.pattern.lstrip("/")
+                candidates = []
+                if path.is_dir():
+                    candidates.append(relative_path)
+                    candidates.extend(relative_path.parents)
+                else:
+                    candidates.extend(relative_path.parents)
+
+                for candidate_path in candidates:
+                    candidate_str = candidate_path.as_posix()
+                    if candidate_str in {"", "."}:
+                        continue
+                    if fnmatch.fnmatch(candidate_str, pattern):
+                        return True
+                return False
+
+            if path.is_dir():
+                components = relative_path.parts
+            else:
+                components = relative_path.parts[:-1]
+            return any(fnmatch.fnmatch(component, self.pattern) for component in components)
+
+        # Leading slash anchors the pattern to the directory containing the
+        # ``.gitignore`` file.
+        candidate = rel_posix
+
+        if self.anchored or "/" in self.pattern:
+            return fnmatch.fnmatch(candidate, self.pattern.lstrip("/"))
+
+        # Patterns without slashes match any path component.
+        parts = candidate.split("/")
+        return any(fnmatch.fnmatch(part, self.pattern) for part in parts)
+
+
 class GitIgnoreFilter:
     """Handles .gitignore file parsing and filtering."""
 
     def __init__(self, search_paths: List[Path]):
-        self.ignore_patterns = []
-        self.load_gitignore_files(search_paths)
+        self.search_paths = [Path(p).resolve() for p in search_paths]
+        self.repo_root = self._discover_repo_root(self.search_paths)
+        if self.repo_root is None and self.search_paths:
+            # Fallback to the shallowest search path when no repository root
+            # could be identified.  This mirrors the behaviour expected by the
+            # tests which build ad-hoc directory trees.
+            self.repo_root = min(self.search_paths, key=lambda p: len(p.parts))
+        self._rules_cache: Dict[Path, List[_GitIgnoreRule]] = {}
 
-    def load_gitignore_files(self, search_paths: List[Path]):
-        """Load .gitignore files from search paths."""
-        gitignore_files = set()
-
-        # ``Path`` is imported here so tests can patch
-        # ``file_utils.lib_filters.Path`` and have that stub picked up.
-        try:  # pragma: no cover - defensive import
-            from .lib_filters import Path as _Path
-        except Exception:  # pragma: no cover
-            from pathlib import Path as _Path
+    @staticmethod
+    def _discover_repo_root(search_paths: List[Path]) -> Optional[Path]:
+        """Return the repository root containing ``.git`` if available."""
 
         for path in search_paths:
-            current = _Path(path).resolve()
-
-            # Walk up the tree, examining the current directory before
-            # deciding whether we've reached the filesystem root.  This
-            # ordering allows tests to use mocked ``Path`` objects whose
-            # ``parent`` attribute may point to themselves.
+            current = path
             while True:
-                gitignore_path = current / ".gitignore"
-                if gitignore_path.exists():
-                    gitignore_files.add(gitignore_path)
+                git_dir = current / ".git"
+                if git_dir.exists():
+                    return current
                 parent = current.parent
                 if parent == current:
                     break
                 current = parent
+        return None
 
-        for gitignore_file in gitignore_files:
-            self.load_gitignore_file(gitignore_file)
+    def _load_rules_for_directory(self, directory: Path) -> List[_GitIgnoreRule]:
+        directory = directory.resolve()
+        if directory in self._rules_cache:
+            return self._rules_cache[directory]
 
-    def load_gitignore_file(self, gitignore_path: Path):
-        """Load patterns from a single .gitignore file."""
+        rules: List[_GitIgnoreRule] = []
+        gitignore_path = directory / ".gitignore"
+        if gitignore_path.is_file():
+            try:
+                with open(gitignore_path, "r", encoding="utf-8") as handle:
+                    for line in handle:
+                        pattern = line.rstrip("\n")
+                        if not pattern or pattern.lstrip().startswith("#"):
+                            continue
+
+                        escaped = pattern.replace("\\#", "#")
+                        escaped = escaped.replace("\\!", "!")
+                        stripped = escaped.strip()
+                        if not stripped:
+                            continue
+
+                        negated = stripped.startswith("!")
+                        if negated:
+                            stripped = stripped[1:]
+
+                        directory_only = stripped.endswith("/")
+                        if directory_only:
+                            stripped = stripped[:-1]
+
+                        anchored = stripped.startswith("/")
+                        rule_pattern = stripped
+                        if not rule_pattern:
+                            continue
+                        rules.append(
+                            _GitIgnoreRule(
+                                pattern=rule_pattern,
+                                negated=negated,
+                                directory_only=directory_only,
+                                anchored=anchored,
+                                base_dir=directory,
+                            )
+                        )
+            except (OSError, UnicodeDecodeError) as exc:
+                log_debug(f"Could not read {gitignore_path}: {exc}")
+
+        self._rules_cache[directory] = rules
+        return rules
+
+    def _collect_rules_for_path(self, path: Path) -> List[_GitIgnoreRule]:
+        """Return stacked rules from the repo root to ``path``."""
+
+        if not self.repo_root:
+            return []
+
         try:
-            with open(gitignore_path, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if line and not line.startswith("#"):
-                        self.ignore_patterns.append(line)
-        except (OSError, UnicodeDecodeError) as e:
-            log_debug(f"Could not read {gitignore_path}: {e}")
+            resolved = path.resolve()
+        except OSError:
+            resolved = path
 
-    def should_ignore(self, path: Path, base_path: Path) -> bool:
-        """Check if path should be ignored based on gitignore patterns."""
-        try:
-            rel_path = path.relative_to(base_path)
-            path_str = str(rel_path).replace("\\", "/")  # Use forward slashes
+        directories: List[Path] = []
+        current = resolved if resolved.is_dir() else resolved.parent
 
-            for pattern in self.ignore_patterns:
-                if self.matches_gitignore_pattern(path_str, pattern):
-                    return True
+        while True:
+            directories.append(current)
+            if current == self.repo_root:
+                break
+            parent = current.parent
+            if parent == current:
+                break
+            current = parent
+
+        rules: List[_GitIgnoreRule] = []
+        for directory in reversed(directories):
+            rules.extend(self._load_rules_for_directory(directory))
+        return rules
+
+    def should_ignore(self, path: Path, base_path: Path | None = None) -> bool:
+        """Return ``True`` if ``path`` is excluded by stacked rules."""
+
+        rules = self._collect_rules_for_path(path)
+        if not rules:
             return False
-        except ValueError:
-            return False  # Path not relative to base
 
-    def matches_gitignore_pattern(self, path: str, pattern: str) -> bool:
-        """Check if path matches gitignore pattern."""
-        # Handle directory patterns ending with /
-        if pattern.endswith("/"):
-            pattern = pattern[:-1]
-            # Only match directories
-            return fnmatch.fnmatch(path, pattern) or fnmatch.fnmatch(
-                path, pattern + "/*"
-            )
+        ignored: bool | None = None
+        for rule in rules:
+            if rule.matches(path):
+                ignored = not rule.negated
 
-        # Handle patterns starting with /
-        if pattern.startswith("/"):
-            pattern = pattern[1:]
-            return fnmatch.fnmatch(path, pattern)
-
-        # Handle wildcards and directory matching
-        return (
-            fnmatch.fnmatch(path, pattern)
-            or fnmatch.fnmatch(path, "*/" + pattern)
-            or any(fnmatch.fnmatch(part, pattern) for part in path.split("/"))
-        )
+        return bool(ignored)
 
 
 class FileSystemFilter:
@@ -468,6 +561,32 @@ class FileSystemFilter:
 
         file_ext = path.suffix.lower()
         return file_ext in self.extension_filters
+
+    def has_file_criteria(self) -> bool:
+        """Return ``True`` when file-targeted rules are configured."""
+
+        return any(
+            (
+                self.size_filters,
+                self.date_filters,
+                self.file_patterns,
+                self.file_ignore_patterns,
+                self.type_filters,
+                self.extension_filters,
+            )
+        )
+
+    def has_dir_criteria(self) -> bool:
+        """Return ``True`` when directory-targeted rules are configured."""
+
+        return any(
+            (
+                self.dir_patterns,
+                self.dir_ignore_patterns,
+                self.skip_empty,
+                self.show_empty,
+            )
+        )
 
     def should_include(
         self,

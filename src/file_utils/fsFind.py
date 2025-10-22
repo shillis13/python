@@ -91,10 +91,11 @@ class EnhancedFileFinder:
         extensions: Optional[List[str]] = None,
         file_types: Optional[List[str]] = None,
         fs_filter: Optional[FileSystemFilter] = None,
-        include_dirs: bool = False,
+        include_dirs: bool = True,
         follow_symlinks: bool = False,
         min_depth: Optional[int] = None,
         max_depth: Optional[int] = None,
+        include_files: bool = True,
     ) -> Iterator[str]:
         """
         Enhanced file finder with filtering capabilities.
@@ -108,7 +109,8 @@ class EnhancedFileFinder:
             extensions: List of file extensions
             file_types: List of file type categories
             fs_filter: FileSystemFilter instance for advanced filtering
-            include_dirs: Whether to include directories in results
+            include_dirs: Whether to include directories in traversal results
+            include_files: Whether to include files in traversal results
             follow_symlinks: Whether to follow symbolic links
 
         Yields:
@@ -149,13 +151,16 @@ class EnhancedFileFinder:
                 file_types,
                 fs_filter,
                 include_dirs,
+                include_files,
                 follow_symlinks,
                 0,
                 min_depth=min_depth,
                 max_depth=max_depth,
             )
 
-    def _should_emit(self, item: Path, include_dirs: bool) -> bool:
+    def _should_emit(
+        self, item: Path, include_dirs: bool, include_files: bool
+    ) -> bool:
         """Update statistics and determine if a matched item should be emitted."""
 
         if item.is_dir():
@@ -169,7 +174,7 @@ class EnhancedFileFinder:
         else:
             self.stats["files_found"] += 1
 
-        return True
+        return include_files
 
     def _search_directory(
         self,
@@ -182,6 +187,7 @@ class EnhancedFileFinder:
         file_types: List[str],
         fs_filter: Optional[FileSystemFilter],
         include_dirs: bool,
+        include_files: bool,
         follow_symlinks: bool,
         depth: int,
         *,
@@ -216,7 +222,9 @@ class EnhancedFileFinder:
                     if min_depth is not None:
                         meets_min_depth = current_depth >= max(min_depth, 0)
 
-                    if meets_min_depth and self._should_emit(item, include_dirs):
+                    if meets_min_depth and self._should_emit(
+                        item, include_dirs, include_files
+                    ):
                         yield str(item)
 
                 # Recurse into directories
@@ -239,6 +247,7 @@ class EnhancedFileFinder:
                         file_types,
                         fs_filter,
                         include_dirs,
+                        include_files,
                         follow_symlinks,
                         current_depth,
                         min_depth=min_depth,
@@ -607,7 +616,19 @@ def add_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--include-dirs",
         action="store_true",
-        help="Include directories in search results",
+        help="Legacy alias; directories are included by default",
+    )
+    parser.add_argument(
+        "--no-dirs",
+        "-nd",
+        action="store_true",
+        help="Suppress directory output (filters still evaluate)",
+    )
+    parser.add_argument(
+        "--no-files",
+        "-nf",
+        action="store_true",
+        help="Suppress file output (filters still evaluate)",
     )
 
     # Legacy search parameters (for backward compatibility)
@@ -615,16 +636,24 @@ def add_args(parser: argparse.ArgumentParser) -> None:
         "pattern",
         nargs="?",
         default=None,
-        help='Glob pattern to search for (e.g., "*lib*")',
+        help=(
+            'Shell-style glob that must match the entire name (e.g., "*lib*")'
+        ),
     )
     parser.add_argument(
         "--substr",
         "-s",
         action="append",
         default=[],
-        help="Substrings to match in filenames (can be repeated)",
+        help="Substring match against the name (repeatable)",
     )
-    parser.add_argument("--regex", help="Regular expression pattern for filenames")
+    parser.add_argument(
+        "--regex",
+        help=(
+            "Python regular expression for names. Anchor with ^ and $ when you "
+            "need whole-name matches. Supports ., ^, $, *, +, ?, [], (), |, {}"
+        ),
+    )
     parser.add_argument("--ext", help="Comma-separated list of file extensions")
     parser.add_argument("--type", help="Comma-separated list of file type categories")
 
@@ -651,7 +680,7 @@ def add_args(parser: argparse.ArgumentParser) -> None:
         dest="file_pattern_filter",
         action="append",
         default=[],
-        help="File name patterns to include (can be repeated)",
+        help="Glob patterns matching entire file names (repeatable)",
     )
     parser.add_argument(
         "--dir-pattern",
@@ -659,13 +688,13 @@ def add_args(parser: argparse.ArgumentParser) -> None:
         dest="dir_pattern_filter",
         action="append",
         default=[],
-        help="Directory name patterns to include (can be repeated)",
+        help="Glob patterns matching entire directory names (repeatable)",
     )
     parser.add_argument(
         "--pattern-filter",
         "-pf",
         dest="pattern_filter",
-        help="Pattern for both files and directories",
+        help="Glob applied to entire file and directory names",
     )
     parser.add_argument(
         "--pattern-ignore",
@@ -680,14 +709,14 @@ def add_args(parser: argparse.ArgumentParser) -> None:
         "-fi",
         action="append",
         default=[],
-        help="File patterns to ignore (can be repeated)",
+        help="Glob patterns to ignore entire file names (repeatable)",
     )
     parser.add_argument(
         "--dir-ignore",
         "-di",
         action="append",
         default=[],
-        help="Directory patterns to ignore (can be repeated)",
+        help="Glob patterns to ignore entire directory names (repeatable)",
     )
     parser.add_argument(
         "--ignore-filter",
@@ -778,11 +807,11 @@ def show_examples():
 Usage Examples for fsFind.py:
 
 Basic File Finding:
-  fsFind.py                                 # Find all items in current directory
+  fsFind.py                                 # Find all files and directories
   fsFind.py . --recursive                  # Recursive search
   fsFind.py . --max-depth 2                # Include depth-2 entries, skip deeper levels
   fsFind.py . --min-depth 1                # Depth 0 = immediate children of the start dirs
-  fsFind.py /project --include-dirs         # Include directories in results
+  fsFind.py /project --no-files            # Directories only (still run file filters)
   fsFind.py . "*.py" --recursive           # Find Python files recursively
 
 Legacy Pattern Matching:
@@ -845,7 +874,9 @@ OVERVIEW:
 BASIC SEARCH OPTIONS:
     directories           Directories to search (default: current directory)
     -r, --recursive       Search subdirectories recursively
-    --include-dirs        Include directories in results (default: files only)
+    --no-files, -nf       Omit files from output (filters still evaluate)
+    --no-dirs, -nd        Omit directories from output (filters still evaluate)
+    --include-dirs        Legacy alias to force directories on (default includes both)
     --follow-symlinks     Follow symbolic links during traversal
     --max-depth N         Limit search to N levels below the starting points (depth N is included)
     --min-depth N         Only return results at depth N or deeper (depth 0 = children of the start dirs)
@@ -854,9 +885,9 @@ BASIC SEARCH OPTIONS:
     immediate children.
 
 LEGACY PATTERN MATCHING:
-    pattern               Glob pattern (e.g., "*.py", "*test*")
-    --substr TEXT         Substring to match in filenames (repeatable)
-    --regex PATTERN       Regular expression for filename matching
+    pattern               Shell glob applied to the entire name (e.g., "*.py")
+    --substr TEXT         Substring match against the name (repeatable)
+    --regex PATTERN       Python regex for names; anchor with ^ and $ for full matches
     --ext EXTENSIONS      Comma-separated extensions (py,js,txt)
     --type TYPES          Comma-separated type categories (image,video,audio)
 
@@ -875,11 +906,11 @@ ENHANCED FILTERING (via fsFilters.py):
     --created-before DATE Created before date
     
     Pattern Filtering:
-    --file-pattern PATTERN    File name patterns (repeatable)
-    --dir-pattern PATTERN     Directory name patterns (repeatable)
-    --pattern-filter PATTERN  Pattern for both files and directories
-    --file-ignore PATTERN     File patterns to ignore (repeatable)
-    --dir-ignore PATTERN      Directory patterns to ignore (repeatable)
+    --file-pattern PATTERN    Glob matching entire file names (repeatable)
+    --dir-pattern PATTERN     Glob matching entire directory names (repeatable)
+    --pattern-filter PATTERN  Glob applied to both file and directory names
+    --file-ignore PATTERN     Glob for file names to ignore (repeatable)
+    --dir-ignore PATTERN      Glob for directory names to ignore (repeatable)
     --ignore-filter PATTERN   Ignore pattern for both files and directories
     
     Type and Extension Filtering:
@@ -1035,6 +1066,11 @@ def process_find_pipeline(args):
     extensions = args.ext.split(",") if args.ext else []
     file_types = args.type.split(",") if args.type else []
 
+    include_files = not getattr(args, "no_files", False)
+    include_dirs = not getattr(args, "no_dirs", False)
+    if getattr(args, "include_dirs", False):
+        include_dirs = True
+
     # Perform search
     try:
         results = list(
@@ -1047,14 +1083,68 @@ def process_find_pipeline(args):
                 extensions=extensions,
                 file_types=file_types,
                 fs_filter=fs_filter,
-                include_dirs=args.include_dirs,
+                include_dirs=True,
+                include_files=True,
                 follow_symlinks=args.follow_symlinks,
                 min_depth=args.min_depth,
                 max_depth=args.max_depth,
             )
         )
 
-        formatted_results = [_format_result(Path(r), roots) for r in results]
+        path_info = []
+        for raw in results:
+            path_obj = Path(raw)
+            try:
+                resolved = path_obj.expanduser().resolve()
+            except Exception:
+                resolved = path_obj
+            try:
+                is_dir = path_obj.is_dir()
+            except OSError:
+                is_dir = False
+            path_info.append((path_obj, resolved, is_dir))
+
+        dir_match_set = {resolved for _, resolved, is_dir in path_info if is_dir}
+        root_set = {Path(d).resolve() for d in search_dirs}
+
+        legacy_file_filters_active = bool(extensions or file_types)
+        advanced_file_filters_active = bool(
+            fs_filter and fs_filter.has_file_criteria()
+        )
+        file_filters_active = legacy_file_filters_active or advanced_file_filters_active
+        dir_filters_active = bool(fs_filter and fs_filter.has_dir_criteria())
+
+        directories_with_file_matches: Set[Path] = set()
+        if file_filters_active:
+            for path_obj, resolved, is_dir in path_info:
+                if is_dir:
+                    continue
+                parent_chain = resolved.parents
+                for parent in parent_chain:
+                    directories_with_file_matches.add(parent)
+                    if parent in root_set:
+                        break
+
+        final_paths: List[Path] = []
+        for original, resolved, is_dir in path_info:
+            if is_dir:
+                if not include_dirs:
+                    continue
+                if (
+                    not include_files
+                    and file_filters_active
+                    and resolved not in directories_with_file_matches
+                ):
+                    continue
+            else:
+                if not include_files:
+                    continue
+                if not include_dirs and dir_filters_active:
+                    if not any(parent in dir_match_set for parent in resolved.parents):
+                        continue
+            final_paths.append(original)
+
+        formatted_results = [_format_result(path, roots) for path in final_paths]
 
         for result in formatted_results:
             print(result)
