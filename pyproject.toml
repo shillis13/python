@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gdir"
+version = "0.1.0"
+description = "Keyword-driven directory jumper"
+readme = "README.md"
+authors = [{name = "gdir"}]
+requires-python = ">=3.9"
+dependencies = []
+
+[project.scripts]
+gdir = "gdir.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
