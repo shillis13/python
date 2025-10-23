@@ -22,6 +22,9 @@ def parse_markdown_chat(file_path):
         return content, []
 
     metadata = {}
+    original_content = content
+    
+    # Extract YAML front matter if present
     if content.startswith("---"):
         parts = content.split("---", 2)
         if len(parts) >= 3:
@@ -29,20 +32,102 @@ def parse_markdown_chat(file_path):
             if "error" in metadata:
                 return {"error": "YAML front matter could not be parsed."}, []
             content = parts[2]
+    
+    # Extract metadata from content headers (for various export formats)
+    lines = content.split('\n')
+    for i, line in enumerate(lines[:20]):  # Check first 20 lines for metadata
+        if line.startswith('# ') and i == 0:
+            # Extract title from first header
+            metadata['title'] = line[2:].strip()
+        elif 'Exported on' in line:
+            # SaveMyChatbot format metadata
+            match = re.search(r'Exported on (\d+/\d+/\d+) at (\d+:\d+:\d+)', line)
+            if match:
+                metadata['export_date'] = match.group(1)
+                metadata['export_time'] = match.group(2)
+        elif 'Session ID:' in line:
+            # Claude CLI format metadata
+            metadata['session_id'] = line.split('Session ID:', 1)[1].strip()
+        elif 'Date:' in line and 'session_id' in metadata:
+            # Claude CLI format date
+            metadata['date'] = line.split('Date:', 1)[1].strip()
+        elif line.startswith('**User:**'):
+            # Prompt/Response format metadata
+            metadata['user'] = line.split('**User:**', 1)[1].strip()
+        elif line.startswith('**Created:**'):
+            metadata['created'] = line.split('**Created:**', 1)[1].strip()
+        elif line.startswith('**Updated:**'):
+            metadata['updated'] = line.split('**Updated:**', 1)[1].strip()
+        elif line.startswith('**Exported:**'):
+            metadata['exported'] = line.split('**Exported:**', 1)[1].strip()
+        elif line.startswith('**Link:**'):
+            # Extract URL from markdown link
+            link_match = re.search(r'\[([^\]]+)\]\(([^)]+)\)', line)
+            if link_match:
+                metadata['link'] = link_match.group(2)
 
+    messages = []
+    
+    # Try original format first (role: content)
     chat_pattern = re.compile(
         r"^\s*(user|assistant|system)\s*:\s*(.*)", re.IGNORECASE | re.MULTILINE
     )
     matches = chat_pattern.findall(content)
+    
+    if matches:
+        messages = [
+            {"role": role.lower(), "content": text.strip()} for role, text in matches
+        ]
+    else:
+        # Try header-based formats
+        # Split content into sections based on headers
+        sections = re.split(r'^#{1,2}\s+', content, flags=re.MULTILINE)[1:]  # Skip empty first element
+        
+        current_role = None
+        current_content = []
+        
+        for section in sections:
+            lines = section.strip().split('\n', 1)
+            if not lines:
+                continue
+                
+            header = lines[0].strip()
+            content_text = lines[1].strip() if len(lines) > 1 else ""
+            
+            # Determine role from header
+            role = None
+            header_lower = header.lower()
+            
+            # Check for various role indicators
+            if any(indicator in header_lower for indicator in ['user', '👤', 'prompt']):
+                role = 'user'
+            elif any(indicator in header_lower for indicator in ['claude', 'assistant', '🤖', 'response']):
+                role = 'assistant'
+            elif 'system' in header_lower:
+                role = 'system'
+            elif header == 'USER':
+                role = 'user'
+            elif header == 'ASSISTANT':
+                role = 'assistant'
+            elif header == 'Prompt:':
+                role = 'user'
+            elif header == 'Response:':
+                role = 'assistant'
+            elif 'thoughts' in header_lower:
+                # Skip internal thoughts sections
+                continue
+                
+            if role:
+                # Remove horizontal rules from content
+                content_text = re.sub(r'^---+\s*$', '', content_text, flags=re.MULTILINE).strip()
+                if content_text:
+                    messages.append({"role": role, "content": content_text})
 
-    if not matches:
+    if not messages:
         return {
-            "error": f"No valid chat messages found in '{file_path}'. The file must contain 'role: content' pairs."
+            "error": f"No valid chat messages found in '{file_path}'. Unable to parse chat format."
         }, []
 
-    messages = [
-        {"role": role.lower(), "content": text.strip()} for role, text in matches
-    ]
     return metadata, messages
 
 

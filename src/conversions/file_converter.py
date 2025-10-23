@@ -75,11 +75,15 @@ def build_parser() -> argparse.ArgumentParser:
         """
         Examples:
           - Automatically detect the type and convert to HTML:
-                file_converter.py transcript.md -f html
+                %(prog)s transcript.md -f html
+          - Convert multiple files to HTML:
+                %(prog)s file1.md file2.md file3.md -f html
+          - Convert all markdown files in current directory:
+                %(prog)s *.md -f html
           - Force document mode and emit JSON:
-                file_converter.py paper.md --input-type doc --format json
+                %(prog)s paper.md --input-type doc --format json
           - Analyze a chat export without writing a file:
-                file_converter.py support.json --input-type chat --analyze
+                %(prog)s support.json --input-type chat --analyze
         """
     )
 
@@ -90,7 +94,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     # --- Universal Arguments ---
-    parser.add_argument("input_file", help="Path to the input file to convert.")
+    parser.add_argument("input_files", nargs="+", help="Path(s) to the input file(s) to convert.")
     parser.add_argument(
         "-o", "--output", help="Path for the output file. Defaults to <input>.<format>."
     )
@@ -128,6 +132,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Disable the Table of Contents in HTML output.",
     )
 
+    parser.add_argument(
+        "--version",
+        action="version",
+        version="%(prog)s 6.0",
+        help="Show version information and exit.",
+    )
+
     return parser
 
 
@@ -151,62 +162,93 @@ The main dispatcher function.
 
 def main():
     parser = build_parser()
+    
+    # If no arguments provided, show help
+    if len(sys.argv) == 1:
+        parser.print_help()
+        sys.exit(0)
+    
     args = parser.parse_args()
 
-    input_path = os.path.expanduser(args.input_file)
-    if not os.path.exists(input_path):
-        print(f"Error: Input file not found at '{args.input_file}'", file=sys.stderr)
-        sys.exit(1)
+    # Process multiple input files
+    all_results = []
+    
+    for input_file in args.input_files:
+        input_path = os.path.expanduser(input_file)
+        if not os.path.exists(input_path):
+            print(f"Error: Input file not found at '{input_file}'", file=sys.stderr)
+            sys.exit(1)
 
-    target, message = _determine_input_type(input_path, args.input_type)
-    print(message)
+        target, message = _determine_input_type(input_path, args.input_type)
+        if len(args.input_files) > 1:
+            print(f"{input_file}: {message}")
+        else:
+            print(message)
 
-    output_format = _normalize_format(args.format)
-    requires_output = not (target == "chat" and args.analyze)
+        output_format = _normalize_format(args.format)
+        requires_output = not (target == "chat" and args.analyze)
 
-    if requires_output:
-        if args.output:
-            base_out, out_ext = _safe_splitext(args.output)
-            if not args.format and out_ext:
-                output_format = out_ext or output_format
-            elif args.format and out_ext and out_ext != output_format:
+        # Create a copy of args for this specific file
+        file_args = argparse.Namespace(**vars(args))
+        file_args.input_file = input_file  # Set for backward compatibility
+        
+        if requires_output:
+            if args.output and len(args.input_files) == 1:
+                base_out, out_ext = _safe_splitext(args.output)
+                if not args.format and out_ext:
+                    output_format = out_ext or output_format
+                elif args.format and out_ext and out_ext != output_format:
+                    print(
+                        f"Warning: Output extension '.{out_ext}' differs from requested format '{output_format}'.",
+                        file=sys.stderr,
+                    )
+                    file_args.output = f"{base_out}.{output_format}"
+                else:
+                    file_args.output = args.output
+            elif args.output and len(args.input_files) > 1:
+                if input_file == args.input_files[0]:  # Only warn once
+                    print(
+                        "Warning: --output ignored when processing multiple files. Output files will be named automatically.",
+                        file=sys.stderr,
+                    )
+                base_name, _ = _safe_splitext(input_path)
+                file_args.output = f"{base_name}.{output_format}"
+            else:
+                base_name, _ = _safe_splitext(input_path)
+                file_args.output = f"{base_name}.{output_format}"
+
+            if os.path.exists(file_args.output) and not args.force:
                 print(
-                    f"Warning: Output extension '.{out_ext}' differs from requested format '{output_format}'.",
+                    f"Error: Output file '{file_args.output}' already exists. Use --force to overwrite.",
                     file=sys.stderr,
                 )
-                args.output = f"{base_out}.{output_format}"
+                sys.exit(1)
         else:
-            base_name, _ = _safe_splitext(input_path)
-            args.output = f"{base_name}.{output_format}"
+            file_args.output = file_args.output or ""
 
-        if os.path.exists(args.output) and not args.force:
-            print(
-                f"Error: Output file '{args.output}' already exists. Use --force to overwrite.",
-                file=sys.stderr,
-            )
+        file_args.format = output_format
+
+        try:
+            if target == "chat":
+                result_message = run_chat_conversion(file_args)
+            else:
+                result_message = run_doc_conversion(file_args)
+
+            if result_message:
+                all_results.append(result_message)
+        except (ChatConversionError, DocConversionError) as exc:
+            print(f"Error processing {input_file}: {exc}", file=sys.stderr)
+            hint = getattr(exc, "hint", None)
+            if hint:
+                print(f"Hint: {hint}", file=sys.stderr)
             sys.exit(1)
-    else:
-        args.output = args.output or ""
-
-    args.format = output_format
-
-    try:
-        if target == "chat":
-            result_message = run_chat_conversion(args)
-        else:
-            result_message = run_doc_conversion(args)
-
-        if result_message:
-            print(result_message)
-    except (ChatConversionError, DocConversionError) as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        hint = getattr(exc, "hint", None)
-        if hint:
-            print(f"Hint: {hint}", file=sys.stderr)
-        sys.exit(1)
-    except Exception as exc:  # pragma: no cover - defensive
-        print(f"Unexpected error: {exc}", file=sys.stderr)
-        sys.exit(1)
+        except Exception as exc:  # pragma: no cover - defensive
+            print(f"Unexpected error processing {input_file}: {exc}", file=sys.stderr)
+            sys.exit(1)
+    
+    # Print all results
+    for result in all_results:
+        print(result)
 
 
 if __name__ == "__main__":

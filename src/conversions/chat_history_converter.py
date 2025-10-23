@@ -64,82 +64,102 @@ h1 { text-align: center; color: #1a1a1a; font-size: 2em; margin-bottom: 20px; pa
 def run_chat_conversion(args):
     """Execute the chat conversion and return a user-facing status message."""
 
-    input_path = os.path.expanduser(args.input_file)
-    if not os.path.exists(input_path):
-        raise ConversionError(
-            f"Input file not found: {args.input_file}",
-            hint="Verify the path or use an absolute location.",
-        )
+    # Handle multiple input files
+    if hasattr(args, 'input_files'):
+        input_files = args.input_files
+    else:
+        # Backwards compatibility for single input_file
+        input_files = [args.input_file]
 
-    _, input_ext = _safe_splitext(input_path)
-    if input_ext == "yaml":
-        input_ext = "yml"
+    results = []
+    
+    for input_file in input_files:
+        input_path = os.path.expanduser(input_file)
+        if not os.path.exists(input_path):
+            raise ConversionError(
+                f"Input file not found: {input_file}",
+                hint="Verify the path or use an absolute location.",
+            )
 
-    try:
-        metadata: Dict[str, Any]
-        messages: Iterable[Dict[str, Any]]
-        if input_ext == "md":
-            metadata, messages = converter.parse_markdown_chat(input_path)
-        elif input_ext in {"json", "yml"}:
-            content = utils.read_file_content(input_path)
-            if isinstance(content, dict) and "error" in content:
-                raise ConversionError(content["error"])
+        _, input_ext = _safe_splitext(input_path)
+        if input_ext == "yaml":
+            input_ext = "yml"
 
-            loader = utils.load_json_from_string if input_ext == "json" else utils.load_yaml_from_string
-            data = loader(content)  # type: ignore[arg-type]
-            if isinstance(data, dict) and "error" in data:
-                raise ConversionError(data["error"], hint="Double-check the source formatting.")
+        try:
+            metadata: Dict[str, Any]
+            messages: Iterable[Dict[str, Any]]
+            if input_ext == "md":
+                metadata, messages = converter.parse_markdown_chat(input_path)
+            elif input_ext in {"json", "yml"}:
+                content = utils.read_file_content(input_path)
+                if isinstance(content, dict) and "error" in content:
+                    raise ConversionError(content["error"])
 
-            if not isinstance(data, dict):
+                loader = utils.load_json_from_string if input_ext == "json" else utils.load_yaml_from_string
+                data = loader(content)  # type: ignore[arg-type]
+                if isinstance(data, dict) and "error" in data:
+                    raise ConversionError(data["error"], hint="Double-check the source formatting.")
+
+                if not isinstance(data, dict):
+                    raise ConversionError(
+                        "The chat file did not contain the expected mapping structure.",
+                        hint="Ensure the file has top-level 'metadata' and 'messages' keys.",
+                    )
+
+                metadata = data.get("metadata", {})
+                messages = data.get("messages", [])
+            else:
                 raise ConversionError(
-                    "The chat file did not contain the expected mapping structure.",
-                    hint="Ensure the file has top-level 'metadata' and 'messages' keys.",
+                    f"Unsupported chat file format: {input_ext or 'unknown'}",
+                    hint="Use .md, .json, or .yml chat export files.",
                 )
+        except ConversionError:
+            raise
+        except Exception as exc:  # pragma: no cover - defensive
+            raise ConversionError(f"Unexpected failure while parsing chat file: {exc}") from exc
 
-            metadata = data.get("metadata", {})
-            messages = data.get("messages", [])
+        if isinstance(metadata, dict) and "error" in metadata:
+            raise ConversionError(metadata["error"])
+
+        messages_list = list(messages)
+
+        if args.analyze:
+            analysis = converter.analyze_chat(messages_list)
+            lines = [f"Chat Analysis for {input_file}:"]
+            for key, value in analysis.items():
+                lines.append(f"- {key.replace('_', ' ').title()}: {value}")
+            results.append("\n".join(lines))
+            continue
+
+        output_format = _normalize_format(args.format)
+        if output_format == "html":
+            output_content = converter.to_html_chat(metadata, messages_list, DEFAULT_CSS)
+        elif output_format == "md":
+            output_content = converter.to_markdown_chat(metadata, messages_list)
+        elif output_format == "json":
+            output_content = utils.to_json_string({"metadata": metadata, "messages": messages_list})
+        elif output_format == "yml":
+            output_content = utils.to_yaml_string({"metadata": metadata, "messages": messages_list})
         else:
             raise ConversionError(
-                f"Unsupported chat file format: {input_ext or 'unknown'}",
-                hint="Use .md, .json, or .yml chat export files.",
+                f"Unsupported output format: {output_format}",
+                hint="Choose from html, md, json, or yml.",
             )
-    except ConversionError:
-        raise
-    except Exception as exc:  # pragma: no cover - defensive
-        raise ConversionError(f"Unexpected failure while parsing chat file: {exc}") from exc
 
-    if isinstance(metadata, dict) and "error" in metadata:
-        raise ConversionError(metadata["error"])
+        # Generate output filename for each input file
+        if args.output and len(input_files) == 1:
+            output_path = args.output
+        else:
+            base_name, _ = _safe_splitext(input_path)
+            output_path = f"{base_name}.{output_format}"
 
-    messages_list = list(messages)
+        result = utils.write_file_content(output_path, output_content)
+        if "error" in result:
+            raise ConversionError(result["error"])
 
-    if args.analyze:
-        analysis = converter.analyze_chat(messages_list)
-        lines = ["Chat Analysis:"]
-        for key, value in analysis.items():
-            lines.append(f"- {key.replace('_', ' ').title()}: {value}")
-        return "\n".join(lines)
+        results.append(f"Successfully converted '{input_file}' to '{output_path}'")
 
-    output_format = _normalize_format(args.format)
-    if output_format == "html":
-        output_content = converter.to_html_chat(metadata, messages_list, DEFAULT_CSS)
-    elif output_format == "md":
-        output_content = converter.to_markdown_chat(metadata, messages_list)
-    elif output_format == "json":
-        output_content = utils.to_json_string({"metadata": metadata, "messages": messages_list})
-    elif output_format == "yml":
-        output_content = utils.to_yaml_string({"metadata": metadata, "messages": messages_list})
-    else:
-        raise ConversionError(
-            f"Unsupported output format: {output_format}",
-            hint="Choose from html, md, json, or yml.",
-        )
-
-    result = utils.write_file_content(args.output, output_content)
-    if "error" in result:
-        raise ConversionError(result["error"])
-
-    return f"Successfully converted chat to '{args.output}'"
+    return "\n".join(results)
 
 
 """
@@ -163,11 +183,15 @@ def build_parser() -> argparse.ArgumentParser:
         """
         Examples:
           - Convert a Markdown transcript to HTML:
-                chat_history_converter.py chat.md --format html
+                %(prog)s chat.md --format html
+          - Convert multiple files to JSON:
+                %(prog)s chat1.md chat2.md chat3.md --format json
+          - Convert all markdown files in current directory:
+                %(prog)s *.md --format html
           - Inspect a JSON chat export without writing output:
-                chat_history_converter.py export.json --analyze
-          - Convert YAML to Markdown and specify the destination file:
-                chat_history_converter.py conversation.yml -o story.md
+                %(prog)s export.json --analyze
+          - Convert YAML to Markdown and specify the destination file (single file only):
+                %(prog)s conversation.yml -o story.md
         """
     )
 
@@ -176,7 +200,7 @@ def build_parser() -> argparse.ArgumentParser:
         epilog=epilog,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("input_file", help="Path to the chat history file (md, json, yml).")
+    parser.add_argument("input_files", nargs="+", help="Path(s) to the chat history file(s) (md, json, yml).")
     parser.add_argument(
         "-o",
         "--output",
@@ -193,16 +217,29 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Print chat statistics instead of writing an output file.",
     )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version="%(prog)s 5.1",
+        help="Show version information and exit.",
+    )
     return parser
 
 
 def main():
     parser = build_parser()
+    
+    # If no arguments provided, show help
+    if len(sys.argv) == 1:
+        parser.print_help()
+        sys.exit(0)
+    
     args = parser.parse_args()
 
     output_format = _normalize_format(getattr(args, "format", None))
 
-    if args.output:
+    # Handle multiple files - only set specific output if single file and output specified
+    if args.output and len(args.input_files) == 1:
         base_out, out_ext = _safe_splitext(args.output)
         if not args.format and out_ext:
             output_format = out_ext or output_format
@@ -212,9 +249,12 @@ def main():
                 file=sys.stderr,
             )
             args.output = f"{base_out}.{output_format}"
-    else:
-        base_name, _ = _safe_splitext(args.input_file)
-        args.output = f"{base_name}.{output_format}"
+    elif args.output and len(args.input_files) > 1:
+        print(
+            "Warning: --output ignored when processing multiple files. Output files will be named automatically.",
+            file=sys.stderr,
+        )
+        args.output = None
 
     args.format = output_format
 

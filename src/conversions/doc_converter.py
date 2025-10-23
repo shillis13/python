@@ -51,59 +51,78 @@ h1 { text-align: center; color: #1a1a1a; font-size: 2em; margin-bottom: 20px; pa
 def run_doc_conversion(args):
     """Execute the document conversion workflow and return a status message."""
 
-    input_path = os.path.expanduser(args.input_file)
-    if not os.path.exists(input_path):
-        raise ConversionError(
-            f"Input file not found: {args.input_file}",
-            hint="Provide a valid path to a document file.",
-        )
-
-    _, input_ext = _safe_splitext(input_path)
-    if input_ext == "yaml":
-        input_ext = "yml"
-
-    try:
-        metadata, content = converter.parse_document(input_path, input_ext)
-    except Exception as exc:  # pragma: no cover - defensive
-        raise ConversionError(f"Failed to parse document: {exc}") from exc
-
-    if isinstance(metadata, dict) and "error" in metadata:
-        raise ConversionError(metadata["error"])
-
-    if not isinstance(metadata, dict):
-        raise ConversionError(
-            "The document metadata is not a mapping.",
-            hint="Ensure the parser returned a metadata dictionary.",
-        )
-
-    if "title" not in metadata:
-        metadata["title"] = os.path.splitext(os.path.basename(input_path))[0].replace(
-            "_",
-            " ",
-        )
-
-    output_format = _normalize_format(args.format)
-    if output_format == "html":
-        output_content = converter.to_html_document(
-            metadata, content, DEFAULT_CSS, include_toc=not args.no_toc
-        )
-    elif output_format == "md":
-        output_content = content
-    elif output_format == "json":
-        output_content = utils.to_json_string({"metadata": metadata, "content": content})
-    elif output_format == "yml":
-        output_content = utils.to_yaml_string({"metadata": metadata, "content": content})
+    # Handle multiple input files
+    if hasattr(args, 'input_files'):
+        input_files = args.input_files
     else:
-        raise ConversionError(
-            f"Unsupported output format: {output_format}",
-            hint="Choose from html, md, json, or yml.",
-        )
+        # Backwards compatibility for single input_file
+        input_files = [args.input_file]
 
-    result = utils.write_file_content(args.output, output_content)
-    if "error" in result:
-        raise ConversionError(result["error"])
+    results = []
+    
+    for input_file in input_files:
+        input_path = os.path.expanduser(input_file)
+        if not os.path.exists(input_path):
+            raise ConversionError(
+                f"Input file not found: {input_file}",
+                hint="Provide a valid path to a document file.",
+            )
 
-    return f"Successfully converted document to '{args.output}'"
+        _, input_ext = _safe_splitext(input_path)
+        if input_ext == "yaml":
+            input_ext = "yml"
+
+        try:
+            metadata, content = converter.parse_document(input_path, input_ext)
+        except Exception as exc:  # pragma: no cover - defensive
+            raise ConversionError(f"Failed to parse document: {exc}") from exc
+
+        if isinstance(metadata, dict) and "error" in metadata:
+            raise ConversionError(metadata["error"])
+
+        if not isinstance(metadata, dict):
+            raise ConversionError(
+                "The document metadata is not a mapping.",
+                hint="Ensure the parser returned a metadata dictionary.",
+            )
+
+        if "title" not in metadata:
+            metadata["title"] = os.path.splitext(os.path.basename(input_path))[0].replace(
+                "_",
+                " ",
+            )
+
+        output_format = _normalize_format(args.format)
+        if output_format == "html":
+            output_content = converter.to_html_document(
+                metadata, content, DEFAULT_CSS, include_toc=not args.no_toc
+            )
+        elif output_format == "md":
+            output_content = content
+        elif output_format == "json":
+            output_content = utils.to_json_string({"metadata": metadata, "content": content})
+        elif output_format == "yml":
+            output_content = utils.to_yaml_string({"metadata": metadata, "content": content})
+        else:
+            raise ConversionError(
+                f"Unsupported output format: {output_format}",
+                hint="Choose from html, md, json, or yml.",
+            )
+
+        # Generate output filename for each input file
+        if args.output and len(input_files) == 1:
+            output_path = args.output
+        else:
+            base_name, _ = _safe_splitext(input_path)
+            output_path = f"{base_name}.{output_format}"
+
+        result = utils.write_file_content(output_path, output_content)
+        if "error" in result:
+            raise ConversionError(result["error"])
+
+        results.append(f"Successfully converted '{input_file}' to '{output_path}'")
+
+    return "\n".join(results)
 
 
 """
@@ -125,11 +144,15 @@ def build_parser() -> argparse.ArgumentParser:
         """
         Examples:
           - Generate an HTML report with a Table of Contents:
-                doc_converter.py report.md --format html
-          - Create a JSON representation of a Markdown handbook:
-                doc_converter.py handbook.md -f json -o handbook.json
+                %(prog)s report.md --format html
+          - Convert multiple documents to HTML:
+                %(prog)s doc1.md doc2.md doc3.md --format html
+          - Convert all markdown files in current directory:
+                %(prog)s *.md --format html
+          - Create a JSON representation of a Markdown handbook (single file only):
+                %(prog)s handbook.md -f json -o handbook.json
           - Render HTML without a Table of Contents:
-                doc_converter.py guide.md --no-toc
+                %(prog)s guide.md --no-toc
         """
     )
 
@@ -138,7 +161,7 @@ def build_parser() -> argparse.ArgumentParser:
         epilog=epilog,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("input_file", help="Path to the source document (md, json, yml).")
+    parser.add_argument("input_files", nargs="+", help="Path(s) to the source document(s) (md, json, yml).")
     parser.add_argument(
         "-o",
         "--output",
@@ -155,16 +178,29 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip the Table of Contents when producing HTML output.",
     )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version="%(prog)s 5.1",
+        help="Show version information and exit.",
+    )
     return parser
 
 
 def main():
     parser = build_parser()
+    
+    # If no arguments provided, show help
+    if len(sys.argv) == 1:
+        parser.print_help()
+        sys.exit(0)
+    
     args = parser.parse_args()
 
     output_format = _normalize_format(getattr(args, "format", None))
 
-    if args.output:
+    # Handle multiple files - only set specific output if single file and output specified
+    if args.output and len(args.input_files) == 1:
         base_out, out_ext = _safe_splitext(args.output)
         if not args.format and out_ext:
             output_format = out_ext or output_format
@@ -174,9 +210,12 @@ def main():
                 file=sys.stderr,
             )
             args.output = f"{base_out}.{output_format}"
-    else:
-        base_name, _ = _safe_splitext(args.input_file)
-        args.output = f"{base_name}.{output_format}"
+    elif args.output and len(args.input_files) > 1:
+        print(
+            "Warning: --output ignored when processing multiple files. Output files will be named automatically.",
+            file=sys.stderr,
+        )
+        args.output = None
 
     args.format = output_format
 
