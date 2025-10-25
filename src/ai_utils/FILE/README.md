@@ -37,3 +37,5 @@ On macOS, Python can interface with:
 Attachments may be added directly or encoded with base64 when embedding into
 mail bodies. Incoming messages can be searched by subject to download
 attachments to the local repository.
+
+> **Status:** 2025-10-25: Paused. We’ll resume FILE after we define AI↔AI/AI↔CLI use-cases and a transport matrix.
