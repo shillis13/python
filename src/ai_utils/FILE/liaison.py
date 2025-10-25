@@ -1,37 +1,42 @@
 #!/usr/bin/env python3
 
-"""_summary_
+"""Utilities for exchanging files between FILE and Chatty mailboxes."""
 
-Returns:
-    _type_: _description_
-"""
-# liaison.py
-import os
-import re
-from datetime import datetime
+from __future__ import annotations
 
 import argparse
+import hashlib
+import os
+import re
+import shutil
+from collections.abc import Iterable
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Dict, Tuple
+
 import requests
 import yaml
-import hashlib
-import shutil
+
 from transports import EmailTransport, Transport
 
 CONFIG_PATH = "config.yml"
 
-ARCHIVE_DIR = "archive"
-LOG_FILE = "logs/file_log.txt"
+ARCHIVE_DIR = Path("archive")
+LOG_DIR = Path("logs")
+LOG_FILE = LOG_DIR / "file_log.txt"
 
-# Directories used by the MVP
-TO_CHATTY_DIR = "/Users/shawnhillis/Documents/To_Chatty"
-FROM_CHATTY_DIR = "/Users/shawnhillis/Documents/From_Chatty"
-SYNC_DIR = "SyncDir"
+MANIFEST_FILENAME = "chatty_manifest.yml"
+
+# Directories used by the manifest-driven exchange
+TO_CHATTY_DIR = Path("To_Chatty")
+FROM_CHATTY_DIR = Path("From_Chatty")
+INBOX_DIR = Path("received")
 
 
-def load_config():
-    if not os.path.exists(CONFIG_PATH):
+def load_config() -> Dict[str, Dict[str, object]]:
+    if not Path(CONFIG_PATH).exists():
         return {}
-    with open(CONFIG_PATH, "r") as f:
+    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
         data = yaml.safe_load(f)
     return data or {}
 
@@ -52,12 +57,12 @@ def get_transport(name: str = "default") -> Transport:
     raise ValueError(f"Unknown transport type: {ttype}")
 
 
-def ensure_dirs():
-    os.makedirs(ARCHIVE_DIR, exist_ok=True)
-    os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
-    os.makedirs(TO_CHATTY_DIR, exist_ok=True)
-    os.makedirs(FROM_CHATTY_DIR, exist_ok=True)
-    os.makedirs(SYNC_DIR, exist_ok=True)
+def ensure_dirs() -> None:
+    ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    TO_CHATTY_DIR.mkdir(parents=True, exist_ok=True)
+    FROM_CHATTY_DIR.mkdir(parents=True, exist_ok=True)
+    INBOX_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def parse_links(text):
@@ -65,22 +70,24 @@ def parse_links(text):
     return re.findall(r"sandbox:/mnt/data/(\S+\.\w+)", text)
 
 
-def download_file(filename):
+def download_file(filename: str) -> str | None:
     url = f"https://chat.openai.com/sandbox:/mnt/data/{filename}"
-    dest_path = os.path.join(ARCHIVE_DIR, filename)
+    dest_path = ARCHIVE_DIR / filename
     try:
         r = requests.get(url)
         r.raise_for_status()
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
         with open(dest_path, "wb") as f:
             f.write(r.content)
-        return dest_path
+        return str(dest_path)
     except Exception as e:
         print(f"Failed to download {filename}: {e}")
         return None
 
 
-def log_action(filename, reason="general", title=""):
-    with open(LOG_FILE, "a") as log:
+def log_action(filename: str, reason: str = "general", title: str = "") -> None:
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    with open(LOG_FILE, "a", encoding="utf-8") as log:
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         log.write(f"{timestamp} | {reason} | {filename} | {title}\n")
 
@@ -88,49 +95,59 @@ def log_action(filename, reason="general", title=""):
 # --- Manifest and Sync Utilities ---
 
 
-def generate_manifest(directory):
-    """
-    Computes SHA256 hashes of all files in the specified directory.
-    Returns a dict: {relative_filename: {"sha256": hash, "last_modified": timestamp}}
-    """
-    manifest = {}
-    for root, _, files in os.walk(directory):
-        for fname in files:
-            fpath = os.path.join(root, fname)
-            relpath = os.path.relpath(fpath, directory)
-            # Skip manifest itself
-            if relpath == "chatty_manifest.yml":
-                continue
-            try:
-                with open(fpath, "rb") as f:
-                    file_hash = hashlib.sha256(f.read()).hexdigest()
-                    manifest[relpath] = {
-                        "sha256": file_hash,
-                        "last_modified": datetime.fromtimestamp(
-                            os.path.getmtime(fpath)
-                        ).strftime("%Y-%m-%d %H:%M:%S"),
-                    }
-            except Exception as e:
-                print(f"Error hashing {relpath}: {e}")
+def _compute_sha256(path: Path) -> str:
+    hasher = hashlib.sha256()
+    with open(path, "rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            hasher.update(chunk)
+    return hasher.hexdigest()
+
+
+def _gather_files(directory: Path) -> Iterable[Path]:
+    for path in directory.rglob("*"):
+        if path.is_file():
+            yield path
+
+
+def generate_manifest(directory: Path | str) -> Dict[str, Dict[str, object]]:
+    """Return manifest entries for *directory* indexed by relative path."""
+
+    base = Path(directory)
+    manifest: Dict[str, Dict[str, object]] = {}
+    for file_path in _gather_files(base):
+        relpath = file_path.relative_to(base)
+        if relpath.name == MANIFEST_FILENAME and relpath.parent == Path("."):
+            continue
+        manifest[str(relpath)] = {
+            "sha256": _compute_sha256(file_path),
+        }
     return manifest
 
 
-def compare_manifest(manifest, directory):
+def compare_manifest(
+    manifest: Dict[str, Dict[str, object]], directory: Path | str
+) -> Tuple[list[str], list[str]]:
+    """Compare *manifest* to files under *directory*.
+
+    Returns ``(to_download, to_delete)`` similarly to the historical helper.
+    ``manifest`` may include a ``_meta`` section which will be ignored.
     """
-    Compares manifest (dict of filename->hash) to local directory.
-    Returns: (to_download, to_delete)
-    - to_download: files in manifest missing or with different hash locally
-    - to_delete: local files present but not in manifest
-    """
+
     local_manifest = generate_manifest(directory)
-    to_download = []
+    to_download: list[str] = []
     for fname, remote_entry in manifest.items():
+        if fname == "_meta":
+            continue
         remote_hash = (
-            remote_entry["sha256"] if isinstance(remote_entry, dict) else remote_entry
+            remote_entry.get("sha256")
+            if isinstance(remote_entry, dict)
+            else remote_entry
         )
         local_entry = local_manifest.get(fname)
         local_hash = (
-            local_entry["sha256"] if isinstance(local_entry, dict) else local_entry
+            local_entry.get("sha256")
+            if isinstance(local_entry, dict)
+            else local_entry
         )
         if local_hash != remote_hash:
             to_download.append(fname)
@@ -138,110 +155,192 @@ def compare_manifest(manifest, directory):
     return to_download, to_delete
 
 
-def sync_from_chatty():
-    """
-    Loads manifest from From_Chatty/chatty_manifest.yml,
-    compares to From_Chatty/, copies any missing or changed files
-    into From_Chatty/received/, prints/logs actions taken.
-    """
-    manifest_path = os.path.join(FROM_CHATTY_DIR, "chatty_manifest.yml")
-    received_dir = os.path.join(FROM_CHATTY_DIR, "received")
-    os.makedirs(received_dir, exist_ok=True)
-    if not os.path.exists(manifest_path):
-        print(f"Manifest file not found: {manifest_path}")
-        return
-    with open(manifest_path, "r") as f:
-        manifest = yaml.safe_load(f)
+def _build_manifest_with_meta(directory: Path) -> Dict[str, object]:
+    entries = generate_manifest(directory)
+    manifest: Dict[str, object] = {
+        "_meta": {
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "source": str(directory.resolve()),
+            "file_count": len(entries),
+        }
+    }
+    for key in sorted(entries):
+        manifest[key] = entries[key]
+    return manifest
+
+
+def _write_manifest(manifest: Dict[str, object], manifest_path: Path) -> None:
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(manifest_path, "w", encoding="utf-8") as handle:
+        yaml.safe_dump(manifest, handle, sort_keys=False)
+
+
+def _load_manifest(path: Path) -> Dict[str, object]:
+    with open(path, "r", encoding="utf-8") as handle:
+        manifest = yaml.safe_load(handle) or {}
     if not isinstance(manifest, dict):
-        print("Manifest is not a dictionary.")
-        return
-    to_download, to_delete = compare_manifest(manifest, FROM_CHATTY_DIR)
-    if not to_download and not to_delete:
-        print("From_Chatty is already synchronized with the manifest.")
-        return
-    if to_download:
-        print("Files to download (copy to received/):")
-        for fname in to_download:
-            src_path = os.path.join(FROM_CHATTY_DIR, fname)
-            dst_path = os.path.join(received_dir, fname)
-            if os.path.exists(src_path):
-                os.makedirs(os.path.dirname(dst_path), exist_ok=True)
-                shutil.copy2(src_path, dst_path)
-                print(f"Copied: {fname} -> received/")
-                log_action(fname, "sync", "sync_from_chatty:copied")
-            else:
-                print(f"Missing source file in From_Chatty: {fname}")
-    if to_delete:
-        print("Files present locally but not in manifest (consider deleting):")
-        for fname in to_delete:
-            print(f"  {fname}")
+        raise ValueError(f"Manifest at {path} is not a dictionary")
+    return manifest
 
 
-# --- Two-Way Sync ---
-def sync_two_way():
-    """
-    Compares To_Chatty and From_Chatty manifests and files, identifies differences,
-    and copies changed files in both directions.
-    """
-    print("=== Starting Two-Way Sync ===")
-    to_manifest_path = os.path.join(TO_CHATTY_DIR, "chatty_manifest.yml")
-    from_manifest_path = os.path.join(FROM_CHATTY_DIR, "chatty_manifest.yml")
+def _manifest_entries(manifest: Dict[str, object]) -> Dict[str, Dict[str, object]]:
+    return {
+        key: value
+        for key, value in manifest.items()
+        if key != "_meta"
+        and isinstance(value, dict)
+        and "sha256" in value
+    }
 
-    if not os.path.exists(to_manifest_path):
+
+def _extra_in_destination(manifest_entries: Iterable[str], destination: Path) -> Dict[str, Path]:
+    manifest_keys = set(manifest_entries)
+    extras: Dict[str, Path] = {}
+    if not destination.exists():
+        return extras
+    for file_path in _gather_files(destination):
+        rel = str(file_path.relative_to(destination))
+        if rel not in manifest_keys:
+            extras[rel] = file_path
+    return extras
+
+
+def _log_summary(command: str, lines: Iterable[str]) -> Path:
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    log_path = LOG_DIR / f"liaison_{command}_{timestamp}.log"
+    with open(log_path, "w", encoding="utf-8") as handle:
+        for line in lines:
+            handle.write(f"{line}\n")
+    return log_path
+
+
+def generate_manifest_file(directory: Path = TO_CHATTY_DIR) -> Path:
+    manifest = _build_manifest_with_meta(directory)
+    manifest_path = directory / MANIFEST_FILENAME
+    _write_manifest(manifest, manifest_path)
+    summary = [
+        f"Generated manifest for {directory}.",
+        f"Files recorded: {manifest.get('_meta', {}).get('file_count', 0)}.",
+        f"Manifest path: {manifest_path}",
+    ]
+    for line in summary:
+        print(line)
+    _log_summary("generate_manifest", summary)
+    return manifest_path
+
+
+def _plan_direction(
+    source_entries: Dict[str, Dict[str, object]],
+    source_dir: Path,
+    destination_entries: Dict[str, Dict[str, object]],
+    destination_dir: Path,
+) -> Dict[str, object]:
+    copies: list[Tuple[str, Path, Path]] = []
+    missing_sources: list[str] = []
+    new = 0
+    updated = 0
+
+    for relpath, info in source_entries.items():
+        expected_hash = info["sha256"]
+        source_path = source_dir / relpath
+        destination_path = destination_dir / relpath
+        destination_hash = (
+            destination_entries.get(relpath, {}).get("sha256")
+            if isinstance(destination_entries.get(relpath), dict)
+            else None
+        )
+
+        if destination_hash == expected_hash:
+            continue
+
+        if not source_path.exists():
+            missing_sources.append(relpath)
+            continue
+
+        copies.append((relpath, source_path, destination_path))
+        if destination_hash is None:
+            new += 1
+        else:
+            updated += 1
+
+    deletions = [rel for rel in destination_entries if rel not in source_entries]
+
+    return {
+        "copies": copies,
+        "missing_sources": missing_sources,
+        "deletions": deletions,
+        "new": new,
+        "updated": updated,
+    }
+
+
+def sync_two_way(dry_run: bool = True, apply: bool = False) -> None:
+    if apply:
+        dry_run = False
+
+    to_manifest_path = TO_CHATTY_DIR / MANIFEST_FILENAME
+    from_manifest_path = FROM_CHATTY_DIR / MANIFEST_FILENAME
+
+    if not to_manifest_path.exists():
         print("Missing To_Chatty manifest. Please generate it first.")
         return
-    if not os.path.exists(from_manifest_path):
+    if not from_manifest_path.exists():
         print("Missing From_Chatty manifest. Please ensure it's provided.")
         return
 
-    with open(to_manifest_path, "r") as f:
-        to_manifest = yaml.safe_load(f)
-    with open(from_manifest_path, "r") as f:
-        from_manifest = yaml.safe_load(f)
+    to_manifest = _manifest_entries(_load_manifest(to_manifest_path))
+    from_manifest = _manifest_entries(_load_manifest(from_manifest_path))
 
-    to_manifest_files = {k: v for k, v in to_manifest.items() if k != "_meta_"}
-    from_manifest_files = {k: v for k, v in from_manifest.items() if k != "_meta_"}
+    from_to_plan = _plan_direction(from_manifest, FROM_CHATTY_DIR, to_manifest, TO_CHATTY_DIR)
+    to_from_plan = _plan_direction(to_manifest, TO_CHATTY_DIR, from_manifest, FROM_CHATTY_DIR)
 
-    to_dir = TO_CHATTY_DIR
-    from_dir = FROM_CHATTY_DIR
-    copied = 0
-
-    # Pull from From_Chatty to To_Chatty
-    for fname, entry in from_manifest_files.items():
-        from_file = os.path.join(from_dir, fname)
-        to_file = os.path.join(to_dir, fname)
-        from_hash = entry.get("sha256") if isinstance(entry, dict) else entry
-        to_entry = to_manifest_files.get(fname)
-        to_hash = to_entry.get("sha256") if isinstance(to_entry, dict) else to_entry
-
-        if from_hash != to_hash:
-            if os.path.exists(from_file):
-                os.makedirs(os.path.dirname(to_file), exist_ok=True)
-                shutil.copy2(from_file, to_file)
-                log_action(fname, reason="two_way:from→to")
-                copied += 1
-
-    # Pull from To_Chatty to From_Chatty
-    for fname, entry in to_manifest_files.items():
-        to_file = os.path.join(to_dir, fname)
-        from_file = os.path.join(from_dir, fname)
-        to_hash = entry.get("sha256") if isinstance(entry, dict) else entry
-        from_entry = from_manifest_files.get(fname)
-        from_hash = (
-            from_entry.get("sha256") if isinstance(from_entry, dict) else from_entry
+    def _print_plan(direction: str, plan: Dict[str, object]) -> None:
+        copies: list[Tuple[str, Path, Path]] = plan["copies"]  # type: ignore[index]
+        missing_sources: list[str] = plan["missing_sources"]  # type: ignore[index]
+        deletions: list[str] = plan["deletions"]  # type: ignore[index]
+        print(
+            f"{direction}: copy {len(copies)} (new {plan['new']}, updated {plan['updated']}), "
+            f"delete {len(deletions)}, missing sources {len(missing_sources)}"
         )
+        if copies:
+            action = "would copy" if dry_run else "copying"
+            for relpath, _, destination_path in copies:
+                print(f"  {action} {relpath} -> {destination_path}")
+        if deletions:
+            action = "would delete" if dry_run else "deleting"
+            for relpath in deletions:
+                print(f"  {action} {relpath}")
+        if missing_sources:
+            for relpath in missing_sources:
+                print(f"  Missing source: {relpath}")
 
-        if to_hash != from_hash:
-            if os.path.exists(to_file):
-                os.makedirs(os.path.dirname(from_file), exist_ok=True)
-                shutil.copy2(to_file, from_file)
-                log_action(fname, reason="two_way:to→from")
-                copied += 1
+    print("=== Two-Way Sync Plan ===")
+    _print_plan("From Chatty → To Chatty", from_to_plan)
+    _print_plan("To Chatty → From Chatty", to_from_plan)
 
-    print(f"Two-way sync complete. {copied} files updated across both directories.")
-    log_action(
-        "two_way_sync_summary", reason="summary", title=f"Total files synced: {copied}"
-    )
+    if dry_run:
+        action_state = "Dry-run only; no changes applied."
+    else:
+        for plan in (from_to_plan, to_from_plan):
+            for _, src, dst in plan["copies"]:  # type: ignore[index]
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, dst)
+            for relpath in plan["deletions"]:  # type: ignore[index]
+                target = (TO_CHATTY_DIR if plan is from_to_plan else FROM_CHATTY_DIR) / relpath
+                if target.exists():
+                    target.unlink()
+        action_state = "Changes applied."
+
+    summary = [
+        f"Two-way sync {'dry-run' if dry_run else 'apply'} complete.",
+        f"From→To copies: {len(from_to_plan['copies'])}, deletions: {len(from_to_plan['deletions'])}.",
+        f"To→From copies: {len(to_from_plan['copies'])}, deletions: {len(to_from_plan['deletions'])}.",
+        action_state,
+    ]
+    for line in summary:
+        print(line)
+    _log_summary("sync_two_way", summary)
 
 
 def pull_mode():
@@ -271,129 +370,159 @@ def pull_mode():
             log_action(filename, "pull", title)
 
 
-def write_manifest(directory, out_path):
-    from collections import OrderedDict
-
-    manifest = generate_manifest(directory)
-    manifest_with_meta = OrderedDict()
-    manifest_with_meta["_meta_"] = {
-        "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "source": os.path.basename(directory),
-    }
-    for key in sorted(manifest.keys()):
-        manifest_with_meta[key] = manifest[key]
-    with open(out_path, "w") as f:
-        yaml.dump(
-            manifest_with_meta,
-            f,
-            default_flow_style=False,
-            sort_keys=False,
-            Dumper=yaml.SafeDumper,
-        )
-    return manifest_with_meta
-
-
-def generate_manifest_for_chatty():
-    out_path = os.path.join(TO_CHATTY_DIR, "chatty_manifest.yml")
-    manifest = write_manifest(TO_CHATTY_DIR, out_path)
-    print(
-        f"Manifest written to {out_path} with {len(manifest) - 1} entries (plus metadata)."
-    )
-
-
-def simulate_chatty_reply():
-    """
-    Simulates Chatty 'replying' by copying files listed in To_Chatty/chatty_manifest.yml
-    into From_Chatty/, preserving relative paths.
-    """
-    manifest_path = os.path.join(TO_CHATTY_DIR, "chatty_manifest.yml")
-    if not os.path.exists(manifest_path):
-        print("No manifest found in To_Chatty.")
+def simulate_chatty_reply(manifest_path: Path | None = None) -> None:
+    manifest_path = Path(manifest_path) if manifest_path else TO_CHATTY_DIR / MANIFEST_FILENAME
+    if not manifest_path.exists():
+        print(f"No manifest found at {manifest_path}.")
         return
 
-    with open(manifest_path, "r") as f:
-        manifest = yaml.safe_load(f)
-
-    if not isinstance(manifest, dict):
-        print("Invalid manifest format.")
-        return
+    manifest = _load_manifest(manifest_path)
+    entries = _manifest_entries(manifest)
 
     copied = 0
-    for relpath in manifest:
-        src = os.path.join(TO_CHATTY_DIR, relpath)
-        dst = os.path.join(FROM_CHATTY_DIR, relpath)
-        if os.path.exists(src):
-            os.makedirs(os.path.dirname(dst), exist_ok=True)
-            shutil.copy2(src, dst)
-            copied += 1
+    missing_sources: list[str] = []
+    for relpath in entries:
+        source_path = TO_CHATTY_DIR / relpath
+        destination_path = FROM_CHATTY_DIR / relpath
+        if not source_path.exists():
+            missing_sources.append(relpath)
+            continue
+        destination_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source_path, destination_path)
+        copied += 1
+
+    summary = [
+        f"Simulated Chatty reply using {manifest_path}.",
+        f"Files copied: {copied}.",
+        f"Missing sources: {len(missing_sources)}.",
+    ]
+    for line in summary:
+        print(line)
+    if missing_sources:
+        for relpath in missing_sources:
+            print(f"  Missing source: {relpath}")
+    _log_summary("simulate_chatty_reply", summary)
+
+
+def sync_from_chatty(inbox: Path | str = INBOX_DIR, dry_run: bool = False) -> None:
+    manifest_path = FROM_CHATTY_DIR / MANIFEST_FILENAME
+    if not manifest_path.exists():
+        print(f"Manifest file not found: {manifest_path}")
+        return
+
+    manifest = _load_manifest(manifest_path)
+    entries = _manifest_entries(manifest)
+    inbox_path = Path(inbox)
+    inbox_path.mkdir(parents=True, exist_ok=True)
+
+    to_copy: list[Tuple[str, Path, Path]] = []
+    missing_sources: list[str] = []
+    new_files = 0
+    updated_files = 0
+
+    for relpath, info in entries.items():
+        expected_hash = info["sha256"]
+        source_path = FROM_CHATTY_DIR / relpath
+        destination_path = inbox_path / relpath
+
+        if not source_path.exists():
+            missing_sources.append(relpath)
+            continue
+
+        if destination_path.exists():
+            current_hash = _compute_sha256(destination_path)
+            if current_hash == expected_hash:
+                continue
+            updated_files += 1
         else:
-            print(f"Missing source file: {src}")
+            new_files += 1
 
-    print(f"Simulated Chatty reply: copied {copied} files to From_Chatty/")
-    log_action(
-        "simulate_chatty_reply_summary", reason="summary", title=f"Copied: {copied}"
-    )
+        to_copy.append((relpath, source_path, destination_path))
+
+    extras = _extra_in_destination(entries.keys(), inbox_path)
+
+    if not to_copy and not missing_sources:
+        print("Inbox is up to date with Chatty manifest.")
+    else:
+        action = "would copy" if dry_run else "copying"
+        for relpath, _, destination_path in to_copy:
+            print(f"{action.title()} {relpath} -> {destination_path}")
+        if missing_sources:
+            for relpath in missing_sources:
+                print(f"Missing in source mailbox: {relpath}")
+
+    if not dry_run:
+        for _, src, dst in to_copy:
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+
+    summary = [
+        f"Sync from Chatty completed{' (dry-run)' if dry_run else ''}.",
+        f"Files copied: {0 if dry_run else len(to_copy)} (planned: {len(to_copy)}).",
+        f"New files: {new_files}.",
+        f"Updated files: {updated_files}.",
+        f"Missing sources: {len(missing_sources)}.",
+        f"Extra files in inbox: {len(extras)}.",
+    ]
+    for line in summary:
+        print(line)
+    if extras:
+        print("Files in inbox not present in manifest:")
+        for relpath in sorted(extras):
+            print(f"  {relpath}")
+    _log_summary("sync_from_chatty", summary)
 
 
-def pull_files_from_request(request_path):
-    """
-    Given a manifest-format request file, attempts to pull those files
-    from From_Chatty/ into From_Chatty/received/ if hashes match.
-    """
-    received_dir = os.path.join(FROM_CHATTY_DIR, "received")
-    os.makedirs(received_dir, exist_ok=True)
+def pull_files_from_request(request_path: str) -> None:
+    received_dir = FROM_CHATTY_DIR / INBOX_DIR
+    received_dir.mkdir(parents=True, exist_ok=True)
 
-    if not os.path.exists(request_path):
+    path = Path(request_path)
+    if not path.exists():
         print(f"Request file not found: {request_path}")
         return
 
-    with open(request_path, "r") as f:
-        request_manifest = yaml.safe_load(f)
+    request_manifest = _load_manifest(path)
+    entries = _manifest_entries(request_manifest)
 
-    if not isinstance(request_manifest, dict):
-        print("Request file is not a valid manifest format.")
-        return
+    pulled: list[str] = []
+    missing: list[str] = []
+    mismatched: list[str] = []
 
-    local_manifest = generate_manifest(FROM_CHATTY_DIR)
-    pulled, missing, mismatched = [], [], []
-
-    for relpath, entry in request_manifest.items():
-        if isinstance(entry, dict):
-            expected_hash = entry.get("sha256")
-        else:
-            expected_hash = entry
-        local_path = os.path.join(FROM_CHATTY_DIR, relpath)
-        if not os.path.exists(local_path):
+    for relpath, info in entries.items():
+        expected_hash = info["sha256"]
+        local_path = FROM_CHATTY_DIR / relpath
+        if not local_path.exists():
             missing.append(relpath)
             continue
-        with open(local_path, "rb") as f:
-            actual_hash = hashlib.sha256(f.read()).hexdigest()
+        actual_hash = _compute_sha256(local_path)
         if actual_hash != expected_hash:
             mismatched.append(relpath)
             continue
-        # Passed all checks, pull file
-        dest_path = os.path.join(received_dir, relpath)
-        os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+        dest_path = received_dir / relpath
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(local_path, dest_path)
         pulled.append(relpath)
-        log_action(
-            relpath, reason="validated:hash_match", title="pull_files_from_request"
-        )
+        log_action(relpath, reason="validated:hash_match", title="pull_files_from_request")
 
-    print(f"Pulled {len(pulled)} files into received/")
+    summary = [
+        f"Pulled {len(pulled)} files into {received_dir}.",
+        f"Missing: {len(missing)}.",
+        f"Hash mismatches: {len(mismatched)}.",
+    ]
+    for line in summary:
+        print(line)
+    if missing:
+        for relpath in missing:
+            print(f"  Missing file: {relpath}")
+    if mismatched:
+        for relpath in mismatched:
+            print(f"  Hash mismatch: {relpath}")
     log_action(
         "pull_files_summary",
         reason="summary",
-        title=f"Pulled: {len(pulled)}, Missing: {len(missing)}, Hash Mismatch: {len(mismatched)}",
+        title=f"Pulled: {len(pulled)}, Missing: {len(missing)}, Hash mismatch: {len(mismatched)}",
     )
-    if missing:
-        print(f"Missing {len(missing)} files:")
-        for f in missing:
-            print(f"  [MISSING] {f}")
-    if mismatched:
-        print(f"{len(mismatched)} files had mismatched hashes:")
-        for f in mismatched:
-            print(f"  [HASH MISMATCH] {f}")
 
 
 def send_via_endpoint(files, endpoint="default", subject="FILE transfer", body=""):
@@ -417,14 +546,24 @@ def main():
         help="Download file(s) from pasted ChatGPT response",
     )
     parser.add_argument(
-        "--sync-from-chatty",
-        action="store_true",
-        help="Sync files from From_Chatty/ using manifest",
-    )
-    parser.add_argument(
         "--generate-manifest",
         action="store_true",
-        help="Generate a manifest from To_Chatty/",
+        help="Generate To_Chatty/chatty_manifest.yml",
+    )
+    parser.add_argument(
+        "--simulate-chatty-reply",
+        action="store_true",
+        help="Copy files listed in To_Chatty manifest into From_Chatty (simulation)",
+    )
+    parser.add_argument(
+        "--sync-from-chatty",
+        action="store_true",
+        help="Pull files described by From_Chatty/chatty_manifest.yml into the inbox",
+    )
+    parser.add_argument(
+        "--sync-two-way",
+        action="store_true",
+        help="Plan or apply a bidirectional sync between To_Chatty and From_Chatty",
     )
     parser.add_argument(
         "--pull-files",
@@ -432,14 +571,19 @@ def main():
         help="Pull files listed in request manifest file",
     )
     parser.add_argument(
-        "--update-manifest",
-        action="store_true",
-        help="Re-generate and update the chatty_manifest.yml in To_Chatty/",
+        "--inbox",
+        metavar="PATH",
+        help="Destination directory for --sync-from-chatty (default: received/)",
     )
     parser.add_argument(
-        "--sync-two-way",
+        "--dry-run",
         action="store_true",
-        help="Perform a bidirectional sync between To_Chatty and From_Chatty",
+        help="Preview actions without copying or deleting files",
+    )
+    parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="Apply changes for --sync-two-way",
     )
     parser.add_argument(
         "--send-via",
@@ -462,23 +606,25 @@ def main():
 
     if args.pull:
         pull_mode()
-    elif args.sync_from_chatty:
-        sync_from_chatty()
-    elif args.update_manifest:
-        generate_manifest_for_chatty()
     elif args.generate_manifest:
-        generate_manifest_for_chatty()
+        generate_manifest_file()
+    elif args.simulate_chatty_reply:
+        simulate_chatty_reply()
+    elif args.sync_from_chatty:
+        inbox = Path(args.inbox) if args.inbox else INBOX_DIR
+        sync_from_chatty(inbox=inbox, dry_run=args.dry_run)
+    elif args.sync_two_way:
+        sync_two_way(dry_run=args.dry_run and not args.apply, apply=args.apply)
     elif args.pull_files:
         pull_files_from_request(args.pull_files)
     elif args.send_via:
         send_via_endpoint(args.send_via, args.endpoint, args.subject)
     elif args.receive_subject:
         receive_from_endpoint(args.receive_subject, args.endpoint)
-    elif args.sync_two_way:
-        sync_two_way()
     else:
         print(
-            "No mode selected. Use --pull to fetch files or --sync-from-chatty to sync."
+            "No mode selected. Use --generate-manifest, --simulate-chatty-reply,"
+            " --sync-from-chatty, or --sync-two-way."
         )
 
 
