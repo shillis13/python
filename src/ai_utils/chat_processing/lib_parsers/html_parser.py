@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime, timezone
 import logging
 
-from ..conversion_framework import BaseParser, ParserRegistry
+from chat_processing.lib_converters.conversion_framework import BaseParser, ParserRegistry
 
 logger = logging.getLogger(__name__)
 

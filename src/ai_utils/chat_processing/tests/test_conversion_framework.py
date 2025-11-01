@@ -13,15 +13,15 @@ from pathlib import Path
 import sys
 
 # Add parent directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from chat_processing.converters.conversion_framework import (
+from ..lib_converters.conversion_framework import (
     detect_format, detect_source, convert_to_v2, ParserRegistry,
     load_file
 )
 
 # Import parsers to register them
-from chat_processing.converters.parsers import (
+from ..lib_parsers import (
     markdown_parser, json_parser, yaml_parser, html_parser
 )
 
@@ -250,7 +250,7 @@ class TestValidation(unittest.TestCase):
     
     def test_valid_schema(self):
         """Test validation of valid v2.0 data."""
-        from chat_processing.converters.conversion_framework import validate_v2_schema
+        from ..lib_converters.conversion_framework import validate_v2_schema
         
         valid_data = {
             'schema_version': '2.0',
@@ -275,7 +275,7 @@ class TestValidation(unittest.TestCase):
     
     def test_invalid_schema(self):
         """Test validation of invalid data."""
-        from chat_processing.converters.conversion_framework import validate_v2_schema
+        from ..lib_converters.conversion_framework import validate_v2_schema
         
         invalid_data = {
             'schema_version': '1.0',  # Wrong version

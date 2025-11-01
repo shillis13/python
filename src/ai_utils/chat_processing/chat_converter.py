@@ -13,15 +13,14 @@ from typing import List, Optional
 import logging
 
 # Add parent directory to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from chat_processing.converters.conversion_framework import (
+from chat_processing.lib_converters.conversion_framework import (
     convert_to_v2, convert_batch, detect_format, detect_source,
     load_file, ParserRegistry
 )
 
 # Import all parsers to register them
-from chat_processing.converters.parsers import (
+from chat_processing.lib_parsers import (
     markdown_parser,
     json_parser,
     yaml_parser,
@@ -29,8 +28,8 @@ from chat_processing.converters.parsers import (
 )
 
 # Import formatters for output
-from chat_processing.converters.formatters.markdown_formatter import format_as_markdown
-from chat_processing.converters.formatters.html_formatter import format_as_html
+from chat_processing.lib_formatters.markdown_formatter import format_as_markdown
+from chat_processing.lib_formatters.html_formatter import format_as_html
 
 
 def setup_logging(verbose: bool = False):

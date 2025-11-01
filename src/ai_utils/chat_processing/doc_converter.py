@@ -2,23 +2,22 @@
 # -*- coding: utf-8 -*-
 
 """
-Specialized Chat History Converter (Version 5.1 - Refactored for Library Use)
-Provides the core execution logic for converting structured chat history files.
+General-Purpose Document Converter (Version 5.1 - Refactored for Library Use)
+Provides the core execution logic for converting monolithic documents.
 This script is intended to be called by a master dispatcher.
 """
-
 import argparse
 import os
 import sys
-from typing import Any, Dict, Iterable, Tuple
+from typing import Tuple
 
-import lib_chat_converter as converter
-import conversion_utils as utils
+from lib_converters import lib_doc_converter as converter
+from lib_converters import lib_conversion_utils as utils
 from textwrap import dedent
 
 
 class ConversionError(Exception):
-    """Custom exception used to signal conversion failures."""
+    """Custom exception raised when document conversion fails."""
 
     def __init__(self, message: str, *, hint: str | None = None) -> None:
         super().__init__(message)
@@ -26,43 +25,31 @@ class ConversionError(Exception):
 
 
 def _normalize_format(value: str | None, *, default: str = "html") -> str:
-    """Return a normalized output format value."""
-
     if not value:
         return default
 
     normalized = value.lower().lstrip(".")
-    if normalized == "yaml":
-        normalized = "yml"
-    return normalized
+    return "yml" if normalized == "yaml" else normalized
 
 
 def _safe_splitext(path: str) -> Tuple[str, str]:
-    """os.path.splitext but always lower-cases the extension."""
-
     base, ext = os.path.splitext(path)
     return base, ext.lower().replace(".", "")
 
 # Default CSS for HTML Output
 DEFAULT_CSS = """
-/* Chat-specific CSS */
+/* Document-specific CSS */
 body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; background-color: #f7f7f7; color: #333; margin: 0; padding: 0; }
 .chat-container { max-width: 800px; margin: 20px auto; padding: 20px; background-color: #ffffff; border-radius: 12px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08); }
 h1 { text-align: center; color: #1a1a1a; font-size: 2em; margin-bottom: 20px; padding-bottom: 10px; border-bottom: 1px solid #eaeaea; }
-.message { display: flex; margin-bottom: 20px; padding: 15px; border-radius: 10px; }
-.user { background-color: #e9f5ff; border-left: 4px solid #007bff; }
-.assistant { background-color: #f0f0f0; border-left: 4px solid #6c757d; }
-.system { background-color: #fffbe6; border-left: 4px solid #ffc107; }
-.avatar { font-weight: bold; margin-right: 15px; flex-shrink: 0; padding: 8px 12px; border-radius: 8px; color: #fff; height: fit-content; }
-.user .avatar { background-color: #007bff; }
-.assistant .avatar { background-color: #5a6268; }
-.system .avatar { background-color: #e6a800; }
 .content { flex-grow: 1; }
+.toc-section { background-color: #f8f9fa; border: 1px solid #dee2e6; border-radius: 8px; margin-bottom: 25px; padding: 15px 25px; }
+.toc-section h2 { text-align: left; border-bottom: none; font-size: 1.4em; margin-top: 0; margin-bottom: 15px; }
+.toc ul { padding-left: 20px; }
 """
 
-
-def run_chat_conversion(args):
-    """Execute the chat conversion and return a user-facing status message."""
+def run_doc_conversion(args):
+    """Execute the document conversion workflow and return a status message."""
 
     # Handle multiple input files
     if hasattr(args, 'input_files'):
@@ -78,7 +65,7 @@ def run_chat_conversion(args):
         if not os.path.exists(input_path):
             raise ConversionError(
                 f"Input file not found: {input_file}",
-                hint="Verify the path or use an absolute location.",
+                hint="Provide a valid path to a document file.",
             )
 
         _, input_ext = _safe_splitext(input_path)
@@ -86,60 +73,36 @@ def run_chat_conversion(args):
             input_ext = "yml"
 
         try:
-            metadata: Dict[str, Any]
-            messages: Iterable[Dict[str, Any]]
-            if input_ext == "md":
-                metadata, messages = converter.parse_markdown_chat(input_path)
-            elif input_ext in {"json", "yml"}:
-                content = utils.read_file_content(input_path)
-                if isinstance(content, dict) and "error" in content:
-                    raise ConversionError(content["error"])
-
-                loader = utils.load_json_from_string if input_ext == "json" else utils.load_yaml_from_string
-                data = loader(content)  # type: ignore[arg-type]
-                if isinstance(data, dict) and "error" in data:
-                    raise ConversionError(data["error"], hint="Double-check the source formatting.")
-
-                if not isinstance(data, dict):
-                    raise ConversionError(
-                        "The chat file did not contain the expected mapping structure.",
-                        hint="Ensure the file has top-level 'metadata' and 'messages' keys.",
-                    )
-
-                metadata = data.get("metadata", {})
-                messages = data.get("messages", [])
-            else:
-                raise ConversionError(
-                    f"Unsupported chat file format: {input_ext or 'unknown'}",
-                    hint="Use .md, .json, or .yml chat export files.",
-                )
-        except ConversionError:
-            raise
+            metadata, content = converter.parse_document(input_path, input_ext)
         except Exception as exc:  # pragma: no cover - defensive
-            raise ConversionError(f"Unexpected failure while parsing chat file: {exc}") from exc
+            raise ConversionError(f"Failed to parse document: {exc}") from exc
 
         if isinstance(metadata, dict) and "error" in metadata:
             raise ConversionError(metadata["error"])
 
-        messages_list = list(messages)
+        if not isinstance(metadata, dict):
+            raise ConversionError(
+                "The document metadata is not a mapping.",
+                hint="Ensure the parser returned a metadata dictionary.",
+            )
 
-        if args.analyze:
-            analysis = converter.analyze_chat(messages_list)
-            lines = [f"Chat Analysis for {input_file}:"]
-            for key, value in analysis.items():
-                lines.append(f"- {key.replace('_', ' ').title()}: {value}")
-            results.append("\n".join(lines))
-            continue
+        if "title" not in metadata:
+            metadata["title"] = os.path.splitext(os.path.basename(input_path))[0].replace(
+                "_",
+                " ",
+            )
 
         output_format = _normalize_format(args.format)
         if output_format == "html":
-            output_content = converter.to_html_chat(metadata, messages_list, DEFAULT_CSS)
+            output_content = converter.to_html_document(
+                metadata, content, DEFAULT_CSS, include_toc=not args.no_toc
+            )
         elif output_format == "md":
-            output_content = converter.to_markdown_chat(metadata, messages_list)
+            output_content = content
         elif output_format == "json":
-            output_content = utils.to_json_string({"metadata": metadata, "messages": messages_list})
+            output_content = utils.to_json_string({"metadata": metadata, "content": content})
         elif output_format == "yml":
-            output_content = utils.to_yaml_string({"metadata": metadata, "messages": messages_list})
+            output_content = utils.to_yaml_string({"metadata": metadata, "content": content})
         else:
             raise ConversionError(
                 f"Unsupported output format: {output_format}",
@@ -168,30 +131,28 @@ Main entry point for running this script directly.
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """Create a parser with extensive usage documentation."""
-
     description = dedent(
         """
-        Convert exported chat histories between Markdown, JSON, YAML, and HTML.
+        Convert structured documents to HTML, Markdown, JSON, or YAML.
 
-        The converter automatically preserves metadata (when available) and can
-        optionally perform a quick statistical analysis of the dialogue.
+        The converter preserves metadata and can optionally suppress the
+        auto-generated Table of Contents in HTML output.
         """
     ).strip()
 
     epilog = dedent(
         """
         Examples:
-          - Convert a Markdown transcript to HTML:
-                %(prog)s chat.md --format html
-          - Convert multiple files to JSON:
-                %(prog)s chat1.md chat2.md chat3.md --format json
+          - Generate an HTML report with a Table of Contents:
+                %(prog)s report.md --format html
+          - Convert multiple documents to HTML:
+                %(prog)s doc1.md doc2.md doc3.md --format html
           - Convert all markdown files in current directory:
                 %(prog)s *.md --format html
-          - Inspect a JSON chat export without writing output:
-                %(prog)s export.json --analyze
-          - Convert YAML to Markdown and specify the destination file (single file only):
-                %(prog)s conversation.yml -o story.md
+          - Create a JSON representation of a Markdown handbook (single file only):
+                %(prog)s handbook.md -f json -o handbook.json
+          - Render HTML without a Table of Contents:
+                %(prog)s guide.md --no-toc
         """
     )
 
@@ -200,7 +161,7 @@ def build_parser() -> argparse.ArgumentParser:
         epilog=epilog,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("input_files", nargs="+", help="Path(s) to the chat history file(s) (md, json, yml).")
+    parser.add_argument("input_files", nargs="+", help="Path(s) to the source document(s) (md, json, yml).")
     parser.add_argument(
         "-o",
         "--output",
@@ -213,9 +174,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="Desired output format: html, md, json, or yml.",
     )
     parser.add_argument(
-        "--analyze",
+        "--no-toc",
         action="store_true",
-        help="Print chat statistics instead of writing an output file.",
+        help="Skip the Table of Contents when producing HTML output.",
     )
     parser.add_argument(
         "--version",
@@ -259,7 +220,7 @@ def main():
     args.format = output_format
 
     try:
-        message = run_chat_conversion(args)
+        message = run_doc_conversion(args)
         if message:
             print(message)
     except ConversionError as exc:

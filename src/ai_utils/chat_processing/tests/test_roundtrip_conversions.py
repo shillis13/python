@@ -21,16 +21,24 @@ except ImportError:
     PYTEST_AVAILABLE = False
 
 # Add parent directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from chat_processing.converters.conversion_framework import convert_to_v2
-from chat_processing.converters.formatters.markdown_formatter import format_as_markdown
-from chat_processing.converters.formatters.html_formatter import format_as_html
-
-# Import parsers to register them
-from chat_processing.converters.parsers import (
-    markdown_parser, json_parser, yaml_parser, html_parser
-)
+# Use absolute imports when running as script
+if __name__ == "__main__":
+    from lib_converters.conversion_framework import convert_to_v2
+    from lib_formatters.markdown_formatter import format_as_markdown
+    from lib_formatters.html_formatter import format_as_html
+    from lib_parsers import (
+        markdown_parser, json_parser, yaml_parser, html_parser
+    )
+else:
+    # Use relative imports when imported as module
+    from ..lib_converters.conversion_framework import convert_to_v2
+    from ..lib_formatters.markdown_formatter import format_as_markdown
+    from ..lib_formatters.html_formatter import format_as_html
+    from ..lib_parsers import (
+        markdown_parser, json_parser, yaml_parser, html_parser
+    )
 
 
 def normalize_content(text):
@@ -180,7 +188,7 @@ if PYTEST_AVAILABLE:
     
     @pytest.fixture
     def test_cases_dir():
-        return Path(__file__).parent.parent.parent / "conversions/export_converter_test_cases"
+        return Path(__file__).parent / "test_cases/chat_converter_test_cases"
     
     def test_json_yaml_md_html_json(test_cases_dir):
         """Test: JSON → YAML → MD → HTML → JSON"""
@@ -228,7 +236,7 @@ else:
     class TestRoundTripConversions(unittest.TestCase):
         
         def setUp(self):
-            self.test_cases_dir = Path(__file__).parent.parent.parent / "conversions/export_converter_test_cases"
+            self.test_cases_dir = Path(__file__).parent / "test_cases/chat_converter_test_cases"
         
         def test_json_yaml_md_html_json(self):
             """Test: JSON → YAML → MD → HTML → JSON"""

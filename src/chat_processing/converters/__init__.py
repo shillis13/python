@@ -1,1 +1,0 @@
-# Chat converters package
