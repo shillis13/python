@@ -1,0 +1,298 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://pianoman.ai/schemas/chat_history_v2.0.schema.json",
+  "title": "Chat History Schema v2.0",
+  "description": "Canonical schema for normalized AI chat conversations",
+  "type": "object",
+  "required": ["schema_version", "metadata", "messages"],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "2.0",
+      "description": "Schema version for migration and validation"
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Conversation-level metadata",
+      "required": ["chat_id", "platform", "created_at", "updated_at"],
+      "properties": {
+        "chat_id": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_-]+$",
+          "description": "Unique identifier for the conversation",
+          "examples": ["chat_20251031_123456", "claude-desktop-001"]
+        },
+        "platform": {
+          "type": "string",
+          "description": "Source platform of the conversation",
+          "enum": [
+            "claude-desktop",
+            "claude-web",
+            "claude-cli",
+            "chatgpt",
+            "gemini",
+            "copilot",
+            "perplexity",
+            "unknown"
+          ]
+        },
+        "exporter": {
+          "type": "string",
+          "description": "Tool or method used for export",
+          "examples": ["SaveMyChatbot", "KeepChatGPT", "manual", "api"]
+        },
+        "title": {
+          "type": "string",
+          "description": "Human-readable conversation title",
+          "examples": ["Python Code Review", "Project Architecture Discussion"]
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO 8601 timestamp of conversation start"
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO 8601 timestamp of last modification"
+        },
+        "exported_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO 8601 timestamp of export from platform"
+        },
+        "tags": {
+          "type": "array",
+          "description": "User-defined tags for categorization",
+          "items": {
+            "type": "string"
+          },
+          "examples": [["python", "code-review"], ["architecture", "design"]]
+        },
+        "session_info": {
+          "type": "object",
+          "description": "Session tracking information",
+          "properties": {
+            "session_id": {
+              "type": "string",
+              "description": "Platform-specific session identifier"
+            },
+            "session_continuity": {
+              "type": "string",
+              "enum": ["new_session", "continued_session"],
+              "description": "Whether this continues a previous session"
+            },
+            "parent_session_id": {
+              "type": "string",
+              "description": "Previous session ID if continued"
+            }
+          }
+        },
+        "statistics": {
+          "type": "object",
+          "description": "Computed statistics about the conversation",
+          "properties": {
+            "message_count": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Total number of messages"
+            },
+            "word_count": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Total word count across all messages"
+            },
+            "token_count": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Estimated token count"
+            },
+            "duration_seconds": {
+              "type": "number",
+              "minimum": 0,
+              "description": "Duration from first to last message"
+            }
+          }
+        }
+      }
+    },
+    "messages": {
+      "type": "array",
+      "description": "Array of conversation messages",
+      "items": {
+        "type": "object",
+        "required": ["message_id", "role", "content", "timestamp"],
+        "properties": {
+          "message_id": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "description": "Unique identifier within the conversation",
+            "examples": ["msg_001", "1730401234567"]
+          },
+          "role": {
+            "type": "string",
+            "enum": ["user", "assistant", "system", "tool", "thinking"],
+            "description": "Message sender role"
+          },
+          "content": {
+            "type": "string",
+            "description": "Main message content (can be empty string for certain message types)"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp when message was sent"
+          },
+          "parent_message_id": {
+            "type": "string",
+            "description": "Reference to parent message for conversation branching"
+          },
+          "platform_specific": {
+            "type": "object",
+            "description": "Platform-specific fields that don't fit the common schema",
+            "properties": {
+              "model": {
+                "type": "string",
+                "description": "AI model used for response",
+                "examples": ["gpt-4", "claude-3-opus", "gemini-pro"]
+              },
+              "thinking": {
+                "type": "string",
+                "description": "Claude thinking/reasoning content (if separate from main content)"
+              },
+              "tool_calls": {
+                "type": "array",
+                "description": "Function or tool invocations",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "tool_name": {
+                      "type": "string"
+                    },
+                    "arguments": {
+                      "type": "object"
+                    },
+                    "result": {}
+                  }
+                }
+              },
+              "original_role": {
+                "type": "string",
+                "description": "Original role name if mapped to standard role"
+              }
+            },
+            "additionalProperties": true
+          },
+          "attachments": {
+            "type": "array",
+            "description": "File attachments or embedded content",
+            "items": {
+              "type": "object",
+              "required": ["type", "name"],
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": ["file", "image", "code", "artifact", "document"],
+                  "description": "Type of attachment"
+                },
+                "name": {
+                  "type": "string",
+                  "description": "Filename or identifier"
+                },
+                "content": {
+                  "type": "string",
+                  "description": "Inline content (text, base64, etc.) or file reference"
+                },
+                "url": {
+                  "type": "string",
+                  "format": "uri",
+                  "description": "External URL reference"
+                },
+                "size_bytes": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "File size in bytes"
+                },
+                "mime_type": {
+                  "type": "string",
+                  "description": "MIME type of the attachment",
+                  "examples": ["image/png", "text/plain", "application/pdf"]
+                },
+                "metadata": {
+                  "type": "object",
+                  "description": "Additional attachment metadata",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "metadata": {
+            "type": "object",
+            "description": "Message-level metadata",
+            "properties": {
+              "edited": {
+                "type": "boolean",
+                "description": "Whether message was edited after creation"
+              },
+              "edit_timestamp": {
+                "type": "string",
+                "format": "date-time",
+                "description": "When the message was last edited"
+              },
+              "tokens": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Token count for this message"
+              },
+              "flagged": {
+                "type": "boolean",
+                "description": "Whether message was flagged by platform"
+              },
+              "flag_reason": {
+                "type": "string",
+                "description": "Reason for flagging"
+              }
+            },
+            "additionalProperties": true
+          }
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "schema_version": "2.0",
+      "metadata": {
+        "chat_id": "claude_20251031_abc123",
+        "platform": "claude-desktop",
+        "title": "Schema Design Discussion",
+        "created_at": "2025-10-31T10:00:00Z",
+        "updated_at": "2025-10-31T11:30:00Z",
+        "tags": ["schema", "design", "yaml"],
+        "statistics": {
+          "message_count": 4,
+          "word_count": 500,
+          "token_count": 650
+        }
+      },
+      "messages": [
+        {
+          "message_id": "msg_001",
+          "role": "user",
+          "content": "Can you help me design a YAML schema?",
+          "timestamp": "2025-10-31T10:00:00Z"
+        },
+        {
+          "message_id": "msg_002",
+          "role": "assistant",
+          "content": "I'd be happy to help you design a YAML schema.",
+          "timestamp": "2025-10-31T10:00:15Z",
+          "parent_message_id": "msg_001",
+          "platform_specific": {
+            "model": "claude-3-opus-20240229"
+          }
+        }
+      ]
+    }
+  ]
+}

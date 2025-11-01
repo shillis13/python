@@ -1,0 +1,20 @@
+# Minimal meta.yaml schema (informal)
+required:
+  - source
+  - timestamps
+  - content_sha256
+properties:
+  source:
+    properties:
+      ai: {type: string}
+      exporter: {type: string}
+  timestamps:
+    properties:
+      created_utc: {type: string}      # ISO-8601 Z
+      created_local: {type: string}    # ISO-8601 with offset
+      tz: {type: string}               # IANA tz
+  content_sha256: {type: string}
+  provenance:
+    properties:
+      where_from: {type: array}
+      detectors:  {type: array}

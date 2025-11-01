@@ -6,6 +6,8 @@ A wrapper around the f2 utility
 """
 
 import argparse
+import os
+import shutil
 import subprocess
 import sys
 import logging
@@ -29,6 +31,43 @@ from dev_utils.lib_argparse_registry import (
     register_arguments,
     build_parser,
 )
+
+
+def _resolve_f2_executable() -> str:
+    """Return a usable f2 executable path."""
+
+    candidates: list[Path] = []
+
+    env_override = os.environ.get("F2_PATH")
+    if env_override:
+        candidates.append(Path(env_override).expanduser())
+
+    which_path = shutil.which("f2")
+    if which_path:
+        candidates.append(Path(which_path))
+
+    home = Path.home()
+    candidates.extend(
+        [
+            home / "bin/go/f2",
+            home / "bin/go/f2/f2",
+            home / "go/bin/f2",
+        ]
+    )
+
+    seen: set[Path] = set()
+    for candidate in candidates:
+        candidate = candidate.expanduser()
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        path_to_check = candidate / "f2" if candidate.is_dir() else candidate
+        if path_to_check.exists() and os.access(path_to_check, os.X_OK):
+            return str(path_to_check)
+
+    raise FileNotFoundError(
+        "f2 executable not found. Install f2, add it to PATH, or set F2_PATH."
+    )
 
 
 def _print_results_table(rows: list[tuple[str, str, str]]) -> None:
@@ -186,7 +225,13 @@ def rename_files(args):
         _rename_internal(args)
         return
 
-    command = build_f2_command(args)
+    try:
+        f2_executable = _resolve_f2_executable()
+    except FileNotFoundError as exc:
+        log_error(str(exc))
+        sys.exit(1)
+
+    command = build_f2_command(args, f2_executable)
     try:
         log_info(f"Running command: {' '.join(command)}")
         subprocess.run(command, check=True)
@@ -194,7 +239,7 @@ def rename_files(args):
         log_error(f"Command failed with error: {e}")
         sys.exit(1)
     except FileNotFoundError:
-        log_error("f2 executable not found. Ensure it is installed and in PATH.")
+        log_error(f"f2 executable not found at {f2_executable}.")
         sys.exit(1)
 
 
@@ -203,8 +248,8 @@ Construct the f2 command based on the provided arguments.
 """
 
 
-def build_f2_command(args):
-    command = ["f2"]
+def build_f2_command(args, f2_executable: str):
+    command = [f2_executable]
 
     if args.undo:
         command.append("--undo")
