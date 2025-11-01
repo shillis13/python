@@ -167,6 +167,28 @@ class TreePrinter:
         except (OSError, PermissionError):
             return name
 
+    def format_display_name(self, path: Path, override_name: Optional[str] = None) -> str:
+        """Return the display name with suffixes for directories and symlinks."""
+        name = override_name if override_name is not None else path.name
+
+        try:
+            is_symlink = path.is_symlink()
+        except (OSError, PermissionError):
+            is_symlink = False
+
+        try:
+            is_directory = path.is_dir()
+        except (OSError, PermissionError):
+            is_directory = False
+
+        display_name = name
+        if is_directory:
+            display_name += "/"
+        if is_symlink:
+            display_name += "@"
+
+        return self.colorize_item(display_name, path)
+
     def get_sorted_children(self, directory: Path) -> List[Path]:
         """Get sorted list of directory children."""
         try:
@@ -223,7 +245,7 @@ class TreePrinter:
                     next_prefix = prefix + self.chars["vertical"]
 
                 # Format the item name and info
-                display_name = self.colorize_item(child.name, child)
+                display_name = self.format_display_name(child)
                 info = self.get_item_info(child)
 
                 # Handle symlinks
@@ -307,7 +329,7 @@ class TreePrinter:
             )
             current_path = parent_path / name
 
-            display_name = self.colorize_item(name, current_path)
+            display_name = self.format_display_name(current_path, override_name=name)
             info = self.get_item_info(current_path)
 
             symlink_target = ""
