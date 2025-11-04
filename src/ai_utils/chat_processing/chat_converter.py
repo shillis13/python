@@ -12,8 +12,6 @@ from pathlib import Path
 from typing import List, Optional
 import logging
 
-# Add parent directory to path for imports
-
 from chat_processing.lib_converters.conversion_framework import (
     convert_to_v2, convert_batch, detect_format, detect_source,
     load_file, ParserRegistry

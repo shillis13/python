@@ -1,5 +1,5 @@
 # lib_doc_converter.py
-from lib_converters import lib_conversion_utils as conversion_utils as utils
+from lib_converters import lib_conversion_utils as utils
 import yaml
 
 """
