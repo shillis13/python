@@ -120,6 +120,94 @@ properties:
             type: number
             minimum: 0
             description: "Duration from first to last message"
+
+      chunking:
+        type: object
+        description: "Chunking metadata (optional - only present if chat is chunked)"
+        required:
+          - strategy
+          - target_size
+          - total_chunks
+          - chunk_metadata
+        properties:
+          strategy:
+            type: string
+            enum:
+              - message_based
+              - semantic
+              - token_based
+            description: "Chunking algorithm used"
+            examples:
+              - "message_based"
+
+          target_size:
+            type: integer
+            minimum: 1000
+            description: "Soft maximum chunk size in tokens"
+            example: 4000
+
+          total_chunks:
+            type: integer
+            minimum: 1
+            description: "Total number of chunks in this conversation"
+
+          chunk_metadata:
+            type: array
+            description: "Metadata for each chunk"
+            items:
+              type: object
+              required:
+                - chunk_id
+                - sequence_number
+                - message_range
+                - token_count
+                - timestamp_range
+              properties:
+                chunk_id:
+                  type: string
+                  pattern: "^chunk_\\d{3}$"
+                  description: "Unique chunk identifier (e.g., chunk_001)"
+                  examples:
+                    - "chunk_001"
+                    - "chunk_002"
+
+                sequence_number:
+                  type: integer
+                  minimum: 1
+                  description: "Chunk order (1-indexed)"
+
+                message_range:
+                  type: array
+                  description: "Start and end indices in messages array (inclusive)"
+                  items:
+                    type: integer
+                    minimum: 0
+                  minItems: 2
+                  maxItems: 2
+                  examples:
+                    - [0, 15]
+                    - [16, 32]
+
+                token_count:
+                  type: integer
+                  minimum: 0
+                  description: "Approximate token count for this chunk"
+
+                timestamp_range:
+                  type: object
+                  description: "Timestamp range for messages in this chunk"
+                  required:
+                    - start
+                    - end
+                  properties:
+                    start:
+                      type: string
+                      format: date-time
+                      description: "Timestamp of first message in chunk"
+                    end:
+                      type: string
+                      format: date-time
+                      description: "Timestamp of last message in chunk"
   
   messages:
     type: array

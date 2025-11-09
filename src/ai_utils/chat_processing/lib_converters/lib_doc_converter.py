@@ -1,6 +1,12 @@
 # lib_doc_converter.py
 from lib_converters import lib_conversion_utils as utils
 import yaml
+import sys
+import os
+
+# Import md_structure_parser from parent directory
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from md_structure_parser import parse_markdown_structure
 
 """
 * Recursively converts a Python object (from YAML/JSON) into an HTML string
@@ -41,20 +47,34 @@ def _format_yaml_to_html(data_item):
 * Args:
 *    file_path (str): The path to the input document.
 *    file_format (str): The extension of the file ('md', 'json', 'yml').
-* 
+*    structured (bool): If True, parse markdown into structured format with sections.
+*
 * Returns:
-*    tuple: A tuple containing (metadata_dict, content_string).
+*    tuple: A tuple containing (metadata_dict, content_or_structure).
+*           For structured MD: returns (metadata, full_structure_dict)
+*           For unstructured MD: returns ({}, content_string)
 *           Returns ({'error':...}, None) on failure.
 """
 
 
-def parse_document(file_path, file_format):
+def parse_document(file_path, file_format, structured=False):
     content_str = utils.read_file_content(file_path)
     if isinstance(content_str, dict) and "error" in content_str:
         return content_str, None
 
     if file_format == "md":
-        return {}, content_str
+        if structured:
+            # Use md_structure_parser for structured parsing
+            try:
+                parsed_data = parse_markdown_structure(content_str, file_path)
+                metadata = parsed_data.get("metadata", {})
+                # Return metadata and full structure (including TOC and sections)
+                return metadata, parsed_data
+            except Exception as e:
+                return {"error": f"Failed to parse markdown structure: {e}"}, None
+        else:
+            # Original behavior: return raw content
+            return {}, content_str
     elif file_format == "json":
         data = utils.load_json_from_string(content_str)
         if "error" in data:

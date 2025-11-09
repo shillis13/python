@@ -1,0 +1,54 @@
+# Example Chat with Chunking Metadata
+# This demonstrates the optional chunking extension to v2.0 schema
+
+schema_version: "2.0"
+
+metadata:
+  chat_id: "example_20251106_demo"
+  platform: "claude-desktop"
+  title: "Example Chat with Chunking"
+  created_at: "2025-11-06T10:00:00Z"
+  updated_at: "2025-11-06T10:30:00Z"
+  exporter: "manual"
+  
+  statistics:
+    message_count: 20
+    word_count: 2500
+    token_count: 3200
+    duration_seconds: 1800
+  
+  # OPTIONAL CHUNKING METADATA (added by chat_chunker.py)
+  chunking:
+    strategy: "message_based"
+    target_size: 4000
+    total_chunks: 2
+    chunk_metadata:
+      - chunk_id: "chunk_001"
+        sequence_number: 1
+        message_range: [0, 9]
+        token_count: 1600
+        timestamp_range:
+          start: "2025-11-06T10:00:00Z"
+          end: "2025-11-06T10:15:00Z"
+      
+      - chunk_id: "chunk_002"
+        sequence_number: 2
+        message_range: [10, 19]
+        token_count: 1600
+        timestamp_range:
+          start: "2025-11-06T10:15:05Z"
+          end: "2025-11-06T10:30:00Z"
+
+messages:
+  - message_id: "msg_001"
+    role: "user"
+    content: "Hello, can you help me with a task?"
+    timestamp: "2025-11-06T10:00:00Z"
+  
+  - message_id: "msg_002"
+    role: "assistant"
+    content: "Of course! I'd be happy to help. What task do you need assistance with?"
+    timestamp: "2025-11-06T10:00:05Z"
+    parent_message_id: "msg_001"
+  
+  # ... additional messages up to msg_020 ...

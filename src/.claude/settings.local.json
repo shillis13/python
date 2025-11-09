@@ -5,7 +5,13 @@
       "Bash(echo:*)",
       "Bash(touch:*)",
       "Bash(ls:*)",
-      "Bash(mkdir:*)"
+      "Bash(mkdir:*)",
+      "Bash(chmod:*)",
+      "Bash(done)",
+      "Bash(./install_packages.sh:*)",
+      "Bash(pip3:*)",
+      "Bash(python3:*)",
+      "Bash(cat:*)"
     ],
     "deny": []
   }

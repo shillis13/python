@@ -72,8 +72,11 @@ def run_doc_conversion(args):
         if input_ext == "yaml":
             input_ext = "yml"
 
+        # Use structured parsing for markdown if requested
+        use_structured = getattr(args, 'structured', False) and input_ext == "md"
+
         try:
-            metadata, content = converter.parse_document(input_path, input_ext)
+            metadata, content = converter.parse_document(input_path, input_ext, structured=use_structured)
         except Exception as exc:  # pragma: no cover - defensive
             raise ConversionError(f"Failed to parse document: {exc}") from exc
 
@@ -93,16 +96,26 @@ def run_doc_conversion(args):
             )
 
         output_format = _normalize_format(args.format)
+
+        # For structured markdown, content is already a complete dict with metadata, TOC, sections
+        if use_structured and isinstance(content, dict):
+            # Content is the full parsed structure
+            structured_data = content
+        else:
+            # Traditional format: separate metadata and content
+            structured_data = {"metadata": metadata, "content": content}
+
         if output_format == "html":
             output_content = converter.to_html_document(
                 metadata, content, DEFAULT_CSS, include_toc=not args.no_toc
             )
         elif output_format == "md":
-            output_content = content
+            # For MD output, if it's already structured data, convert back to string
+            output_content = content if isinstance(content, str) else utils.to_yaml_string(content)
         elif output_format == "json":
-            output_content = utils.to_json_string({"metadata": metadata, "content": content})
+            output_content = utils.to_json_string(structured_data)
         elif output_format == "yml":
-            output_content = utils.to_yaml_string({"metadata": metadata, "content": content})
+            output_content = utils.to_yaml_string(structured_data)
         else:
             raise ConversionError(
                 f"Unsupported output format: {output_format}",
@@ -179,9 +192,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip the Table of Contents when producing HTML output.",
     )
     parser.add_argument(
+        "--structured",
+        action="store_true",
+        help="Parse markdown files into structured format (metadata, TOC, sections). Recommended for YAML/JSON output.",
+    )
+    parser.add_argument(
         "--version",
         action="version",
-        version="%(prog)s 5.1",
+        version="%(prog)s 5.2",
         help="Show version information and exit.",
     )
     return parser

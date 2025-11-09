@@ -17,6 +17,9 @@ from chat_processing.lib_converters.conversion_framework import (
     load_file, ParserRegistry
 )
 
+# Import chunker for optional chunking
+from chat_processing.lib_converters.chunker import ChatChunker
+
 # Import all parsers to register them
 from chat_processing.lib_parsers import (
     markdown_parser,
@@ -90,43 +93,121 @@ def show_file_info(file_path: str) -> None:
         print(f"Error analyzing file: {e}")
 
 
-def convert_single_file(input_path: str, output_path: Optional[str] = None, 
-                       validate: bool = True, show_output: bool = False) -> bool:
-    """Convert a single file."""
+def convert_single_file(input_path: str, output_path: Optional[str] = None,
+                       validate: bool = True, show_output: bool = False,
+                       chunk: bool = False, chunk_size: int = 4000) -> bool:
+    """Convert a single file, optionally chunking the output."""
     try:
         print(f"Converting: {input_path}")
-        
+
         # Convert
         result = convert_to_v2(input_path, validate=validate)
+
+        # Apply chunking if requested
+        if chunk:
+            print(f"Chunking with target size: {chunk_size} tokens...")
+            chunker = ChatChunker(target_size=chunk_size)
+            result = chunker.chunk_chat(result)
         
-        # Determine output path
-        if not output_path:
-            output_path = str(Path(input_path).with_suffix('.v2.json'))
-        
-        # Handle different output formats
-        output_ext = Path(output_path).suffix.lower()
-        
-        if output_ext in ['.yaml', '.yml']:
-            with open(output_path, 'w', encoding='utf-8') as f:
-                yaml.safe_dump(result, f, sort_keys=False, allow_unicode=True)
-        elif output_ext in ['.md', '.markdown']:
-            # Convert to Markdown
-            markdown_output = format_as_markdown(result)
-            with open(output_path, 'w', encoding='utf-8') as f:
-                f.write(markdown_output)
-        elif output_ext in ['.html', '.htm']:
-            # Convert to HTML
-            html_output = format_as_html(result)
-            with open(output_path, 'w', encoding='utf-8') as f:
-                f.write(html_output)
+        # Handle chunked vs non-chunked output
+        if chunk:
+            # Chunked output: write multiple files to a directory
+            # Determine output directory
+            if not output_path:
+                output_dir = Path(input_path).parent / 'chunks'
+            elif Path(output_path).is_dir() or not Path(output_path).suffix:
+                output_dir = Path(output_path)
+            else:
+                # Output path is a file, use its parent directory
+                output_dir = Path(output_path).parent / 'chunks'
+
+            output_dir.mkdir(parents=True, exist_ok=True)
+
+            # Write chunk files
+            base_name = Path(input_path).stem
+            chunking = result['metadata']['chunking']
+            messages = result['messages']
+            files_written = 0
+
+            print(f"Writing {chunking['total_chunks']} chunk files to: {output_dir}/")
+
+            for chunk_meta in chunking['chunk_metadata']:
+                chunk_id = chunk_meta['chunk_id']
+                chunk_file = output_dir / f"{base_name}.{chunk_id}.yaml"
+
+                # Extract messages for this chunk
+                msg_start, msg_end = chunk_meta['message_range']
+                chunk_messages = messages[msg_start:msg_end + 1]
+
+                # Build minimal chunk metadata
+                chunk_metadata = {
+                    'chat_id': result['metadata']['chat_id'],
+                    'platform': result['metadata']['platform'],
+                    'title': result['metadata'].get('title', base_name) + f" (Chunk {chunk_meta['sequence_number']}/{chunking['total_chunks']})",
+                    'created_at': result['metadata'].get('created_at'),
+                    'updated_at': result['metadata'].get('updated_at'),
+                    'chunking': {
+                        'strategy': chunking['strategy'],
+                        'target_size': chunking['target_size'],
+                        'total_chunks': chunking['total_chunks'],
+                        'current_chunk': {
+                            'chunk_id': chunk_meta['chunk_id'],
+                            'sequence_number': chunk_meta['sequence_number'],
+                            'message_range': chunk_meta['message_range'],
+                            'token_count': chunk_meta['token_count'],
+                            'timestamp_range': chunk_meta['timestamp_range']
+                        }
+                    }
+                }
+
+                # Create chunk data
+                chunk_data = {
+                    'schema_version': '2.0',
+                    'metadata': chunk_metadata,
+                    'messages': chunk_messages
+                }
+
+                # Write chunk file (always YAML for chunks)
+                with open(chunk_file, 'w', encoding='utf-8') as f:
+                    yaml.safe_dump(chunk_data, f, sort_keys=False, allow_unicode=True)
+
+                files_written += 1
+
+            print(f"✓ Converted and chunked to: {output_dir}/")
+            print(f"  Chat ID: {result['metadata']['chat_id']}")
+            print(f"  Total messages: {len(result['messages'])}")
+            print(f"  Chunks written: {files_written}")
+
         else:
-            # Default to JSON
-            with open(output_path, 'w', encoding='utf-8') as f:
-                json.dump(result, f, indent=2, ensure_ascii=False)
-        
-        print(f"✓ Converted to: {output_path}")
-        print(f"  Chat ID: {result['metadata']['chat_id']}")
-        print(f"  Messages: {len(result['messages'])}")
+            # Non-chunked output: write single file
+            # Determine output path
+            if not output_path:
+                output_path = str(Path(input_path).with_suffix('.v2.json'))
+
+            # Handle different output formats
+            output_ext = Path(output_path).suffix.lower()
+
+            if output_ext in ['.yaml', '.yml']:
+                with open(output_path, 'w', encoding='utf-8') as f:
+                    yaml.safe_dump(result, f, sort_keys=False, allow_unicode=True)
+            elif output_ext in ['.md', '.markdown']:
+                # Convert to Markdown
+                markdown_output = format_as_markdown(result)
+                with open(output_path, 'w', encoding='utf-8') as f:
+                    f.write(markdown_output)
+            elif output_ext in ['.html', '.htm']:
+                # Convert to HTML
+                html_output = format_as_html(result)
+                with open(output_path, 'w', encoding='utf-8') as f:
+                    f.write(html_output)
+            else:
+                # Default to JSON
+                with open(output_path, 'w', encoding='utf-8') as f:
+                    json.dump(result, f, indent=2, ensure_ascii=False)
+
+            print(f"✓ Converted to: {output_path}")
+            print(f"  Chat ID: {result['metadata']['chat_id']}")
+            print(f"  Messages: {len(result['messages'])}")
         
         if show_output:
             print("\nOutput preview:")
@@ -148,21 +229,26 @@ def main():
 Examples:
   # Convert single file to JSON
   %(prog)s input.md -o output.json
-  
+
   # Convert to different output formats
   %(prog)s input.json -o output.yml   # YAML output
   %(prog)s input.json -o output.md    # Markdown output
   %(prog)s input.json -o output.html  # HTML output
-  
+
+  # Convert and chunk large chat files
+  %(prog)s large_chat.md --chunk                    # Default 4000 token chunks
+  %(prog)s large_chat.md --chunk --chunk-size 2000  # Custom chunk size
+  %(prog)s large_chat.md --chunk -o /output/dir/    # Specify output directory
+
   # Batch convert (always outputs JSON in batch mode)
   %(prog)s exports/*.json -o converted/
-  
+
   # Show file info
   %(prog)s input.md --info
-  
+
   # List available parsers
   %(prog)s --list-parsers
-  
+
   # Skip validation
   %(prog)s input.md --no-validate
 """
@@ -184,8 +270,16 @@ Examples:
                        help='List available parsers')
     parser.add_argument('-v', '--verbose', action='store_true',
                        help='Enable verbose logging')
-    
+    parser.add_argument('--chunk', action='store_true',
+                       help='Split output into chunks (adds chunking metadata)')
+    parser.add_argument('--chunk-size', type=int, default=4000,
+                       help='Target chunk size in tokens (default: 4000, minimum: 1000)')
+
     args = parser.parse_args()
+
+    # Validate chunk-size if chunking is enabled
+    if args.chunk and args.chunk_size < 1000:
+        parser.error('--chunk-size must be at least 1000 tokens')
     
     # Set up logging
     setup_logging(args.verbose)
@@ -210,13 +304,18 @@ Examples:
         return 0
     
     # Handle single vs batch conversion
-    if len(args.files) == 1 and args.output and not Path(args.output).is_dir():
+    if len(args.files) == 1:
         # Single file conversion
-        success = convert_single_file(args.files[0], args.output, 
-                                    args.validate, args.show)
+        success = convert_single_file(args.files[0], args.output,
+                                    args.validate, args.show,
+                                    args.chunk, args.chunk_size)
         return 0 if success else 1
     else:
         # Batch conversion
+        if args.chunk:
+            print("Warning: --chunk flag is not supported for batch conversions")
+            print("Proceeding without chunking...")
+
         results = convert_batch(args.files, args.output, args.validate)
         
         # Print summary

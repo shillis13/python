@@ -280,6 +280,79 @@ def compute_statistics(messages):
 
 ---
 
+## 6. Chunking Metadata (Optional Extension)
+
+**Added:** v2.0 (2025-11-06)
+**Purpose:** Support for splitting large conversations into manageable chunks
+
+### Schema Addition
+
+The `metadata.chunking` field is an **optional** extension to v2.0 schema. It is only present when a chat has been processed by the chunking tool.
+
+```yaml
+metadata:
+  # ... existing fields ...
+  chunking:
+    strategy: "message_based"      # Chunking algorithm: message_based | semantic | token_based
+    target_size: 4000               # Soft maximum chunk size in tokens
+    total_chunks: 3                 # Total number of chunks
+    chunk_metadata:
+      - chunk_id: "chunk_001"
+        sequence_number: 1
+        message_range: [0, 15]      # Start and end indices (inclusive)
+        token_count: 3850
+        timestamp_range:
+          start: "2025-10-31T10:00:00Z"
+          end: "2025-10-31T10:15:00Z"
+      - chunk_id: "chunk_002"
+        sequence_number: 2
+        message_range: [16, 32]
+        token_count: 4100
+        timestamp_range:
+          start: "2025-10-31T10:15:05Z"
+          end: "2025-10-31T10:30:00Z"
+```
+
+### Field Descriptions
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `strategy` | string (enum) | Yes | Chunking algorithm used: `message_based`, `semantic`, or `token_based` |
+| `target_size` | integer | Yes | Soft maximum chunk size in tokens (minimum: 1000) |
+| `total_chunks` | integer | Yes | Total number of chunks created from this conversation |
+| `chunk_metadata` | array | Yes | Array of chunk metadata objects (one per chunk) |
+| `chunk_metadata[].chunk_id` | string | Yes | Unique chunk identifier (pattern: `chunk_\d{3}`) |
+| `chunk_metadata[].sequence_number` | integer | Yes | 1-indexed chunk order |
+| `chunk_metadata[].message_range` | array[2] | Yes | Start and end message indices (inclusive) |
+| `chunk_metadata[].token_count` | integer | Yes | Approximate token count for this chunk |
+| `chunk_metadata[].timestamp_range` | object | Yes | First and last message timestamps in chunk |
+
+### Usage
+
+**Chunking is applied as a post-processing step:**
+
+1. Convert source format → v2.0 schema (steps 1-4)
+2. Optionally apply chunking (step 5)
+3. Output includes chunking metadata if chunking was applied
+
+**Command Examples:**
+```bash
+# Standalone chunking
+python chat_chunker.py input.yaml -o chunks/ --target-size 4000
+
+# Integrated with converter
+python chat_converter.py input.json --chunk --chunk-size 4000 -o output.yaml
+```
+
+### Backward Compatibility
+
+- Files without `chunking` field remain valid v2.0 schema
+- Parsers/validators should treat `chunking` as optional
+- Tools that don't understand chunking can safely ignore this field
+- No breaking changes to existing v2.0 files
+
+---
+
 ## Implementation Notes
 
 1. **Platform Detection**: When platform is ambiguous, scan content for patterns:

@@ -31,17 +31,7 @@ setup(
         # Add any required packages here
         # 'pyyaml',  # if needed
     ],
-
-    # Console scripts - makes commands available system-wide
-    entry_points={
-        'console_scripts': [
-            'chat-converter=chat_processing.chat_converter:main',
-            'doc-converter=chat_processing.doc_converter:main',
-            'chats-splitter=chat_processing.chats_splitter:main',
-        ],
-    },
-
-    # Classifiers for PyPI (if you ever publish)
+# Classifiers for PyPI (if you ever publish)
     classifiers=[
         "Development Status :: 4 - Beta",
         "Intended Audience :: Developers",
@@ -51,4 +41,21 @@ setup(
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
     ],
+    # Console scripts - auto-generated
+    entry_points={
+        'console_scripts': [
+            'codex_manager=ai_utils.codex_manager:main',
+            'liaison=ai_utils.FILE.liaison:main',
+            'chat_chunker=ai_utils.chat_processing.chat_chunker:main',
+            'doc_converter=ai_utils.chat_processing.doc_converter:main',
+            'chat_converter=ai_utils.chat_processing.chat_converter:main',
+            'md_structure_parser=ai_utils.chat_processing.md_structure_parser:main',
+            'chats_splitter=ai_utils.chat_processing.chats_splitter:main',
+            'batch_md_to_yaml=ai_utils.chat_processing.batch_md_to_yaml:main',
+            'python_chat_utilities=ai_utils.chat_continuity_protocol.python_chat_utilities:main',
+            'simple_schema_validator=ai_utils.validation.simple_schema_validator:main',
+            'distribute_ai_files=ai_utils.distribute_ai_files:main',
+        ],
+    },
+
 )

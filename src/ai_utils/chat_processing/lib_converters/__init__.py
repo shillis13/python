@@ -15,13 +15,20 @@ from .conversion_framework import (
     validate_v2_schema
 )
 
+from .chunker import (
+    ChatChunker,
+    chunk_chat_file
+)
+
 __all__ = [
     'BaseParser',
-    'ParserRegistry', 
+    'ParserRegistry',
     'convert_to_v2',
     'convert_batch',
     'detect_format',
     'detect_source',
     'load_file',
-    'validate_v2_schema'
+    'validate_v2_schema',
+    'ChatChunker',
+    'chunk_chat_file'
 ]
