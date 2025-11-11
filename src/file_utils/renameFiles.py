@@ -31,6 +31,7 @@ from dev_utils.lib_argparse_registry import (
     register_arguments,
     build_parser,
 )
+from file_utils.lib_fileinput import get_file_paths_from_input
 
 
 def _resolve_f2_executable() -> str:
@@ -179,12 +180,17 @@ def _build_new_name(path: Path, args, index: int | None) -> str:
     return new_name
 
 
-def _rename_internal(args) -> None:
-    files = sorted(
-        p
-        for p in Path.cwd().iterdir()
-        if p.is_file() and (args.hidden or not p.name.startswith("."))
-    )
+def _rename_internal(args, file_paths: list[str] | None = None) -> None:
+    if file_paths is not None:
+        # Use provided file paths (from pipe or other sources)
+        files = sorted(Path(p) for p in file_paths if Path(p).is_file())
+    else:
+        # Default behavior: use files in current directory
+        files = sorted(
+            p
+            for p in Path.cwd().iterdir()
+            if p.is_file() and (args.hidden or not p.name.startswith("."))
+        )
     sequential = bool(args.format and re.search(r"\{(%[^{}]+d)\}", args.format))
     index = 1
     results: list[tuple[str, str, str]] = []
@@ -211,7 +217,7 @@ the ``f2`` utility.
 """
 
 
-def rename_files(args):
+def rename_files(args, file_paths: list[str] | None = None):
     if any(
         [
             args.format,
@@ -222,7 +228,7 @@ def rename_files(args):
             args.remove_white_space,
         ]
     ):
-        _rename_internal(args)
+        _rename_internal(args, file_paths)
         return
 
     try:
@@ -349,6 +355,7 @@ def print_usage():
     """Usage"""
     usage_text = """
     Usage: renameFiles.py [options]
+           <command> | renameFiles.py [options]
 
     Options:
       --find=<pattern>             The find pattern to look for in filenames
@@ -358,7 +365,7 @@ def print_usage():
       --indexing=<digits>          Add sequential numbering with specified digit padding
       --remove-vowels              Remove all vowels from filenames
       --change-case=<case>         Change case of filenames: upper, lower, camel, proper
-      --replace-white-space=<char> Replace whitespace with specified character
+      --replace-white-space <char> Replace whitespace with specified character
       --remove-white-space         Remove all whitespace from filenames
       --no-clean                   Remove special characters and trim whitespace
       --undo                       Undo the last renaming operation
@@ -371,6 +378,12 @@ def print_usage():
       --help-verbose               Show more expanded and more detailed help with examples
       --help-examples              Show help with examples only
       --help-exfil                 Show help specifically about using exfil data and options
+
+    Pipe Input:
+      renameFiles.py accepts file paths from stdin, allowing integration with other commands:
+        ls -1 | renameFiles.py --change-case lower
+        fsFind . --name "*.txt" | renameFiles.py --replace-white-space "_"
+        find . -name "*.jpg" | renameFiles.py --format "{date}-{name}.{ext}"
     """
     print_colored(usage_text, fore_color="green", style="bright")
 
@@ -450,6 +463,21 @@ def print_help():
             "14. Move files into dirs by first char:",
             'renameFiles.py --find "(^.)(.*$)" --replace "{<$1>.up}/$1$2" -e',
             "Organize files into dirs by first char of filename.",
+        ),
+        (
+            "15. Pipe from ls command:",
+            'ls -1 *.txt | renameFiles.py --change-case lower --exec',
+            "Rename only .txt files to lowercase using piped input.",
+        ),
+        (
+            "16. Pipe from fsFind:",
+            'fsFind . --name "*.jpg" | renameFiles.py --format "photo-{%03d}.{ext}" --exec',
+            "Find all JPG files and rename them sequentially.",
+        ),
+        (
+            "17. Pipe from find with filters:",
+            'find . -type f -name "*.log" | renameFiles.py --replace-white-space "_" --exec',
+            "Replace spaces with underscores in all log files found recursively.",
         ),
     ]
 
@@ -595,7 +623,26 @@ def main():
         print_exfil_help()
         sys.exit(0)
 
-    rename_files(args)
+    # Check if input is coming from a pipe
+    file_paths = None
+    # Only read from stdin if it's not a TTY and appears to have data
+    # (select would be better but this is simpler for cross-platform)
+    if not sys.stdin.isatty():
+        import select
+        # Check if stdin has data available (with 0 second timeout)
+        if select.select([sys.stdin], [], [], 0.0)[0]:
+            piped_paths, dry_run_detected = get_file_paths_from_input(args)
+            if piped_paths:
+                file_paths = piped_paths
+                # If dry run was detected in piped input, update args
+                if dry_run_detected and not hasattr(args, 'dry_run'):
+                    args.dry_run = True
+            else:
+                # Empty pipe input - exit without processing
+                log_info("No files provided via pipe. Exiting without processing.")
+                sys.exit(0)
+
+    rename_files(args, file_paths)
 
 
 if __name__ == "__main__":

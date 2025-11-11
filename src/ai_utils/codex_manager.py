@@ -291,8 +291,8 @@ class SessionDirectoryWatcher:
         self.interval = interval
         self.followers: Dict[Path, FileFollower] = {}
         self.latest_initialized = False
-        self.last_scan = 0.0
         self.start_time = time.time()
+        self.last_scan = self.start_time
 
     def _discover(self) -> List[Path]:
         if not self.base_dir.exists():

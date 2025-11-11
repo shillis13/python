@@ -35,7 +35,7 @@ SCRIPT = os.path.abspath(
 
 
 # Helper function to run the renameFiles.py script
-def run_rename_command(args, execute=True):
+def run_rename_command(args, execute=True, stdin_input=None):
     command = ["python3", SCRIPT] + args
 
     if execute and "--dry-run" not in args:
@@ -48,7 +48,8 @@ def run_rename_command(args, execute=True):
     env["PYTHONPATH"] = os.pathsep.join([src_path, env.get("PYTHONPATH", "")])
 
     result = subprocess.run(
-        command, cwd=TEST_DIR, capture_output=True, text=True, env=env
+        command, cwd=TEST_DIR, capture_output=True, text=True, env=env,
+        input=stdin_input
     )
     return result
 
@@ -189,9 +190,111 @@ def test_display_usage():
 # Invalid Command
 def test_invalid_command():
     result = run_rename_command(["--invalid-command"])
-    
+
     assert result.returncode != 0
     assert "unrecognized arguments" in result.stderr
+
+
+# Pipe Input - Basic
+def test_pipe_input_basic():
+    create_test_files(['file1.txt', 'file2.txt', 'file3.txt'])
+
+    # Create pipe input with absolute paths
+    test_dir_abs = os.path.abspath(TEST_DIR)
+    pipe_input = "\n".join([
+        os.path.join(test_dir_abs, 'file1.txt'),
+        os.path.join(test_dir_abs, 'file2.txt'),
+    ])
+
+    run_rename_command(["--change-case", "upper"], stdin_input=pipe_input)
+
+    # Only piped files should be renamed
+    assert os.path.exists(os.path.join(TEST_DIR, "FILE1.TXT"))
+    assert os.path.exists(os.path.join(TEST_DIR, "FILE2.TXT"))
+    assert os.path.exists(os.path.join(TEST_DIR, "file3.txt"))  # Not in pipe, unchanged
+
+    cleanup_test_files()
+
+
+# Pipe Input - With Format
+def test_pipe_input_with_format():
+    create_test_files(['image1.jpg', 'image2.jpg', 'document.pdf'])
+
+    test_dir_abs = os.path.abspath(TEST_DIR)
+    pipe_input = "\n".join([
+        os.path.join(test_dir_abs, 'image1.jpg'),
+        os.path.join(test_dir_abs, 'image2.jpg'),
+    ])
+
+    run_rename_command(["--format", "photo-{%03d}.{ext}"], stdin_input=pipe_input)
+
+    assert os.path.exists(os.path.join(TEST_DIR, "photo-001.jpg"))
+    assert os.path.exists(os.path.join(TEST_DIR, "photo-002.jpg"))
+    assert os.path.exists(os.path.join(TEST_DIR, "document.pdf"))  # Not in pipe
+
+    cleanup_test_files()
+
+
+# Pipe Input - Replace Whitespace
+def test_pipe_input_replace_whitespace():
+    create_test_files(['my file.txt', 'another file.doc', 'nospace.txt'])
+
+    test_dir_abs = os.path.abspath(TEST_DIR)
+    pipe_input = "\n".join([
+        os.path.join(test_dir_abs, 'my file.txt'),
+        os.path.join(test_dir_abs, 'another file.doc'),
+    ])
+
+    run_rename_command(["--replace-white-space", "_"], stdin_input=pipe_input)
+
+    assert os.path.exists(os.path.join(TEST_DIR, "my_file.txt"))
+    assert os.path.exists(os.path.join(TEST_DIR, "another_file.doc"))
+    assert os.path.exists(os.path.join(TEST_DIR, "nospace.txt"))  # Not in pipe
+
+    cleanup_test_files()
+
+
+# Pipe Input - Dry Run
+def test_pipe_input_dry_run():
+    create_test_files(['file_old.txt', 'another_old.txt'])
+
+    test_dir_abs = os.path.abspath(TEST_DIR)
+    pipe_input = "\n".join([
+        os.path.join(test_dir_abs, 'file_old.txt'),
+        os.path.join(test_dir_abs, 'another_old.txt'),
+    ])
+
+    result = run_rename_command(["--find", "old", "--replace", "new", "--dry-run"],
+                                 stdin_input=pipe_input)
+
+    # Files should not be renamed in dry run
+    assert os.path.exists(os.path.join(TEST_DIR, "file_old.txt"))
+    assert os.path.exists(os.path.join(TEST_DIR, "another_old.txt"))
+
+    # Check output mentions both files
+    assert "file_old.txt" in result.stdout
+    assert "another_old.txt" in result.stdout
+
+    cleanup_test_files()
+
+
+# Pipe Input - Empty Input
+def test_pipe_input_empty():
+    create_test_files(['file1.txt', 'file2.txt'])
+
+    # Empty pipe input - should exit without processing any files
+    result = run_rename_command(["--change-case", "upper"], stdin_input="")
+
+    # Files should remain unchanged with empty pipe
+    assert os.path.exists(os.path.join(TEST_DIR, "file1.txt"))
+    assert os.path.exists(os.path.join(TEST_DIR, "file2.txt"))
+    # Uppercase versions should NOT exist
+    assert not os.path.exists(os.path.join(TEST_DIR, "FILE1.TXT"))
+    assert not os.path.exists(os.path.join(TEST_DIR, "FILE2.TXT"))
+    # Should exit successfully
+    assert result.returncode == 0
+
+    cleanup_test_files()
 
 
 if __name__ == "__main__":
