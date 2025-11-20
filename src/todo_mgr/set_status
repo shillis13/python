@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# scripts/set_status - Change todo status
+
+usage() {
+    cat << EOF
+Usage: set_status STATUS [TODO_DIR]
+
+Changes todo status by replacing the .status file.
+
+Valid statuses:
+  Triaging, Needs_Research, Needs_Derivation, Ready,
+  In_Progress, Blocked, Reviewing, Accepting, Done, Cancelled
+  (Legacy alias: Incoming → Triaging)
+
+Arguments:
+  STATUS      New status (case-insensitive, underscores optional)
+  TODO_DIR    Todo directory (default: current directory)
+
+Examples:
+  set_status ready
+  set_status in_progress todo_fix_bug/
+  cd todo_setup_chat && set_status done
+  set_status needs_derivation
+EOF
+    exit 1
+}
+
+[[ $# -eq 0 ]] && usage
+
+STATUS="$1"
+TODO_DIR="${2:-.}"
+
+# Normalize status to match exact valid status
+STATUS_LOWER="${STATUS,,}"
+STATUS_LOWER="${STATUS_LOWER// /_}"
+
+case "$STATUS_LOWER" in
+    incoming|triaging|triage) STATUS="Triaging" ;;
+    needs_research|needsresearch|research) STATUS="Needs_Research" ;;
+    needs_derivation|needsderivation|needs-derivation) STATUS="Needs_Derivation" ;;
+    pending) STATUS="Ready" ;;
+    ready) STATUS="Ready" ;;
+    in_progress|inprogress|in-progress) STATUS="In_Progress" ;;
+    blocked) STATUS="Blocked" ;;
+    reviewing|review) STATUS="Reviewing" ;;
+    accepting|acceptance) STATUS="Accepting" ;;
+    done|completed) STATUS="Done" ;;
+    cancelled|canceled) STATUS="Cancelled" ;;
+    *)
+        echo "Error: Invalid status '$1'"
+        echo ""
+        echo "Valid statuses:"
+        echo "  triaging, needs_research, needs_derivation, ready,"
+        echo "  in_progress, blocked, reviewing, accepting, done, cancelled"
+        exit 1
+        ;;
+esac
+
+# Verify todo directory exists
+if [[ ! -d "$TODO_DIR" ]]; then
+    echo "Error: Todo directory not found: $TODO_DIR"
+    exit 1
+fi
+
+# Find and remove existing status file
+find "$TODO_DIR" -maxdepth 1 -name "*.status" -delete
+
+# Create new status file
+touch "$TODO_DIR/${STATUS}.status"
+
+echo "✓ Status changed to: $STATUS"
+echo "  Location: $TODO_DIR"

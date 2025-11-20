@@ -4,6 +4,7 @@ import yaml
 import os
 import re
 from html import escape
+from typing import Any
 
 try:
     import markdown2  # type: ignore
@@ -127,6 +128,30 @@ def load_yaml_from_string(content):
 
 def to_yaml_string(data):
     return yaml.dump(data, sort_keys=False)
+
+
+def compress_newlines(text: str, max_consecutive: int = 2) -> str:
+    """Collapse runs of blank lines to at most ``max_consecutive``.
+
+    This preserves code blocks and content semantics reasonably well while
+    preventing excessive vertical whitespace in outputs.
+
+    Args:
+        text: The input text to normalize.
+        max_consecutive: Maximum allowed consecutive newline characters
+            (default 2). Any longer run is reduced to exactly this count.
+
+    Returns:
+        The normalized text.
+    """
+    if not isinstance(text, str) or not text:
+        return text
+
+    # Replace runs of 3+ newlines (CRLF or LF) with exactly ``max_consecutive`` LFs
+    # Normalize CRLF sequences consistently.
+    import re as _re
+    pattern = _re.compile(r'(?:\r?\n){' + str(max_consecutive + 1) + r',}')
+    return pattern.sub('\n' * max_consecutive, text)
 
 
 def _fallback_markdown_to_html(text):

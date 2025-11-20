@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Type
 from datetime import datetime, timezone
 import logging
+from .lib_conversion_utils import compress_newlines as _compress_newlines
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -138,7 +139,7 @@ class ParserRegistry:
     def register(cls, name: str, parser_class: Type[BaseParser]) -> None:
         """Register a parser implementation."""
         cls._parsers[name] = parser_class
-        logger.info(f"Registered parser: {name}")
+        logger.debug(f"Registered parser: {name}")
     
     @classmethod
     def get_parser(cls, content: Any, format: str) -> Optional[BaseParser]:
@@ -147,7 +148,7 @@ class ParserRegistry:
             parser = parser_class()
             try:
                 if parser.validate_source(content, format):
-                    logger.info(f"Selected parser: {name}")
+                    logger.debug(f"Selected parser: {name}")
                     return parser
             except Exception as e:
                 logger.debug(f"Parser {name} validation error: {e}")
@@ -218,7 +219,7 @@ def detect_format(file_path: str) -> str:
     except Exception as e:
         logger.debug(f"Error inspecting file content: {e}")
     
-    logger.info(f"Detected format for {file_path}: {format}")
+    logger.debug(f"Detected format for {file_path}: {format}")
     return format
 
 
@@ -305,7 +306,7 @@ def detect_source(content: Any, format: str) -> str:
     except Exception as e:
         logger.debug(f"Error detecting source: {e}")
     
-    logger.info(f"Detected source: {source}")
+    logger.debug(f"Detected source: {source}")
     return source
 
 
@@ -341,12 +342,12 @@ def validate_v2_schema(data: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
         return False, f"Validation error: {str(e)}"
 
 
-def convert_to_v2(file_path: str, validate: bool = True) -> Dict[str, Any]:
+def convert_to_v2(file_path: str, validate: bool = True, *, compress_newlines: bool = True) -> Dict[str, Any]:
     """
     Main conversion pipeline.
     Orchestrate detection → parsing → validation.
     """
-    logger.info(f"Converting file: {file_path}")
+    logger.debug(f"Converting file: {file_path}")
     
     # Detect format
     format = detect_format(file_path)
@@ -366,6 +367,14 @@ def convert_to_v2(file_path: str, validate: bool = True) -> Dict[str, Any]:
     
     # Parse to v2.0 format
     v2_data = parser.parse(content, file_path)
+
+    # Default: compress excessive blank lines in message content
+    if compress_newlines and isinstance(v2_data, dict):
+        msgs = v2_data.get('messages')
+        if isinstance(msgs, list):
+            for msg in msgs:
+                if isinstance(msg, dict) and isinstance(msg.get('content'), str):
+                    msg['content'] = _compress_newlines(msg['content'])
     
     # Validate if requested
     if validate:
@@ -374,11 +383,11 @@ def convert_to_v2(file_path: str, validate: bool = True) -> Dict[str, Any]:
             logger.warning(f"Validation failed: {error}")
             # Don't fail completely, allow partial conversions
     
-    logger.info(f"Conversion complete for: {file_path}")
+    logger.debug(f"Conversion complete for: {file_path}")
     return v2_data
 
 
-def convert_batch(file_paths: List[str], output_dir: str = None, validate: bool = True) -> Dict[str, Any]:
+def convert_batch(file_paths: List[str], output_dir: str = None, validate: bool = True, *, compress_newlines: bool = True) -> Dict[str, Any]:
     """
     Convert multiple files in batch.
     Returns results dictionary with successes and failures.
@@ -392,7 +401,7 @@ def convert_batch(file_paths: List[str], output_dir: str = None, validate: bool 
     for file_path in file_paths:
         try:
             # Convert file
-            v2_data = convert_to_v2(file_path, validate)
+            v2_data = convert_to_v2(file_path, validate, compress_newlines=compress_newlines)
             
             # Determine output path
             if output_dir:

@@ -102,7 +102,7 @@ class SaveMyChatbotMarkdownParser(MarkdownParser):
         ])
     
     def parse(self, content: str, file_path: str = None) -> Dict[str, Any]:
-        logger.info("Parsing SaveMyChatbot markdown format")
+        logger.debug("Parsing SaveMyChatbot markdown format")
         
         # Extract frontmatter if present
         frontmatter, content = self.extract_yaml_frontmatter(content)
@@ -206,7 +206,7 @@ class ChatGPTExporterMarkdownParser(MarkdownParser):
         ])
     
     def parse(self, content: str, file_path: str = None) -> Dict[str, Any]:
-        logger.info("Parsing ChatGPT Exporter markdown format")
+        logger.debug("Parsing ChatGPT Exporter markdown format")
         
         result = {
             'schema_version': '2.0',
@@ -308,7 +308,7 @@ class GenericMarkdownParser(MarkdownParser):
         return format == 'markdown' and isinstance(content, str)
     
     def parse(self, content: str, file_path: str = None) -> Dict[str, Any]:
-        logger.info("Parsing generic markdown format")
+        logger.debug("Parsing generic markdown format")
         
         result = {
             'schema_version': '2.0',

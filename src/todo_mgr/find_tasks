@@ -1,0 +1,143 @@
+#!/usr/bin/env bash
+# scripts/find_tasks - Query todos by status/flag/tag
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TODO_ROOT="$(dirname "$SCRIPT_DIR")"
+
+usage() {
+    cat << EOF
+Usage: find_tasks [OPTIONS]
+
+Query todos based on status, flags, or tags.
+
+Options:
+  -s, --status STATUS     Find todos with this status
+  -f, --flag FLAG         Find todos with this flag
+  -t, --tag TAG           Find todos with this tag
+  -a, --all              Show all todos with their status
+  -h, --help             Show this help
+
+Multiple filters can be combined (AND logic).
+
+Examples:
+  find_tasks --status ready
+  find_tasks --flag high_priority
+  find_tasks --tag orchestrator
+  find_tasks --status blocked --flag high_priority
+  find_tasks --all
+EOF
+    exit 1
+}
+
+STATUS=""
+FLAG=""
+TAG=""
+SHOW_ALL=false
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -s|--status) STATUS="$2"; shift 2 ;;
+        -f|--flag) FLAG="$2"; shift 2 ;;
+        -t|--tag) TAG="$2"; shift 2 ;;
+        -a|--all) SHOW_ALL=true; shift ;;
+        -h|--help) usage ;;
+        *) echo "Unknown option: $1"; usage ;;
+    esac
+done
+
+cd "$TODO_ROOT"
+
+# Show all todos with their status
+if [[ "$SHOW_ALL" = true ]]; then
+    echo "All todos:"
+    echo ""
+    find . -type f -name "*.status" | while read -r f; do
+        TASK_DIR="$(dirname "$f")"
+        TASK_DIR="${TASK_DIR#./}"
+        if [[ "$TASK_DIR" == "todo_item" ]] || [[ "$TASK_DIR" == "task_item" ]]; then
+            continue
+        fi
+        STATUS_FILE="$(basename "$f")"
+        STATUS="${STATUS_FILE%.status}"
+        
+        # Get flags and tags
+        FLAGS=$(find "$TASK_DIR" -maxdepth 1 -name "*.flag" 2>/dev/null | sed 's/.*\///' | sed 's/.flag$//' | tr '\n' ',' | sed 's/,$//')
+        TAGS=$(find "$TASK_DIR" -maxdepth 1 -name "*.tag" 2>/dev/null | sed 's/.*\///' | sed 's/.tag$//' | tr '\n' ',' | sed 's/,$//')
+        
+        printf "%-15s %s\n" "[$STATUS]" "$TASK_DIR"
+        [[ -n "$FLAGS" ]] && printf "%-15s   Flags: %s\n" "" "$FLAGS"
+        [[ -n "$TAGS" ]] && printf "%-15s   Tags: %s\n" "" "$TAGS"
+    done | sort
+    exit 0
+fi
+
+# Find all todo directories (supports legacy task_ prefix)
+RESULTS=$(find . -type d \( -name "todo_*" -o -name "task_*" \) | grep -v "/\.")
+RESULTS=$(printf '%s\n' "$RESULTS" | grep -v '/todo_item$' | grep -v '/task_item$')
+
+# Filter by status
+if [[ -n "$STATUS" ]]; then
+    # Normalize status
+    STATUS_NORMALIZED="${STATUS//_/ }"
+    STATUS_NORMALIZED="${STATUS_NORMALIZED,,}"
+    STATUS_NORMALIZED="${STATUS_NORMALIZED// /_}"
+    STATUS_NORMALIZED="$(echo "$STATUS_NORMALIZED" | sed 's/\b\(.\)/\u\1/g')"
+    
+    FILTERED=""
+    for dir in $RESULTS; do
+        if [[ -f "$dir/${STATUS_NORMALIZED}.status" ]]; then
+            FILTERED="$FILTERED$dir"$'\n'
+        fi
+    done
+    RESULTS="$FILTERED"
+fi
+
+# Filter by flag
+if [[ -n "$FLAG" ]]; then
+    FILTERED=""
+    for dir in $RESULTS; do
+        if [[ -f "$dir/${FLAG}.flag" ]]; then
+            FILTERED="$FILTERED$dir"$'\n'
+        fi
+    done
+    RESULTS="$FILTERED"
+fi
+
+# Filter by tag
+if [[ -n "$TAG" ]]; then
+    FILTERED=""
+    for dir in $RESULTS; do
+        if [[ -f "$dir/${TAG}.tag" ]]; then
+            FILTERED="$FILTERED$dir"$'\n'
+        fi
+    done
+    RESULTS="$FILTERED"
+fi
+
+# Display results
+RESULTS=$(echo "$RESULTS" | grep -v '^$' | sort)
+
+if [[ -z "$RESULTS" ]]; then
+    echo "No todos found matching criteria."
+    [[ -n "$STATUS" ]] && echo "  Status: $STATUS"
+    [[ -n "$FLAG" ]] && echo "  Flag: $FLAG"
+    [[ -n "$TAG" ]] && echo "  Tag: $TAG"
+else
+    echo "Found todos:"
+    echo ""
+    echo "$RESULTS" | while read -r dir; do
+        [[ -z "$dir" ]] && continue
+        dir="${dir#./}"
+        
+        # Get status
+        STATUS_FILE=$(find "$dir" -maxdepth 1 -name "*.status" 2>/dev/null | head -1)
+        if [[ -n "$STATUS_FILE" ]]; then
+            STATUS="${STATUS_FILE##*/}"
+            STATUS="${STATUS%.status}"
+            printf "%-15s %s\n" "[$STATUS]" "$dir"
+        else
+            printf "%-15s %s\n" "[NO STATUS]" "$dir"
+        fi
+    done
+fi

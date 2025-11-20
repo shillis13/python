@@ -62,9 +62,9 @@ def create_test_data():
         "single": single_mapping
     }
 
-def test_chats_splitter():
-    """Test the chats_splitter.py functionality"""
-    print("=== Testing chats_splitter.py ===\n")
+def test_chat_export_splitter():
+    """Test the chat_export_splitter.py functionality"""
+    print("=== Testing chat_export_splitter.py ===\n")
     
     test_data = create_test_data()
     results = []
@@ -87,7 +87,7 @@ def test_chats_splitter():
             
             # Run chats_splitter
             result = subprocess.run([
-                sys.executable, "-m", "chat_processing.chats_splitter",
+                sys.executable, "-m", "chat_processing.chat_export_splitter",
                 str(input_file), "-o", str(output_dir)
             ], capture_output=True, text=True, cwd=Path(__file__).parent.parent)
             
@@ -124,25 +124,31 @@ def test_chat_converter():
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_path = Path(temp_dir)
         
-        # Test different output formats
-        formats = ['json', 'yaml', 'md', 'html']
+        # Test different output formats using -f
+        # Map display name to flag format and extension
+        formats = [
+            ('json', 'json', 'json'),
+            ('yaml', 'yml', 'yml'),
+            ('md', 'md', 'md'),
+            ('html', 'html', 'html'),
+        ]
         results = []
         
-        for fmt in formats:
-            print(f"Testing conversion to {fmt}...")
-            output_file = temp_path / f"output.{fmt}"
+        for display, flag_fmt, ext in formats:
+            print(f"Testing conversion to {display}...")
+            output_file = temp_path / f"output.{ext}"
             
             result = subprocess.run([
                 sys.executable, "-m", "chat_processing.chat_converter",
-                str(test_file), "-o", str(output_file)
+                str(test_file), "-f", flag_fmt, "-o", str(output_file)
             ], capture_output=True, text=True, cwd=Path(__file__).parent.parent)
             
             if result.returncode == 0 and output_file.exists():
                 size = output_file.stat().st_size
-                print(f"  ✓ Created {fmt} file ({size:,} bytes)")
+                print(f"  ✓ Created {display} file ({size:,} bytes)")
                 results.append(True)
             else:
-                print(f"  ✗ Failed to create {fmt} file")
+                print(f"  ✗ Failed to create {display} file")
                 if result.stderr:
                     print(f"    Error: {result.stderr}")
                 results.append(False)
@@ -180,7 +186,7 @@ def test_integration():
         print("1. Splitting multi-chat file...")
         
         result = subprocess.run([
-            sys.executable, "-m", "chat_processing.chats_splitter",
+            sys.executable, "-m", "chat_processing.chat_export_splitter",
             str(input_file), "-o", str(split_dir)
         ], capture_output=True, text=True, cwd=Path(__file__).parent.parent)
         
@@ -215,7 +221,7 @@ def test_help_commands():
     """Test that help commands work"""
     print("\n=== Testing Help Commands ===\n")
     
-    tools = ["chats_splitter", "chat_converter"]
+    tools = ["chat_export_splitter", "chat_converter", "chat_chunker"]
     results = []
     
     for tool in tools:
@@ -232,6 +238,59 @@ def test_help_commands():
     
     return all(results)
 
+
+def test_chat_chunker():
+    """Test the chat_chunker.py functionality on a minimal v2.0 YAML file"""
+    print("\n=== Testing chat_chunker.py ===\n")
+
+    import yaml
+    from datetime import datetime
+
+    # Build a small v2.0 YAML chat with enough content to force multiple chunks
+    now = datetime.utcnow().isoformat() + "Z"
+    chat = {
+        'schema_version': '2.0',
+        'metadata': {
+            'chat_id': 'test_chat_001',
+            'platform': 'test',
+            'created_at': now,
+            'updated_at': now,
+            'title': 'Chunker Test',
+        },
+        'messages': [
+            # 5000 chars ≈ 1250 tokens per message with 4 char/token heuristic
+            {'role': 'user', 'content': 'A' * 5000, 'timestamp': now},
+            {'role': 'assistant', 'content': 'B' * 5000, 'timestamp': now},
+            {'role': 'user', 'content': 'C' * 5000, 'timestamp': now},
+            {'role': 'assistant', 'content': 'D' * 5000, 'timestamp': now},
+        ]
+    }
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_path = Path(temp_dir)
+        input_yaml = temp_path / "input.yaml"
+        output_dir = temp_path / "chunks"
+
+        input_yaml.write_text(yaml.safe_dump(chat, sort_keys=False), encoding='utf-8')
+
+        # Use minimum allowed target size to force >1 chunk
+        result = subprocess.run([
+            sys.executable, "-m", "chat_processing.chat_chunker",
+            str(input_yaml), "-o", str(output_dir), "--target-size", "1000"
+        ], capture_output=True, text=True, cwd=Path(__file__).parent.parent)
+
+        if result.returncode != 0:
+            print(f"  ✗ chat_chunker failed: {result.stderr}")
+            return False
+
+        chunk_files = list(output_dir.glob("*.yaml"))
+        if len(chunk_files) >= 2:
+            print(f"  ✓ Created {len(chunk_files)} chunk files")
+            return True
+        else:
+            print(f"  ✗ Expected multiple chunks, found {len(chunk_files)}")
+            return False
+
 def main():
     print("Chat Processing Tools Test Suite")
     print("=" * 50)
@@ -243,8 +302,9 @@ def main():
     
     tests = [
         ("Help Commands", test_help_commands),
-        ("Chats Splitter", test_chats_splitter),
+        ("Chat Export Splitter", test_chat_export_splitter),
         ("Chat Converter", test_chat_converter),
+        ("Chat Chunker", test_chat_chunker),
         ("Integration", test_integration)
     ]
     

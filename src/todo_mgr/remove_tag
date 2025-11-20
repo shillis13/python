@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# scripts/remove_tag - Remove tag from todo
+
+usage() {
+    cat << EOF
+Usage: remove_tag TAG_NAME [TODO_DIR]
+
+Removes a tag file from a todo.
+
+Arguments:
+  TAG_NAME    Tag name (without .tag extension)
+  TODO_DIR    Todo directory (default: current directory)
+
+Examples:
+  remove_tag orchestrator
+  remove_tag puppeteer todo_fix_bug/
+EOF
+    exit 1
+}
+
+[[ $# -eq 0 ]] && usage
+
+TAG="$1"
+TODO_DIR="${2:-.}"
+
+if [[ ! -d "$TODO_DIR" ]]; then
+    echo "Error: Todo directory not found: $TODO_DIR"
+    exit 1
+fi
+
+if [[ ! -f "$TODO_DIR/${TAG}.tag" ]]; then
+    echo "Warning: Tag '$TAG' not found in $TODO_DIR"
+    exit 0
+fi
+
+rm -f "$TODO_DIR/${TAG}.tag"
+echo "✓ Removed tag: $TAG"
+echo "  Location: $TODO_DIR"

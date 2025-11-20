@@ -29,7 +29,7 @@ class NativeChatGPTParser(BaseParser):
         ])
     
     def parse(self, content: Dict[str, Any], file_path: str = None) -> Dict[str, Any]:
-        logger.info("Parsing native ChatGPT JSON format")
+        logger.debug("Parsing native ChatGPT JSON format")
         
         # Native ChatGPT exports contain an array of sessions
         # For now, we'll process the first session (or could process all)
@@ -131,7 +131,7 @@ class ChatGPTExporterJSONParser(BaseParser):
         ])
     
     def parse(self, content: Dict[str, Any], file_path: str = None) -> Dict[str, Any]:
-        logger.info("Parsing ChatGPT Exporter JSON format")
+        logger.debug("Parsing ChatGPT Exporter JSON format")
         
         result = {
             'schema_version': '2.0',
@@ -253,7 +253,7 @@ class SaveMyChatbotJSONParser(BaseParser):
         )
     
     def parse(self, content: Dict[str, Any], file_path: str = None) -> Dict[str, Any]:
-        logger.info("Parsing SaveMyChatbot JSON format")
+        logger.debug("Parsing SaveMyChatbot JSON format")
         
         result = {
             'schema_version': '2.0',
@@ -355,7 +355,7 @@ class GenericJSONParser(BaseParser):
         return 'messages' in content and isinstance(content['messages'], list)
     
     def parse(self, content: Dict[str, Any], file_path: str = None) -> Dict[str, Any]:
-        logger.info("Parsing generic JSON format")
+        logger.debug("Parsing generic JSON format")
         
         result = {
             'schema_version': '2.0',

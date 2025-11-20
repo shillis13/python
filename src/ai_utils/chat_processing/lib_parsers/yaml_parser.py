@@ -22,7 +22,7 @@ class GenericYAMLParser(BaseParser):
         return format == 'yaml' and isinstance(content, (dict, list))
     
     def parse(self, content: Any, file_path: str = None) -> Dict[str, Any]:
-        logger.info("Parsing YAML format")
+        logger.debug("Parsing YAML format")
         
         # Handle list format (some exports might be arrays)
         if isinstance(content, list):

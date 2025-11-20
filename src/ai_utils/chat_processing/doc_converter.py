@@ -11,8 +11,10 @@ import os
 import sys
 from typing import Tuple
 
-from lib_converters import lib_doc_converter as converter
-from lib_converters import lib_conversion_utils as utils
+from .lib_converters import lib_doc_converter as converter
+from .lib_converters import lib_conversion_utils as utils
+from .lib_formatters.markdown_formatter import format_as_markdown as chat_format_md
+from .lib_formatters.html_formatter import format_as_html as chat_format_html
 from textwrap import dedent
 
 
@@ -22,6 +24,16 @@ class ConversionError(Exception):
     def __init__(self, message: str, *, hint: str | None = None) -> None:
         super().__init__(message)
         self.hint = hint
+
+
+def _supports_color() -> bool:
+    return sys.stdout.isatty() and not os.environ.get('NO_COLOR')
+
+
+def _green(text: str) -> str:
+    if _supports_color():
+        return f"\033[32m{text}\033[0m"
+    return text
 
 
 def _normalize_format(value: str | None, *, default: str = "html") -> str:
@@ -47,6 +59,10 @@ h1 { text-align: center; color: #1a1a1a; font-size: 2em; margin-bottom: 20px; pa
 .toc-section h2 { text-align: left; border-bottom: none; font-size: 1.4em; margin-top: 0; margin-bottom: 15px; }
 .toc ul { padding-left: 20px; }
 """
+
+def _is_chat_v2(root: dict) -> bool:
+    return isinstance(root, dict) and root.get('schema_version') == '2.0' and isinstance(root.get('messages'), list)
+
 
 def run_doc_conversion(args):
     """Execute the document conversion workflow and return a status message."""
@@ -76,7 +92,7 @@ def run_doc_conversion(args):
         use_structured = getattr(args, 'structured', False) and input_ext == "md"
 
         try:
-            metadata, content = converter.parse_document(input_path, input_ext, structured=use_structured)
+            metadata, content, root = converter.parse_document(input_path, input_ext, structured=use_structured)
         except Exception as exc:  # pragma: no cover - defensive
             raise ConversionError(f"Failed to parse document: {exc}") from exc
 
@@ -105,13 +121,26 @@ def run_doc_conversion(args):
             # Traditional format: separate metadata and content
             structured_data = {"metadata": metadata, "content": content}
 
+        # Prefer chat schema-aware formatters when input is chat v2.0
+        v2_root = root if _is_chat_v2(root) else None
+
         if output_format == "html":
-            output_content = converter.to_html_document(
-                metadata, content, DEFAULT_CSS, include_toc=not args.no_toc
-            )
+            if v2_root:
+                output_content = chat_format_html(v2_root)
+            else:
+                output_content = converter.to_html_document(
+                    metadata, content, DEFAULT_CSS, include_toc=not args.no_toc,
+                    compress_newlines=not getattr(args, 'no_compress_newlines', False)
+                )
         elif output_format == "md":
-            # For MD output, if it's already structured data, convert back to string
-            output_content = content if isinstance(content, str) else utils.to_yaml_string(content)
+            if v2_root:
+                output_content = chat_format_md(v2_root)
+            else:
+                # For MD output, if it's already structured data, convert back to string
+                if isinstance(content, str):
+                    output_content = content if getattr(args, 'no_compress_newlines', False) else utils.compress_newlines(content)
+                else:
+                    output_content = utils.to_yaml_string(content)
         elif output_format == "json":
             output_content = utils.to_json_string(structured_data)
         elif output_format == "yml":
@@ -192,6 +221,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip the Table of Contents when producing HTML output.",
     )
     parser.add_argument(
+        "--no-compress-newlines",
+        action="store_true",
+        help="Do not compress excess blank lines in textual content.",
+    )
+    parser.add_argument(
         "--structured",
         action="store_true",
         help="Parse markdown files into structured format (metadata, TOC, sections). Recommended for YAML/JSON output.",
@@ -240,7 +274,7 @@ def main():
     try:
         message = run_doc_conversion(args)
         if message:
-            print(message)
+            print(_green(message))
     except ConversionError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         if getattr(exc, "hint", None):

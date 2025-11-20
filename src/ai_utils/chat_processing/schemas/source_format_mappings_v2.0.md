@@ -340,8 +340,9 @@ metadata:
 # Standalone chunking
 python chat_chunker.py input.yaml -o chunks/ --target-size 4000
 
-# Integrated with converter
-python chat_converter.py input.json --chunk --chunk-size 4000 -o output.yaml
+# Convert then chunk (two-step)
+python chat_converter.py input.json -o output.yaml
+python chat_chunker.py output.yaml -o chunks/ --target-size 4000
 ```
 
 ### Backward Compatibility

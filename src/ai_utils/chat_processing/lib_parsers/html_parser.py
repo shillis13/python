@@ -123,7 +123,7 @@ class GenericHTMLParser(BaseParser):
         return bool(re.search(r'<html|<!DOCTYPE', content, re.IGNORECASE))
     
     def parse(self, content: str, file_path: str = None) -> Dict[str, Any]:
-        logger.info("Parsing HTML format")
+        logger.debug("Parsing HTML format")
         
         # Use custom HTML parser
         parser = ChatHTMLParser()

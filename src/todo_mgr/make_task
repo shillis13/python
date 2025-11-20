@@ -1,0 +1,115 @@
+#!/usr/bin/env bash
+# scripts/make_task - Create new todo from template (legacy name kept for now)
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TODO_ROOT="$(dirname "$SCRIPT_DIR")"
+PRIMARY_TEMPLATE="$TODO_ROOT/todo_item"
+LEGACY_TEMPLATE="$TODO_ROOT/task_item"
+if [[ -d "$PRIMARY_TEMPLATE" ]]; then
+    TEMPLATE_DIR="$PRIMARY_TEMPLATE"
+elif [[ -d "$LEGACY_TEMPLATE" ]]; then
+    TEMPLATE_DIR="$LEGACY_TEMPLATE"
+else
+    TEMPLATE_DIR="$PRIMARY_TEMPLATE"
+fi
+
+usage() {
+    cat << EOF
+Usage: make_task TODO_NAME [PARENT_PATH]
+
+Creates a new todo directory from template. (Command rename to make_todo is planned.)
+
+Arguments:
+  TODO_NAME       Name without 'todo_' prefix (automatically added). Legacy names
+                  that start with task_ are converted to todo_.
+  PARENT_PATH     Optional parent directory (default: current directory)
+
+Examples:
+  make_task fix_message_bug
+  cd todo_AI_to_AI_Chats && make_task setup_chat
+  make_task detect_ready todo_submit_prompt/
+
+Environment:
+  TODO_ROOT: $TODO_ROOT
+EOF
+    exit 1
+}
+
+[[ $# -eq 0 ]] && usage
+
+INPUT_NAME="$1"
+PARENT_PATH="${2:-.}"
+
+# Normalize to todo_ prefix
+if [[ "$INPUT_NAME" =~ ^todo_ ]]; then
+    TODO_NAME="$INPUT_NAME"
+elif [[ "$INPUT_NAME" =~ ^task_ ]]; then
+    TODO_NAME="todo_${INPUT_NAME#task_}"
+else
+    TODO_NAME="todo_${INPUT_NAME}"
+fi
+
+# Resolve target directory
+if [[ "$PARENT_PATH" = "." ]]; then
+    TARGET_DIR="$PWD/$TODO_NAME"
+else
+    TARGET_DIR="$(cd "$PARENT_PATH" 2>/dev/null && pwd)/$TODO_NAME"
+    if [[ ! -d "$(dirname "$TARGET_DIR")" ]]; then
+        echo "Error: Parent directory does not exist: $PARENT_PATH"
+        exit 1
+    fi
+fi
+
+# Validation
+if [[ ! -d "$TEMPLATE_DIR" ]]; then
+    echo "Error: Template not found. Expected at $PRIMARY_TEMPLATE"
+    [[ -d "$LEGACY_TEMPLATE" ]] && echo "Legacy template still available at $LEGACY_TEMPLATE"
+    exit 1
+fi
+
+if [[ -e "$TARGET_DIR" ]]; then
+    echo "Error: Todo already exists: $TARGET_DIR"
+    exit 1
+fi
+
+# Copy template (use -a to preserve symlinks and attributes)
+echo "Creating todo: $TARGET_DIR"
+cp -a "$TEMPLATE_DIR" "$TARGET_DIR"
+
+# Calculate relative path using Python (more reliable)
+cd "$TARGET_DIR"
+RELATIVE_PATH=$(python3 -c "import os.path; print(os.path.relpath('$TODO_ROOT/scripts', '$TARGET_DIR'))")
+
+# Fix scripts symlink
+rm -f "$TARGET_DIR/scripts"
+ln -s "$RELATIVE_PATH" scripts
+
+# Update notes.md with todo display name and date
+TODO_DISPLAY="${TODO_NAME#todo_}"
+TODO_DISPLAY="${TODO_DISPLAY//_/ }"
+TODAY="$(date +%Y-%m-%d)"
+
+if [[ "$(uname)" == "Darwin" ]]; then
+    # macOS
+    sed -i '' \
+        -e "s/__TODO_NAME__/$TODO_DISPLAY/g" \
+        -e "s/__TASK_NAME__/$TODO_DISPLAY/g" \
+        -e "s/__DATE__/$TODAY/g" "notes.md"
+else
+    # Linux
+    sed -i \
+        -e "s/__TODO_NAME__/$TODO_DISPLAY/g" \
+        -e "s/__TASK_NAME__/$TODO_DISPLAY/g" \
+        -e "s/__DATE__/$TODAY/g" "notes.md"
+fi
+
+echo "✓ Created: $TARGET_DIR"
+echo "  Status: Triaging"
+echo ""
+echo "Next steps:"
+echo "  cd $TARGET_DIR"
+echo "  vim notes.md  # Fill in description, requirements, etc."
+echo "  set_status ready  # When ready to dispatch worker Tasks"
+echo ""

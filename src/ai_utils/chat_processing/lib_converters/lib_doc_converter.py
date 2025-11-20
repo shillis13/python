@@ -1,12 +1,7 @@
 # lib_doc_converter.py
-from lib_converters import lib_conversion_utils as utils
+from . import lib_conversion_utils as utils
+from ..md_structure_parser import parse_markdown_structure
 import yaml
-import sys
-import os
-
-# Import md_structure_parser from parent directory
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from md_structure_parser import parse_markdown_structure
 
 """
 * Recursively converts a Python object (from YAML/JSON) into an HTML string
@@ -58,9 +53,19 @@ def _format_yaml_to_html(data_item):
 
 
 def parse_document(file_path, file_format, structured=False):
+    """Parse a generic document (md/json/yml) into metadata, content, and root.
+
+    Returns a tuple of (metadata, content, root_object) where:
+    - metadata: dict of metadata if present, else {}.
+    - content: for markdown, either raw text (unstructured) or structured dict
+               (when structured=True); for json/yml, a Python object representing
+               the core content (not stringified).
+    - root_object: the full loaded object for json/yml (or structured md), to help
+                   callers detect special schemas (e.g., chat v2.0).
+    """
     content_str = utils.read_file_content(file_path)
     if isinstance(content_str, dict) and "error" in content_str:
-        return content_str, None
+        return content_str, None, None
 
     if file_format == "md":
         if structured:
@@ -69,24 +74,29 @@ def parse_document(file_path, file_format, structured=False):
                 parsed_data = parse_markdown_structure(content_str, file_path)
                 metadata = parsed_data.get("metadata", {})
                 # Return metadata and full structure (including TOC and sections)
-                return metadata, parsed_data
+                return metadata, parsed_data, parsed_data
             except Exception as e:
-                return {"error": f"Failed to parse markdown structure: {e}"}, None
+                return {"error": f"Failed to parse markdown structure: {e}"}, None, None
         else:
             # Original behavior: return raw content
-            return {}, content_str
+            return {}, content_str, None
     elif file_format == "json":
         data = utils.load_json_from_string(content_str)
-        if "error" in data:
-            return data, None
-        return data.get("metadata", {}), utils.to_json_string(data.get("content", data))
+        if isinstance(data, dict) and "error" in data:
+            return data, None, None
+        # Return raw object for better downstream formatting decisions
+        metadata = data.get("metadata", {}) if isinstance(data, dict) else {}
+        payload = data.get("content", data) if isinstance(data, dict) else data
+        return metadata, payload, data
     elif file_format == "yml":
         data = utils.load_yaml_from_string(content_str)
-        if "error" in data:
-            return data, None
-        return data.get("metadata", {}), utils.to_yaml_string(data.get("content", data))
+        if isinstance(data, dict) and "error" in data:
+            return data, None, None
+        metadata = data.get("metadata", {}) if isinstance(data, dict) else {}
+        payload = data.get("content", data) if isinstance(data, dict) else data
+        return metadata, payload, data
 
-    return {"error": f"Unsupported input format for document: {file_format}"}, None
+    return {"error": f"Unsupported input format for document: {file_format}"}, None, None
 
 
 """
@@ -104,7 +114,7 @@ def parse_document(file_path, file_format, structured=False):
 """
 
 
-def to_html_document(metadata, content, css_content, include_toc=True):
+def to_html_document(metadata, content, css_content, include_toc=True, *, compress_newlines=True):
     title = metadata.get("title", "Document")
     final_html_content = ""
 
@@ -123,6 +133,8 @@ def to_html_document(metadata, content, css_content, include_toc=True):
             )
 
         if isinstance(doc, str):  # Handle Markdown content
+            if compress_newlines:
+                doc = utils.compress_newlines(doc)
             # (Logic for markdown remains the same)
             html_part = utils.convert_markdown_to_html(
                 doc, extras=["toc", "tables", "fenced-code-blocks", "strike"]

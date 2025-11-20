@@ -1,0 +1,162 @@
+#!/usr/bin/env bash
+# scripts/todo_ref - Quick reference lookup for todos
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TODO_ROOT="$(dirname "$SCRIPT_DIR")"
+
+usage() {
+    cat << EOF
+Usage: todo_ref REF [ACTION]
+
+Quick reference lookup for todos using Kanban column codes.
+
+Reference format: XYN (e.g., TR1, NR2, IP2, RV1, AC1)
+  XY = Column code (TR, NR, ND, RD, IP, RV, AC, BL, DN). Legacy alias: IC = Triaging.
+  N  = Todo number within that column
+
+Column codes:
+  TR = Triaging
+  NR = Needs Research
+  ND = Needs Derivation
+  RD = Ready
+  IP = In Progress
+  RV = Reviewing
+  AC = Accepting
+  BL = Blocked
+  DN = Done
+
+Actions:
+  show     - Show todo details (default)
+  path     - Print todo directory path
+  cd       - Change to todo directory (source this script)
+  notes    - Open notes.md in editor
+  status   - Show current status
+
+Examples:
+  todo_ref IP2           # Show details for In Progress todo #2
+  todo_ref RD1 notes     # Open notes for Ready todo #1
+  todo_ref NR3 path      # Print path to Needs Research todo #3
+EOF
+    exit 1
+}
+
+[[ $# -eq 0 ]] && usage
+
+REF="$1"
+ACTION="${2:-show}"
+
+# Parse reference
+COLUMN_CODE="${REF:0:2}"
+TASK_NUM="${REF:2}"
+
+# Validate format
+if [[ ! "$COLUMN_CODE" =~ ^(TR|NR|ND|RD|IP|RV|AC|BL|DN|IC)$ ]]; then
+    echo "Error: Invalid column code '$COLUMN_CODE'"
+    echo "Valid codes: TR, NR, ND, RD, IP, RV, AC, BL, DN (IC legacy alias for Triaging)"
+    exit 1
+fi
+
+if [[ ! "$TASK_NUM" =~ ^[0-9]+$ ]]; then
+    echo "Error: Invalid todo number '$TASK_NUM'"
+    exit 1
+fi
+
+# Map column code to status
+case "$COLUMN_CODE" in
+    TR|IC) STATUS="Triaging" ;;
+    NR) STATUS="Needs_Research" ;;
+    ND) STATUS="Needs_Derivation" ;;
+    RD) STATUS="Ready" ;;
+    IP) STATUS="In_Progress" ;;
+    RV) STATUS="Reviewing" ;;
+    AC) STATUS="Accepting" ;;
+    BL) STATUS="Blocked" ;;
+    DN) STATUS="Done" ;;
+esac
+
+cd "$TODO_ROOT"
+
+# Find todos with this status
+TASKS=$(find . -type f -name "${STATUS}.status" | sort)
+TASK_ARRAY=()
+while IFS= read -r task_status; do
+    TASK_DIR=$(dirname "$task_status")
+    TASK_ARRAY+=("$TASK_DIR")
+done <<< "$TASKS"
+
+# Check if todo number is valid
+if [[ $TASK_NUM -lt 1 ]] || [[ $TASK_NUM -gt ${#TASK_ARRAY[@]} ]]; then
+    echo "Error: Todo number $TASK_NUM not found in $COLUMN_CODE column"
+    echo "Available: 1-${#TASK_ARRAY[@]}"
+    exit 1
+fi
+
+# Get todo (convert to 0-indexed)
+TASK_INDEX=$((TASK_NUM - 1))
+TASK_PATH="${TASK_ARRAY[$TASK_INDEX]}"
+TASK_PATH="${TASK_PATH#./}"
+
+case "$ACTION" in
+    show)
+        TASK_NAME=$(basename "$TASK_PATH")
+        echo "═══════════════════════════════════════════"
+        echo "Reference: $REF - $TASK_NAME"
+        echo "Path: $TASK_PATH"
+        echo "═══════════════════════════════════════════"
+        echo ""
+        
+        # Show status
+        STATUS_FILE=$(find "$TASK_PATH" -maxdepth 1 -name "*.status" | head -1)
+        if [[ -n "$STATUS_FILE" ]]; then
+            STATUS_NAME=$(basename "$STATUS_FILE" .status)
+            echo "Status: [$STATUS_NAME]"
+        fi
+        
+        # Show flags
+        FLAGS=$(find "$TASK_PATH" -maxdepth 1 -name "*.flag" | sed 's/.*\///' | sed 's/.flag$//' | tr '\n' ', ' | sed 's/,$//')
+        [[ -n "$FLAGS" ]] && echo "Flags: $FLAGS"
+        
+        # Show tags
+        TAGS=$(find "$TASK_PATH" -maxdepth 1 -name "*.tag" | sed 's/.*\///' | sed 's/.tag$//' | tr '\n' ', ' | sed 's/,$//')
+        [[ -n "$TAGS" ]] && echo "Tags: $TAGS"
+        
+        echo ""
+        echo "───────────────────────────────────────────"
+        
+        # Show notes.md content
+        if [[ -f "$TASK_PATH/notes.md" ]]; then
+            cat "$TASK_PATH/notes.md"
+        fi
+        ;;
+        
+    path)
+        echo "$TODO_ROOT/$TASK_PATH"
+        ;;
+        
+    cd)
+        cd "$TASK_PATH"
+        pwd
+        ;;
+        
+    notes)
+        if [[ -f "$TASK_PATH/notes.md" ]]; then
+            ${EDITOR:-vim} "$TASK_PATH/notes.md"
+        else
+            echo "Error: notes.md not found in $TASK_PATH"
+            exit 1
+        fi
+        ;;
+        
+    status)
+        TASK_NAME=$(basename "$TASK_PATH")
+        STATUS_FILE=$(find "$TASK_PATH" -maxdepth 1 -name "*.status" | head -1)
+        STATUS_NAME=$(basename "$STATUS_FILE" .status)
+        echo "$REF: $TASK_NAME [$STATUS_NAME]"
+        ;;
+        
+    *)
+        echo "Error: Unknown action '$ACTION'"
+        echo "Valid actions: show, path, cd, notes, status"
+        exit 1
+        ;;
+esac

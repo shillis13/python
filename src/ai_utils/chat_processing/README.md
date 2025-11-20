@@ -14,7 +14,8 @@ The Chat Processing Framework provides a unified way to process chat exports fro
 chat_processing/
 ├── __init__.py
 ├── chat_converter.py          # Main chat format converter
-├── chats_splitter.py          # Splits multi-chat exports into individual files
+├── chat_chunker.py            # Chunk v2.0 YAML chats into pieces
+├── chat_export_splitter.py    # Splits multi-chat exports into individual files
 ├── doc_converter.py           # General document converter
 ├── lib_parsers/               # Input format parsers
 │   ├── __init__.py
@@ -90,22 +91,41 @@ Converts between various chat formats:
 # Convert to default JSON format
 python chat_converter.py input.md
 
-# Specify output format
-python chat_converter.py input.json -o output.yaml
-python chat_converter.py input.json -o output.md
-python chat_converter.py input.json -o output.html
+# Specify output format explicitly (no need to encode it in -o)
+python chat_converter.py input.json -f yml -o output_dir/
+python chat_converter.py input.json -f md       # writes input_basename.md next to input
+python chat_converter.py input.json -f html -o output   # writes output.html
 ```
 
-### 2. Chats Splitter (`chats_splitter.py`)
+Note: Chunking has been removed from `chat_converter.py`. Use `chat_chunker.py` to split large v2.0 YAML chats into chunks.
+
+### Chat Chunker (`chat_chunker.py`)
+
+Splits large v2.0 YAML chat files into coherent chunks that start at user prompts and include per‑chunk metadata.
+
+```bash
+# Basic usage (writes chunks next to input)
+python chat_chunker.py conversation.yaml
+
+# Specify output directory and custom target size
+python chat_chunker.py conversation.yaml -o ./chunks/ --target-size 4000
+
+# Preview chunking without writing files
+python chat_chunker.py conversation.yaml --dry-run
+```
+
+Outputs chunk files named like: `conversation.chunk_001.yaml`, `conversation.chunk_002.yaml`, etc.
+
+### 2. Chat Export Splitter (`chat_export_splitter.py`)
 
 Splits multi-conversation export files into individual conversation files:
 
 ```bash
 # Split ChatGPT export into individual files
-python chats_splitter.py conversations.json
+python chat_export_splitter.py conversations.json
 
 # Specify output directory
-python chats_splitter.py conversations.json -o ./split_chats/
+python chat_export_splitter.py conversations.json -o ./split_chats/
 ```
 
 **Note**: ChatGPT Export Data produces a single .json file containing all your chats, with the entire data structure written to just the first line of the file. This tool separates each chat into its own properly formatted JSON file. It supports various input formats including arrays of conversations, wrapped formats with a "conversations" key, and single conversation files with "mapping" structures.
@@ -123,7 +143,7 @@ python doc_converter.py config.yml -o config.html
 
 ```bash
 # Convert multiple files to a directory
-python convert_chat.py exports/*.json -o converted/
+python chat_converter.py exports/*.json -o converted/
 
 # All batch outputs are in JSON format
 ```
@@ -132,16 +152,16 @@ python convert_chat.py exports/*.json -o converted/
 
 ```bash
 # Show file info without converting
-python convert_chat.py input.md --info
+python chat_converter.py input.md --info
 
 # Skip schema validation
-python convert_chat.py input.md --no-validate
+python chat_converter.py input.md --no-validate
 
 # Show output preview
-python convert_chat.py input.md --show
+python chat_converter.py input.md --show
 
 # List available parsers
-python convert_chat.py --list-parsers
+python chat_converter.py --list-parsers
 ```
 
 ## Output Format Examples
