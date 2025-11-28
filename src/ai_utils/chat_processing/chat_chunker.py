@@ -32,6 +32,128 @@ from ai_utils.chat_processing.lib_converters.lib_conversion_utils import (
 REQUIRED_METADATA_FIELDS = ("chat_id", "platform", "created_at", "updated_at")
 
 
+def chunk_chat(
+    messages: List[Dict],
+    target_size: int = 50000,
+    size_unit: str = "bytes",
+    overlap: int = 0,
+) -> List[List[Dict]]:
+    """
+    Split chat messages into size-aware chunks while keeping Q&A pairs intact.
+
+    Chunks prefer to end before the next user prompt when the current chunk is
+    approaching the size limit. This keeps assistant responses together with
+    their triggering user messages instead of splitting mid-exchange.
+
+    Args:
+        messages: List of chat messages, each with at least 'role' and 'content'.
+        target_size: Soft maximum per chunk measured in size_unit (default 50000).
+        size_unit: Either "bytes" (UTF-8) or "chars" for measuring message length.
+        overlap: Number of trailing messages from the previous chunk to prepend
+                 to the next chunk for context (defaults to 0).
+
+    Returns:
+        List of message lists, each representing a chunk.
+
+    Raises:
+        ValueError: If inputs are invalid.
+    """
+    if not isinstance(messages, list):
+        raise ValueError("messages must be a list of dictionaries")
+
+    if target_size <= 0:
+        raise ValueError("target_size must be positive")
+
+    if overlap < 0:
+        raise ValueError("overlap must be zero or a positive integer")
+
+    unit = size_unit.lower()
+    if unit not in {"bytes", "byte", "chars", "characters"}:
+        raise ValueError("size_unit must be 'bytes' or 'chars'")
+
+    def message_size(message: Dict) -> int:
+        content = "" if message is None else message.get("content", "")
+        text = str(content) if content is not None else ""
+        if unit in {"bytes", "byte"}:
+            return len(text.encode("utf-8"))
+        return len(text)
+
+    def chunk_size(msgs: List[Dict]) -> int:
+        return sum(message_size(m) for m in msgs)
+
+    if not messages:
+        return []
+
+    threshold = max(1, int(target_size * 0.9))
+    base_chunks: List[List[Dict]] = []
+    current_chunk: List[Dict] = []
+    current_size = 0
+
+    for idx, message in enumerate(messages):
+        msg_size = message_size(message)
+
+        # Oversized single message: place in its own chunk.
+        if msg_size >= target_size:
+            if current_chunk:
+                base_chunks.append(current_chunk)
+            base_chunks.append([message])
+            current_chunk = []
+            current_size = 0
+            continue
+
+        # If we're near the limit and the next message is a user prompt,
+        # end the chunk before adding that user prompt.
+        if (
+            message.get("role") == "user"
+            and current_chunk
+            and current_size >= threshold
+        ):
+            base_chunks.append(current_chunk)
+            current_chunk = []
+            current_size = 0
+
+        projected_size = current_size + msg_size
+        if projected_size > target_size and current_chunk:
+            base_chunks.append(current_chunk)
+            current_chunk = []
+            current_size = 0
+
+        current_chunk.append(message)
+        current_size += msg_size
+
+        # Look ahead for a clean break before the next user prompt when near limit.
+        if current_size >= threshold and idx + 1 < len(messages):
+            next_message = messages[idx + 1]
+            if next_message.get("role") == "user":
+                base_chunks.append(current_chunk)
+                current_chunk = []
+                current_size = 0
+
+    if current_chunk:
+        base_chunks.append(current_chunk)
+
+    if overlap == 0 or len(base_chunks) <= 1:
+        return base_chunks
+
+    overlapped_chunks: List[List[Dict]] = []
+    for i, chunk in enumerate(base_chunks):
+        if i == 0:
+            overlapped_chunks.append(chunk)
+            continue
+
+        prefix = list(base_chunks[i - 1][-overlap:])
+        combined = prefix + chunk
+
+        # Trim overlap from the front if it would push us past the target size.
+        while prefix and chunk_size(combined) > target_size:
+            prefix.pop(0)
+            combined = prefix + chunk
+
+        overlapped_chunks.append(combined)
+
+    return overlapped_chunks
+
+
 def parse_arguments() -> argparse.Namespace:
     """
     Parse command line arguments.
