@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
 import logging
 
-from chat_processing.lib_converters.conversion_framework import BaseParser, ParserRegistry
+from chat_processing.lib_converters.conversion_framework import BaseParser, ParserRegistry, validate_v2_schema
 
 logger = logging.getLogger(__name__)
 
@@ -21,12 +21,15 @@ class NativeChatGPTParser(BaseParser):
         if format != 'json' or not isinstance(content, dict):
             return False
         
-        # Check for native ChatGPT structure
-        return all([
-            'chat_sessions' in content,
-            'format_version' in content,
+        # Check for native ChatGPT structure with chat_sessions array
+        # Accept either format_version or schema_version at root
+        has_sessions = (
+            'chat_sessions' in content and
             isinstance(content.get('chat_sessions'), list)
-        ])
+        )
+        has_version = 'format_version' in content or 'schema_version' in content
+        
+        return has_sessions and has_version
     
     def parse(self, content: Dict[str, Any], file_path: str = None) -> Dict[str, Any]:
         logger.debug("Parsing native ChatGPT JSON format")
@@ -343,6 +346,32 @@ class SaveMyChatbotJSONParser(BaseParser):
         return "SaveMyChatbot JSON"
 
 
+class V2SchemaParser(BaseParser):
+    """Parser for files already in v2.0 schema format.
+    
+    Validates against schema and passes through unchanged.
+    Enables idempotent pipeline processing.
+    """
+    
+    def validate_source(self, content: Any, format: str) -> bool:
+        if format not in ('json', 'yaml') or not isinstance(content, dict):
+            return False
+        return content.get('schema_version') == '2.0'
+    
+    def parse(self, content: Dict[str, Any], file_path: str = None) -> Dict[str, Any]:
+        """Validate and pass through v2.0 content unchanged."""
+        logger.debug("Processing already-converted v2.0 schema file")
+        
+        is_valid, error = validate_v2_schema(content)
+        if not is_valid:
+            raise ValueError(f"Invalid v2.0 schema: {error}")
+        
+        return content
+    
+    def get_source_name(self) -> str:
+        return "v2-schema"
+
+
 class GenericJSONParser(BaseParser):
     """Generic JSON parser for various export formats."""
     
@@ -502,6 +531,7 @@ class GenericJSONParser(BaseParser):
 
 
 # Register parsers
+ParserRegistry.register('v2-schema-json', V2SchemaParser)
 ParserRegistry.register('native-chatgpt-json', NativeChatGPTParser)
 ParserRegistry.register('chatgpt-exporter-json', ChatGPTExporterJSONParser)
 ParserRegistry.register('savemychatbot-json', SaveMyChatbotJSONParser)
