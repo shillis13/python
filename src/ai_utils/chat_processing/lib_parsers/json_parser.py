@@ -346,6 +346,111 @@ class SaveMyChatbotJSONParser(BaseParser):
         return "SaveMyChatbot JSON"
 
 
+class ClaudePlatformParser(BaseParser):
+    """Parser for Claude platform exports (Settings → Export Data).
+    
+    Structure:
+    - uuid, name, summary, created_at, updated_at
+    - account: {uuid}
+    - chat_messages[]: sender, text, content[], attachments[], files[]
+    """
+    
+    def validate_source(self, content: Any, format: str) -> bool:
+        if format != 'json' or not isinstance(content, dict):
+            return False
+        
+        # Claude platform export has uuid, chat_messages, and sender field in messages
+        return all([
+            'uuid' in content,
+            'chat_messages' in content,
+            isinstance(content.get('chat_messages'), list)
+        ])
+    
+    def parse(self, content: Dict[str, Any], file_path: str = None) -> Dict[str, Any]:
+        logger.debug("Parsing Claude platform export format")
+        
+        result = {
+            'schema_version': '2.0',
+            'metadata': {},
+            'messages': []
+        }
+        
+        metadata = result['metadata']
+        
+        # Extract metadata
+        metadata['chat_id'] = content.get('uuid', self._generate_chat_id('claude'))
+        metadata['platform'] = 'claude-web'
+        metadata['exporter'] = 'claude-platform-export'
+        metadata['title'] = content.get('name') or 'Claude Conversation'
+        
+        if content.get('summary'):
+            metadata['description'] = content['summary']
+        
+        # Timestamps
+        if content.get('created_at'):
+            metadata['created_at'] = self._parse_timestamp(content['created_at'])
+        if content.get('updated_at'):
+            metadata['updated_at'] = self._parse_timestamp(content['updated_at'])
+        
+        # Process messages
+        messages = []
+        for i, msg_data in enumerate(content.get('chat_messages', [])):
+            # Map sender to role
+            sender = msg_data.get('sender', 'unknown').lower()
+            if sender == 'human':
+                role = 'user'
+            elif sender == 'assistant':
+                role = 'assistant'
+            else:
+                role = sender
+            
+            # Get content - prefer text field, fallback to content blocks
+            content_text = msg_data.get('text', '')
+            if not content_text and msg_data.get('content'):
+                # Join content blocks
+                parts = []
+                for block in msg_data['content']:
+                    if isinstance(block, dict) and block.get('text'):
+                        parts.append(block['text'])
+                content_text = '\n'.join(parts)
+            
+            message = {
+                'message_id': msg_data.get('uuid', f'msg_{i+1:03d}'),
+                'role': role,
+                'content': content_text,
+                'timestamp': self._parse_timestamp(
+                    msg_data.get('created_at') or 
+                    msg_data.get('updated_at')
+                ),
+            }
+            
+            # Handle attachments/files
+            attachments = msg_data.get('attachments', []) + msg_data.get('files', [])
+            if attachments:
+                message['attachments'] = attachments
+            
+            # Parent reference
+            if messages:
+                message['parent_message_id'] = messages[-1]['message_id']
+            
+            messages.append(message)
+        
+        result['messages'] = messages
+        
+        # Ensure metadata timestamps
+        if messages and not metadata.get('created_at'):
+            metadata['created_at'] = messages[0]['timestamp']
+        if messages and not metadata.get('updated_at'):
+            metadata['updated_at'] = messages[-1]['timestamp']
+        
+        metadata['statistics'] = self._compute_statistics(messages)
+        
+        return result
+    
+    def get_source_name(self) -> str:
+        return "Claude Platform Export"
+
+
 class V2SchemaParser(BaseParser):
     """Parser for files already in v2.0 schema format.
     
@@ -532,6 +637,7 @@ class GenericJSONParser(BaseParser):
 
 # Register parsers
 ParserRegistry.register('v2-schema-json', V2SchemaParser)
+ParserRegistry.register('claude-platform-json', ClaudePlatformParser)
 ParserRegistry.register('native-chatgpt-json', NativeChatGPTParser)
 ParserRegistry.register('chatgpt-exporter-json', ChatGPTExporterJSONParser)
 ParserRegistry.register('savemychatbot-json', SaveMyChatbotJSONParser)
