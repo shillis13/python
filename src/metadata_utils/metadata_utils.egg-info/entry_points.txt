@@ -1,0 +1,2 @@
+[console_scripts]
+dir_struct_discovery = metadata_utils.dir_struct_discovery:main

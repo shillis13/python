@@ -17,6 +17,7 @@ from chat_processing.lib_converters.conversion_framework import (
     convert_to_v2, convert_batch, detect_format, detect_source,
     load_file, ParserRegistry
 )
+from chat_processing.lib_converters.lib_conversion_utils import clean_message_content
 
 # Note: Chunking functionality has been removed from this CLI.
 # Use chat_chunker.py for chunking v2.0 YAML chat files.
@@ -140,12 +141,12 @@ def convert_single_file(input_path: str, output_path: Optional[str] = None,
     - If output_format (-f/--format) is provided and no output path, write to
       same directory as input using input basename + appropriate extension.
     - If output path is provided and is a directory or has no suffix, write a file
-      inside that directory using input basename + extension for output_format (or JSON by default).
+      inside that directory using input basename + extension for output_format (or YAML by default).
     - If output path looks like a file path, do not infer format from its extension.
       If output_format is provided, ensure the file extension matches it by replacing
-      the suffix; otherwise keep the provided path and write JSON by default.
+      the suffix; otherwise keep the provided path and write YAML by default.
     - If neither output_format nor output path is provided, default to input basename
-      with suffix '.v2.json' for backward compatibility.
+      with suffix '_v2.yml'.
     """
     try:
         print(_cyan(f"Converting: {input_path}"))
@@ -153,10 +154,15 @@ def convert_single_file(input_path: str, output_path: Optional[str] = None,
         # Convert
         result = convert_to_v2(input_path, validate=validate, compress_newlines=compress_newlines)
         
+        # Clean message content (decode unicode escapes, normalize newlines)
+        for msg in result.get('messages', []):
+            if 'content' in msg and isinstance(msg['content'], str):
+                msg['content'] = clean_message_content(msg['content'])
+        
         # Determine output format
-        fmt = (output_format or 'json').lower()
+        fmt = (output_format or 'yml').lower()
         if fmt not in ('json', 'yml', 'md', 'html'):
-            fmt = 'json'
+            fmt = 'yml'
 
         # Determine output path based on rules
         input_p = Path(input_path)
@@ -164,8 +170,8 @@ def convert_single_file(input_path: str, output_path: Optional[str] = None,
             if output_format:
                 output_path = str(input_p.with_suffix(_ext_for_format(fmt)))
             else:
-                # Backward compatible default
-                output_path = str(input_p.with_suffix('.v2.json'))
+                # Default to YAML output with _v2 suffix
+                output_path = str(input_p.parent / f"{input_p.stem}_v2.yml")
         else:
             out_p = Path(output_path)
             # If path is an existing directory or has no suffix, treat as directory
@@ -249,7 +255,7 @@ Examples:
     parser.add_argument('-o', '--output', 
                        help='Output file or directory (for batch)')
     parser.add_argument('-f', '--format', choices=['md', 'yml', 'html', 'json'],
-                       help='Output format. If omitted, defaults to JSON. '
+                       help='Output format. If omitted, defaults to YAML. '
                             'If provided without --output, uses input basename in same directory.')
     parser.add_argument('--no-compress-newlines', action='store_true',
                        help='Do not compress excess blank lines in message content')

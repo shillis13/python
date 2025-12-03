@@ -1,0 +1,5 @@
+[console_scripts]
+json_chat_filter = json_utils.json_chat_filter:main
+json_chunker = json_utils.json_chunker:main
+json_to_chat_html = json_utils.archive.json_to_chat_html:main
+md_to_json_converter = json_utils.archive.md_to_json_converter:main

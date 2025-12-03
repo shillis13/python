@@ -1,0 +1,9 @@
+[console_scripts]
+fsActions = file_utils.fsActions:main
+fsFilters = file_utils.fsFilters:main
+fsFind = file_utils.fsFind:main
+fsFormat = file_utils.fsFormat:main
+gen_random_files_dirs = file_utils.gen_random_files_dirs:main
+pygrep = file_utils.pygrep:main
+renameFiles = file_utils.renameFiles:main
+treePrint = file_utils.treePrint:main

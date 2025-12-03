@@ -1,0 +1,11 @@
+setup.py
+email_tools.egg-info/PKG-INFO
+email_tools.egg-info/SOURCES.txt
+email_tools.egg-info/dependency_links.txt
+email_tools.egg-info/entry_points.txt
+email_tools.egg-info/top_level.txt
+gmail_client/__init__.py
+gmail_client/cli_gmail.py
+gmail_client/gmail_auth.py
+gmail_client/gmail_receive.py
+gmail_client/gmail_send.py

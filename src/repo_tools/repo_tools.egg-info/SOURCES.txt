@@ -1,0 +1,6 @@
+setup.py
+repo_tools.egg-info/PKG-INFO
+repo_tools.egg-info/SOURCES.txt
+repo_tools.egg-info/dependency_links.txt
+repo_tools.egg-info/entry_points.txt
+repo_tools.egg-info/top_level.txt

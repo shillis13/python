@@ -1,0 +1,2 @@
+[console_scripts]
+pygit = repo_tools.pygit:main

@@ -56,10 +56,12 @@ ${BLUE}WHAT IS EDITABLE MODE?${NC}
 
 ${BLUE}WHAT DOES --rebuild DO?${NC}
     Scans each package for executable Python scripts (excluding lib_*,
-    test_*, and __* files) and automatically updates setup.py with
-    console_scripts entry points. Use this when you:
+    test_*, and __* files) and automatically generates or updates setup.py
+    with console_scripts entry points. If setup.py doesn't exist, it will
+    be created from scratch. Use this when you:
     - Add new executable scripts
     - Remove scripts
+    - Create a new package (generates setup.py from scratch)
     - Want to ensure setup.py is up-to-date
 
 ${BLUE}CONSOLE COMMANDS:${NC}
@@ -150,6 +152,121 @@ find_executable_scripts() {
     printf '%s\n' "${scripts[@]}"
 }
 
+# Function to create a new setup.py from scratch
+create_setup_py() {
+    local pkg="$1"
+    local pkg_dir="$2"
+    local setup_file="$pkg_dir/setup.py"
+
+    echo -e "${BLUE}  Creating new setup.py for $pkg...${NC}"
+
+    # Determine if this is a package (has __init__.py) or flat modules
+    local is_package=false
+    if [[ -f "$pkg_dir/__init__.py" ]]; then
+        is_package=true
+    fi
+
+    if [[ "$is_package" == "true" ]]; then
+        # Standard package structure
+        cat > "$setup_file" <<EOF
+#!/usr/bin/env python3
+"""Setup configuration for $pkg package."""
+
+from setuptools import setup, find_packages
+from pathlib import Path
+
+# Read README if it exists
+readme_file = Path(__file__).parent / "README.md"
+long_description = readme_file.read_text() if readme_file.exists() else ""
+
+setup(
+    name="$pkg",
+    version="1.0.0",
+    description="$pkg package",
+    long_description=long_description,
+    long_description_content_type="text/markdown",
+    python_requires=">=3.8",
+
+    # Find all packages
+    packages=find_packages(),
+
+    # Include package data
+    include_package_data=True,
+
+    # Dependencies
+    install_requires=[
+        # Add any required packages here
+    ],
+
+    # Classifiers for PyPI (if you ever publish)
+    classifiers=[
+        "Development Status :: 4 - Beta",
+        "Intended Audience :: Developers",
+        "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3.8",
+        "Programming Language :: Python :: 3.9",
+        "Programming Language :: Python :: 3.10",
+        "Programming Language :: Python :: 3.11",
+    ],
+)
+EOF
+    else
+        # Flat module structure (no __init__.py) - use py_modules
+        # Find all top-level .py files (excluding setup.py)
+        local py_modules=""
+        for pyfile in "$pkg_dir"/*.py; do
+            local basename=$(basename "$pyfile" .py)
+            if [[ "$basename" != "setup" && "$basename" != "__"* ]]; then
+                if [[ -n "$py_modules" ]]; then
+                    py_modules+=", "
+                fi
+                py_modules+="'$basename'"
+            fi
+        done
+
+        cat > "$setup_file" <<EOF
+#!/usr/bin/env python3
+"""Setup configuration for $pkg package."""
+
+from setuptools import setup
+from pathlib import Path
+
+# Read README if it exists
+readme_file = Path(__file__).parent / "README.md"
+long_description = readme_file.read_text() if readme_file.exists() else ""
+
+setup(
+    name="$pkg",
+    version="1.0.0",
+    description="$pkg package",
+    long_description=long_description,
+    long_description_content_type="text/markdown",
+    python_requires=">=3.8",
+
+    # Individual modules (flat structure, no __init__.py)
+    py_modules=[$py_modules],
+
+    # Dependencies
+    install_requires=[
+        # Add any required packages here
+    ],
+
+    # Classifiers for PyPI (if you ever publish)
+    classifiers=[
+        "Development Status :: 4 - Beta",
+        "Intended Audience :: Developers",
+        "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3.8",
+        "Programming Language :: Python :: 3.9",
+        "Programming Language :: Python :: 3.10",
+        "Programming Language :: Python :: 3.11",
+    ],
+)
+EOF
+    fi
+    echo -e "${GREEN}  ✓ Created setup.py${NC}"
+}
+
 # Function to rebuild setup.py with discovered scripts
 rebuild_setup_py() {
     local pkg="$1"
@@ -161,19 +278,18 @@ rebuild_setup_py() {
     local scripts=()
     mapfile -t scripts < <(find_executable_scripts "$pkg_dir")
 
+    # Check if setup.py exists, create if not
+    local setup_file="$pkg_dir/setup.py"
+    if [[ ! -f "$setup_file" ]]; then
+        create_setup_py "$pkg" "$pkg_dir"
+    fi
+
     if [[ ${#scripts[@]} -eq 0 ]]; then
-        echo -e "${YELLOW}  No executable scripts found, skipping setup.py rebuild${NC}"
+        echo -e "${YELLOW}  No executable scripts found, skipping entry_points update${NC}"
         return 0
     fi
 
     echo -e "${GREEN}  Found ${#scripts[@]} executable script(s)${NC}"
-
-    # Read existing setup.py
-    local setup_file="$pkg_dir/setup.py"
-    if [[ ! -f "$setup_file" ]]; then
-        echo -e "${RED}  setup.py not found${NC}"
-        return 1
-    fi
 
     # Create entry_points section
     local entry_points="    # Console scripts - auto-generated\n"
@@ -196,7 +312,15 @@ rebuild_setup_py() {
         # Keep script name as-is (with underscores)
         local cmd_name="$script"
 
-        entry_points+="            '$cmd_name=${pkg}.${module_path}:main',\n"
+        # If script is at top level (no subdirectory), use just the module name
+        # Otherwise, prefix with package name
+        if [[ "$module_path" == *"/"* ]] || [[ "$module_path" == *"."* ]]; then
+            # Script is in a subdirectory, use full path
+            entry_points+="            '$cmd_name=${pkg}.${module_path}:main',\n"
+        else
+            # Script is at top level, just use module name directly
+            entry_points+="            '$cmd_name=${module_path}:main',\n"
+        fi
     done
 
     entry_points+="        ],\n"
@@ -262,29 +386,32 @@ install_package() {
         return 1
     fi
 
+    # Rebuild setup.py if requested (this will create it if missing)
+    if [[ "$REBUILD_SETUP" == "true" ]]; then
+        rebuild_setup_py "$pkg"
+    fi
+
     if ! has_setup "$pkg"; then
         echo -e "${YELLOW}⚠ No setup.py found in $pkg, skipping${NC}"
         return 1
     fi
 
-    # Rebuild setup.py if requested
-    if [[ "$REBUILD_SETUP" == "true" ]]; then
-        rebuild_setup_py "$pkg"
-    fi
-
     echo -e "${BLUE}Installing $pkg...${NC}"
     # Use python3 -m pip for better compatibility
+    # --config-settings editable_mode=compat ensures legacy editable install
+    # behavior works with modern setuptools (64+)
     # Try different installation methods in order of preference:
     # 1. Normal install (works in venv)
     # 2. User install
     # 3. Break system packages (needed for Homebrew Python 3.14+)
-    if python3 -m pip install -e "$pkg_path" 2>/dev/null; then
+    local pip_opts="--config-settings editable_mode=compat"
+    if python3 -m pip install -e "$pkg_path" $pip_opts 2>/dev/null; then
         echo -e "${GREEN}✓ Successfully installed $pkg${NC}"
         return 0
-    elif python3 -m pip install --user -e "$pkg_path" 2>/dev/null; then
+    elif python3 -m pip install --user -e "$pkg_path" $pip_opts 2>/dev/null; then
         echo -e "${GREEN}✓ Successfully installed $pkg (user install)${NC}"
         return 0
-    elif python3 -m pip install --break-system-packages -e "$pkg_path"; then
+    elif python3 -m pip install --break-system-packages -e "$pkg_path" $pip_opts; then
         echo -e "${GREEN}✓ Successfully installed $pkg (system packages)${NC}"
         return 0
     else

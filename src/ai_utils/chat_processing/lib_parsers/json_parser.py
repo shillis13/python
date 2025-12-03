@@ -125,8 +125,11 @@ class ChatGPTExporterJSONParser(BaseParser):
             return False
         
         # Check for ChatGPT Exporter patterns
+        # Note: metadata may be nested under 'metadata' key or at root level
+        source_meta = content.get('metadata', content)
+        
         return any([
-            'powered_by' in content and 'ChatGPT Exporter' in str(content.get('powered_by', '')),
+            'powered_by' in source_meta and 'ChatGPT Exporter' in str(source_meta.get('powered_by', '')),
             (isinstance(content.get('messages'), list) and 
              any('say' in msg for msg in content.get('messages', []))),
             (isinstance(content.get('messages'), list) and
@@ -144,14 +147,18 @@ class ChatGPTExporterJSONParser(BaseParser):
         
         metadata = result['metadata']
         
+        # Handle both nested and flat metadata structures
+        # ChatGPT Exporter puts metadata under 'metadata' key
+        source_meta = content.get('metadata', content)
+        
         # Extract metadata
-        metadata['title'] = content.get('title', 'ChatGPT Export')
+        metadata['title'] = source_meta.get('title', content.get('title', 'ChatGPT Export'))
         metadata['platform'] = 'chatgpt'
         metadata['exporter'] = 'ChatGPT Exporter'
         
-        # Handle various date formats
-        if 'dates' in content:
-            dates = content['dates']
+        # Handle various date formats - check nested structure first
+        dates = source_meta.get('dates', content.get('dates', {}))
+        if dates:
             if 'created' in dates:
                 metadata['created_at'] = self._parse_timestamp(dates['created'])
             if 'updated' in dates:
@@ -160,7 +167,8 @@ class ChatGPTExporterJSONParser(BaseParser):
                 metadata['exported_at'] = self._parse_timestamp(dates['exported'])
         
         # Handle user info if present
-        if 'user' in content and isinstance(content['user'], dict):
+        user_info = source_meta.get('user', content.get('user'))
+        if user_info and isinstance(user_info, dict):
             # Could store user info in metadata if needed
             pass
         
@@ -368,9 +376,9 @@ class ClaudePlatformParser(BaseParser):
     
     def parse(self, content: Dict[str, Any], file_path: str = None) -> Dict[str, Any]:
         logger.debug("Parsing Claude platform export format")
-        
+
         result = {
-            'schema_version': '2.0',
+            'schema_version': '2.1',  # Updated for thinking block support
             'metadata': {},
             'messages': []
         }
@@ -404,15 +412,25 @@ class ClaudePlatformParser(BaseParser):
             else:
                 role = sender
             
-            # Get content - prefer text field, fallback to content blocks
-            content_text = msg_data.get('text', '')
-            if not content_text and msg_data.get('content'):
-                # Join content blocks
-                parts = []
-                for block in msg_data['content']:
-                    if isinstance(block, dict) and block.get('text'):
-                        parts.append(block['text'])
-                content_text = '\n'.join(parts)
+            # Extract thinking and content separately from content blocks
+            thinking_parts = []
+            content_parts = []
+
+            # Always process content blocks to get proper separation
+            for block in msg_data.get('content', []):
+                if isinstance(block, dict):
+                    if block.get('type') == 'thinking':
+                        thinking_parts.append(block.get('thinking', ''))
+                    elif block.get('type') == 'text':
+                        content_parts.append(block.get('text', ''))
+
+            # If no content blocks parsed, fall back to text field
+            if not content_parts:
+                content_text = msg_data.get('text', '')
+            else:
+                content_text = '\n\n'.join(filter(None, content_parts))
+
+            thinking_text = '\n\n'.join(filter(None, thinking_parts)) if thinking_parts else None
             
             message = {
                 'message_id': msg_data.get('uuid', f'msg_{i+1:03d}'),
@@ -424,6 +442,10 @@ class ClaudePlatformParser(BaseParser):
                 ),
             }
             
+            # Add thinking field if present
+            if thinking_text:
+                message['thinking'] = thinking_text
+
             # Handle attachments/files
             attachments = msg_data.get('attachments', []) + msg_data.get('files', [])
             if attachments:

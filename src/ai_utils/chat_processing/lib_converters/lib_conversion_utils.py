@@ -127,7 +127,7 @@ def load_yaml_from_string(content):
 
 
 def to_yaml_string(data):
-    return yaml.dump(data, sort_keys=False)
+    return yaml.dump(data, sort_keys=False, allow_unicode=True)
 
 
 def compress_newlines(text: str, max_consecutive: int = 2) -> str:
@@ -152,6 +152,68 @@ def compress_newlines(text: str, max_consecutive: int = 2) -> str:
     import re as _re
     pattern = _re.compile(r'(?:\r?\n){' + str(max_consecutive + 1) + r',}')
     return pattern.sub('\n' * max_consecutive, text)
+
+
+def decode_unicode_escapes(text: str) -> str:
+    """Decode unicode escape sequences in text.
+    
+    Converts escaped unicode like \\u251C to actual characters (├).
+    Handles both \\uXXXX (4-digit) patterns.
+    
+    Args:
+        text: Input text that may contain unicode escapes.
+        
+    Returns:
+        Text with unicode escapes decoded to actual characters.
+    """
+    if not isinstance(text, str) or not text:
+        return text
+    
+    # Pattern matches \uXXXX where X is a hex digit
+    # This handles the case where JSON was double-escaped or not fully decoded
+    def replace_unicode(match):
+        try:
+            code_point = int(match.group(1), 16)
+            return chr(code_point)
+        except (ValueError, OverflowError):
+            return match.group(0)  # Return original if can't decode
+    
+    # Handle \\uXXXX (escaped backslash + u + 4 hex digits)
+    text = re.sub(r'\\u([0-9a-fA-F]{4})', replace_unicode, text)
+    
+    return text
+
+
+def clean_message_content(text: str) -> str:
+    """Clean message content by applying standard normalizations.
+    
+    Applies:
+    - Unicode escape decoding (\\u251C -> ├)
+    - Newline compression (max 2 consecutive)
+    - Whitespace normalization
+    
+    Args:
+        text: Raw message content.
+        
+    Returns:
+        Cleaned message content.
+    """
+    if not isinstance(text, str) or not text:
+        return text
+    
+    # Decode unicode escapes first
+    text = decode_unicode_escapes(text)
+    
+    # Then compress newlines
+    text = compress_newlines(text)
+    
+    # Normalize any remaining literal \n sequences to actual newlines
+    text = text.replace('\\n', '\n')
+    
+    # Final newline compression after literal \n replacement
+    text = compress_newlines(text)
+    
+    return text
 
 
 def _fallback_markdown_to_html(text):

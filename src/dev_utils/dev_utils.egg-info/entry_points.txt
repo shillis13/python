@@ -1,0 +1,2 @@
+[console_scripts]
+compile_check = dev_utils.compile_check:main

@@ -1,0 +1,2 @@
+[console_scripts]
+cli_gmail = email_tools.gmail_client.cli_gmail:main

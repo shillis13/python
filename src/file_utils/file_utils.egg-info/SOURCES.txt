@@ -1,0 +1,7 @@
+setup.py
+file_utils.egg-info/PKG-INFO
+file_utils.egg-info/SOURCES.txt
+file_utils.egg-info/dependency_links.txt
+file_utils.egg-info/entry_points.txt
+file_utils.egg-info/top_level.txt
+zip_client/__init__.py

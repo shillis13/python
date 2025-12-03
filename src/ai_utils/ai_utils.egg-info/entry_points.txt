@@ -1,0 +1,12 @@
+[console_scripts]
+batch_md_to_yaml = ai_utils.chat_processing.batch_md_to_yaml:main
+chat_chunker = ai_utils.chat_processing.chat_chunker:main
+chat_converter = ai_utils.chat_processing.chat_converter:main
+chats_splitter = ai_utils.chat_processing.chats_splitter:main
+codex_manager = ai_utils.codex_manager:main
+distribute_ai_files = ai_utils.distribute_ai_files:main
+doc_converter = ai_utils.chat_processing.doc_converter:main
+liaison = ai_utils.FILE.liaison:main
+md_structure_parser = ai_utils.chat_processing.md_structure_parser:main
+python_chat_utilities = ai_utils.chat_continuity_protocol.python_chat_utilities:main
+simple_schema_validator = ai_utils.validation.simple_schema_validator:main

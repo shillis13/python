@@ -1,0 +1,2 @@
+[console_scripts]
+todo_mgr = todo_mgr:main

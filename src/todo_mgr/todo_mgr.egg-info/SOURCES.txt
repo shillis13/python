@@ -1,0 +1,7 @@
+setup.py
+todo_mgr.py
+todo_mgr.egg-info/PKG-INFO
+todo_mgr.egg-info/SOURCES.txt
+todo_mgr.egg-info/dependency_links.txt
+todo_mgr.egg-info/entry_points.txt
+todo_mgr.egg-info/top_level.txt

@@ -1,0 +1,7 @@
+README.md
+setup.py
+metadata_utils.egg-info/PKG-INFO
+metadata_utils.egg-info/SOURCES.txt
+metadata_utils.egg-info/dependency_links.txt
+metadata_utils.egg-info/entry_points.txt
+metadata_utils.egg-info/top_level.txt

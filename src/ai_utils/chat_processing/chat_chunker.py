@@ -181,8 +181,11 @@ Examples:
   # Combine options
   %(prog)s conversation.yaml -o output/ --target-size 3000 --dry-run
 
+  # Use title-based naming instead of source filename
+  %(prog)s 0181_Puppeteer_test_v2.json -o output/ --basename puppeteer_test
+
 Output:
-  Creates chunk files named: input_name.chunk_001.yaml, input_name.chunk_002.yaml, etc.
+  Creates chunk files named: {basename}.chunk_001.yaml, {basename}.chunk_002.yaml, etc.
   Each chunk is a valid v2.0 YAML file that can be processed independently.
         '''
     )
@@ -224,6 +227,12 @@ Output:
         '-v', '--verbose',
         action='store_true',
         help='Verbose output (show detailed chunk information)'
+    )
+
+    parser.add_argument(
+        '--basename',
+        type=str,
+        help='Base name for output chunk files (default: input filename stem). Use this to set title-based naming like "review_pull_requests" instead of source filename.'
     )
 
     args = parser.parse_args()
@@ -272,9 +281,9 @@ def load_chat_file(file_path: Path) -> Dict:
         if key not in chat_data:
             raise ValueError(f"Missing required key: '{key}' (not v2.0 schema?)")
 
-    # Validate schema version
-    if chat_data.get('schema_version') != '2.0':
-        raise ValueError(f"Expected schema version 2.0, got {chat_data.get('schema_version')}")
+    # Validate schema version (2.0 or 2.1 with thinking field)
+    if chat_data.get('schema_version') not in ('2.0', '2.1'):
+        raise ValueError(f"Expected schema version 2.0 or 2.1, got {chat_data.get('schema_version')}")
 
     # Validate metadata structure
     if not isinstance(chat_data['metadata'], dict):
@@ -449,14 +458,16 @@ def _build_chunk_metadata(
     return chunk_metadata
 
 
-def write_chunk_files(chat_data: Dict, input_path: Path, output_dir: Path) -> int:
+def write_chunk_files(chat_data: Dict, input_path: Path, output_dir: Path, basename: str = None) -> int:
     """
     Write individual chunk files.
 
     Args:
         chat_data: Chat data with chunking metadata
-        input_path: Original input file path (for naming)
+        input_path: Original input file path (for naming fallback)
         output_dir: Directory to write chunk files
+        basename: Optional base name for output files (e.g., "review_pull_requests").
+                  If not provided, uses input filename stem.
 
     Returns:
         Number of files written
@@ -466,7 +477,8 @@ def write_chunk_files(chat_data: Dict, input_path: Path, output_dir: Path) -> in
     """
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    base_name = input_path.stem  # filename without extension
+    # Use provided basename or fall back to input filename
+    base_name = basename if basename else input_path.stem
     chunking = chat_data['metadata']['chunking']
     messages = chat_data['messages']
     files_written = 0
@@ -561,7 +573,7 @@ def main() -> int:
         return 0
 
     try:
-        files_written = write_chunk_files(chunked_data, input_path, output_dir)
+        files_written = write_chunk_files(chunked_data, input_path, output_dir, basename=args.basename)
         print(f"\n✓ Success! {files_written} chunk files written.")
         return 0
 

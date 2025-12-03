@@ -1,0 +1,5 @@
+setup.py
+DataTableFunctions.egg-info/PKG-INFO
+DataTableFunctions.egg-info/SOURCES.txt
+DataTableFunctions.egg-info/dependency_links.txt
+DataTableFunctions.egg-info/top_level.txt

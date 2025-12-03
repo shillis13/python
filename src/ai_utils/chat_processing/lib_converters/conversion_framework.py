@@ -64,6 +64,7 @@ class BaseParser(ABC):
                 "%Y-%m-%dT%H:%M:%S",
                 "%Y-%m-%dT%H:%M:%SZ",
                 "%Y-%m-%dT%H:%M:%S.%fZ",
+                "%m/%d/%Y %H:%M:%S",         # ChatGPT Exporter format: "10/23/2025 12:06:08"
                 "%m/%d/%Y at %I:%M %p",
                 "%B %d, %Y at %I:%M %p",
             ]

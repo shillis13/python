@@ -11,7 +11,8 @@
       "Bash(./install_packages.sh:*)",
       "Bash(pip3:*)",
       "Bash(python3:*)",
-      "Bash(cat:*)"
+      "Bash(cat:*)",
+      "Bash(todo_mgr:*)"
     ],
     "deny": []
   }

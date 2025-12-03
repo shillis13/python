@@ -1,0 +1,2 @@
+[console_scripts]
+cleanhist = terminal_utils.cleanhist:main

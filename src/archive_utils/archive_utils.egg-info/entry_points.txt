@@ -1,0 +1,3 @@
+[console_scripts]
+cli_archive = archive_utils.cli_archive:main
+fileBackup = archive_utils.fileBackup:main
