@@ -185,7 +185,7 @@ Examples:
   %(prog)s 0181_Puppeteer_test_v2.json -o output/ --basename puppeteer_test
 
 Output:
-  Creates chunk files named: {basename}.chunk_001.yaml, {basename}.chunk_002.yaml, etc.
+  Creates chunk files named: {basename}.chunk_001.yml, {basename}.chunk_002.yml, etc.
   Each chunk is a valid v2.0 YAML file that can be processed independently.
         '''
     )
@@ -487,7 +487,7 @@ def write_chunk_files(chat_data: Dict, input_path: Path, output_dir: Path, basen
 
     for chunk_meta in chunking['chunk_metadata']:
         chunk_id = chunk_meta['chunk_id']
-        chunk_file = output_dir / f"{base_name}.{chunk_id}.yaml"
+        chunk_file = output_dir / f"{base_name}.{chunk_id}.yml"
 
         # Extract messages for this chunk
         msg_start, msg_end = chunk_meta['message_range']
