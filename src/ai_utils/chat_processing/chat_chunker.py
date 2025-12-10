@@ -185,7 +185,7 @@ Examples:
   %(prog)s 0181_Puppeteer_test_v2.json -o output/ --basename puppeteer_test
 
 Output:
-  Creates chunk files named: {basename}.chunk_001.yaml, {basename}.chunk_002.yaml, etc.
+  Creates chunk files named: {basename}.chunk_001.yml, {basename}.chunk_002.yml, etc.
   Each chunk is a valid v2.0 YAML file that can be processed independently.
         '''
     )

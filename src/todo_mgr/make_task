@@ -5,8 +5,8 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TODO_ROOT="$(dirname "$SCRIPT_DIR")"
-PRIMARY_TEMPLATE="$TODO_ROOT/todo_item"
-LEGACY_TEMPLATE="$TODO_ROOT/task_item"
+PRIMARY_TEMPLATE="$TODO_ROOT/_todo_item_template"
+LEGACY_TEMPLATE="$TODO_ROOT/todo_item"
 if [[ -d "$PRIMARY_TEMPLATE" ]]; then
     TEMPLATE_DIR="$PRIMARY_TEMPLATE"
 elif [[ -d "$LEGACY_TEMPLATE" ]]; then
@@ -65,7 +65,7 @@ fi
 # Validation
 if [[ ! -d "$TEMPLATE_DIR" ]]; then
     echo "Error: Template not found. Expected at $PRIMARY_TEMPLATE"
-    [[ -d "$LEGACY_TEMPLATE" ]] && echo "Legacy template still available at $LEGACY_TEMPLATE"
+    [[ -d "$LEGACY_TEMPLATE" ]] && echo "Legacy template available at $LEGACY_TEMPLATE"
     exit 1
 fi
 
