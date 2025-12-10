@@ -13,6 +13,7 @@ from typing import Tuple
 
 from .lib_converters import lib_doc_converter as converter
 from .lib_converters import lib_conversion_utils as utils
+from .lib_converters.lib_doc_converter import yaml_to_markdown
 from .lib_formatters.markdown_formatter import format_as_markdown as chat_format_md
 from .lib_formatters.html_formatter import format_as_html as chat_format_html
 from textwrap import dedent
@@ -136,11 +137,13 @@ def run_doc_conversion(args):
             if v2_root:
                 output_content = chat_format_md(v2_root)
             else:
-                # For MD output, if it's already structured data, convert back to string
+                # For MD output, if it's already structured data, convert to prose markdown
                 if isinstance(content, str):
                     output_content = content if getattr(args, 'no_compress_newlines', False) else utils.compress_newlines(content)
                 else:
-                    output_content = utils.to_yaml_string(content)
+                    # Convert structured data (from YAML/JSON) to readable Markdown prose
+                    title = metadata.get('title') if isinstance(metadata, dict) else None
+                    output_content = yaml_to_markdown(root if root else content, title=title)
         elif output_format == "json":
             output_content = utils.to_json_string(structured_data)
         elif output_format == "yml":

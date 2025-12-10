@@ -2,6 +2,7 @@
 from . import lib_conversion_utils as utils
 from ..md_structure_parser import parse_markdown_structure
 import yaml
+import re
 
 """
 * Recursively converts a Python object (from YAML/JSON) into an HTML string
@@ -13,6 +14,158 @@ import yaml
 * Returns:
 *    str: An HTML representation of the data.
 """
+
+
+def _format_key_as_header(key: str) -> str:
+    """Convert a YAML key into a readable header title.
+
+    Transforms snake_case and dash-case into Title Case.
+    """
+    # Replace underscores and dashes with spaces
+    title = re.sub(r'[_-]', ' ', str(key))
+    # Title case the result
+    return title.title()
+
+
+def _is_prose_block(value) -> bool:
+    """Check if a value should be rendered as prose (not a structured list).
+
+    Multi-line strings or single-line strings are typically prose.
+    """
+    if not isinstance(value, str):
+        return False
+    return True
+
+
+def _format_yaml_to_markdown(data_item, level: int = 1, parent_key: str = None, skip_metadata: bool = False) -> str:
+    """Recursively converts a Python object (from YAML/JSON) into Markdown prose.
+
+    Args:
+        data_item: The Python object (dict, list, or primitive) to convert.
+        level: Current header level (1-6, clamped to 6 max).
+        parent_key: The key of the parent element (used for context).
+        skip_metadata: If True, skip the 'metadata' key at the current level.
+
+    Returns:
+        str: A Markdown representation of the data with proper headers and structure.
+    """
+    lines = []
+    header_prefix = '#' * min(level, 6)
+
+    if isinstance(data_item, dict):
+        for key, value in data_item.items():
+            # Skip metadata section if requested (it's handled separately for title)
+            if skip_metadata and key == 'metadata':
+                continue
+
+            readable_key = _format_key_as_header(key)
+
+            if value is None:
+                # Just a header with no content
+                lines.append(f"\n{header_prefix} {readable_key}\n")
+            elif isinstance(value, str):
+                # String value - render as header with prose paragraph
+                lines.append(f"\n{header_prefix} {readable_key}\n")
+                # Clean up the string (strip, normalize whitespace)
+                prose = value.strip()
+                if prose:
+                    lines.append(f"\n{prose}\n")
+            elif isinstance(value, list):
+                # List - render as header with bullet points
+                lines.append(f"\n{header_prefix} {readable_key}\n")
+                for item in value:
+                    if isinstance(item, str):
+                        lines.append(f"- {item}")
+                    elif isinstance(item, dict):
+                        # Complex list item - recurse with increased level
+                        # First, check if it's a simple key-value dict
+                        if len(item) == 1:
+                            for k, v in item.items():
+                                if isinstance(v, str):
+                                    lines.append(f"- **{_format_key_as_header(k)}**: {v}")
+                                else:
+                                    lines.append(f"\n{'#' * min(level + 1, 6)} {_format_key_as_header(k)}\n")
+                                    lines.append(_format_yaml_to_markdown(v, level + 2, k))
+                        else:
+                            # Multi-key dict in list - render as sub-section
+                            lines.append(_format_yaml_to_markdown(item, level + 1, key))
+                    else:
+                        lines.append(f"- {item}")
+                lines.append("")  # Add blank line after list
+            elif isinstance(value, dict):
+                # Nested dict - render as header and recurse
+                lines.append(f"\n{header_prefix} {readable_key}\n")
+                lines.append(_format_yaml_to_markdown(value, level + 1, key))
+            else:
+                # Primitive value (number, bool, etc.)
+                lines.append(f"\n{header_prefix} {readable_key}\n")
+                lines.append(f"\n{value}\n")
+
+    elif isinstance(data_item, list):
+        # Top-level list
+        for item in data_item:
+            if isinstance(item, str):
+                lines.append(f"- {item}")
+            elif isinstance(item, dict):
+                lines.append(_format_yaml_to_markdown(item, level, parent_key))
+            else:
+                lines.append(f"- {item}")
+        lines.append("")
+
+    else:
+        # Primitive at top level
+        lines.append(str(data_item))
+
+    return '\n'.join(lines)
+
+
+def yaml_to_markdown(data: dict, title: str = None) -> str:
+    """Convert a YAML data structure to readable Markdown prose.
+
+    Args:
+        data: The parsed YAML data (dict or list).
+        title: Optional title to use as H1. If not provided, extracts from metadata.
+
+    Returns:
+        str: Complete Markdown document with headers, prose, and lists.
+    """
+    lines = []
+
+    # Extract title from metadata if available
+    if title is None and isinstance(data, dict):
+        metadata = data.get('metadata', {})
+        if isinstance(metadata, dict):
+            title = metadata.get('title')
+
+    # Add title as H1
+    if title:
+        lines.append(f"# {title}\n")
+
+    # Add metadata info if present (version, status, etc.) as a brief intro
+    if isinstance(data, dict) and 'metadata' in data:
+        metadata = data['metadata']
+        if isinstance(metadata, dict):
+            meta_parts = []
+            for key in ['version', 'status', 'created', 'maintainer']:
+                if key in metadata:
+                    meta_parts.append(f"**{_format_key_as_header(key)}:** {metadata[key]}")
+            if meta_parts:
+                lines.append(' | '.join(meta_parts))
+                lines.append("")
+
+            # Add purpose/description if present
+            if 'purpose' in metadata:
+                lines.append(f"*{metadata['purpose'].strip()}*\n")
+
+    # Convert the main content (skip metadata since we already handled it above)
+    lines.append(_format_yaml_to_markdown(data, level=2, skip_metadata=True))
+
+    # Clean up excessive blank lines
+    result = '\n'.join(lines)
+    # Collapse 3+ newlines to 2
+    result = re.sub(r'\n{3,}', '\n\n', result)
+
+    return result.strip() + '\n'
 
 
 def _format_yaml_to_html(data_item):

@@ -355,9 +355,16 @@ def _require_base_metadata(
     original_metadata: Dict,
     chunk_meta: Dict,
     chunk_messages: List[Dict],
+    source_section: Dict = None,
 ) -> Dict:
     """
     Extract the minimum schema-required metadata from the original document.
+
+    Args:
+        original_metadata: Metadata section from source chat
+        chunk_meta: Metadata for this specific chunk
+        chunk_messages: Messages in this chunk
+        source_section: Optional source section (v2.0 schema) for platform/chat_id fallback
 
     Raises:
         ValueError: if any of the required base fields are missing
@@ -366,10 +373,20 @@ def _require_base_metadata(
     start_fallback = timestamp_range.get('start') or _first_timestamp(chunk_messages)
     end_fallback = timestamp_range.get('end') or _last_timestamp(chunk_messages)
 
+    # Build lookup that merges source section into metadata for v2.0 schema compatibility
+    # v2.0 schema puts platform/conversation_id in source, older schemas put chat_id/platform in metadata
+    combined = dict(original_metadata)
+    if source_section:
+        # Map source fields to expected metadata field names
+        if 'platform' in source_section and 'platform' not in combined:
+            combined['platform'] = source_section['platform']
+        if 'conversation_id' in source_section and 'chat_id' not in combined:
+            combined['chat_id'] = source_section['conversation_id']
+
     base = {}
     missing = []
     for field in REQUIRED_METADATA_FIELDS:
-        value = original_metadata.get(field)
+        value = combined.get(field)
         if value is None:
             if field == 'created_at':
                 value = start_fallback
@@ -392,7 +409,8 @@ def _build_chunk_metadata(
     chunking: Dict,
     chunk_meta: Dict,
     chunk_messages: List[Dict],
-    input_path: Path
+    input_path: Path,
+    source_section: Dict = None
 ) -> Dict:
     """
     Build per-chunk metadata without copying the full conversation metadata.
@@ -403,11 +421,12 @@ def _build_chunk_metadata(
         chunk_meta: Metadata for the current chunk (sequence, range, tokens, timestamps)
         chunk_messages: Messages included in this chunk
         input_path: Original chat file path (for provenance)
+        source_section: Optional source section (v2.0 schema) for platform/chat_id
 
     Returns:
         Metadata dictionary containing only chunk-specific information
     """
-    chunk_metadata = _require_base_metadata(original_metadata, chunk_meta, chunk_messages)
+    chunk_metadata = _require_base_metadata(original_metadata, chunk_meta, chunk_messages, source_section)
 
     base_title = original_metadata.get('title') or input_path.stem
     chunk_seq = chunk_meta['sequence_number']
@@ -481,13 +500,14 @@ def write_chunk_files(chat_data: Dict, input_path: Path, output_dir: Path, basen
     base_name = basename if basename else input_path.stem
     chunking = chat_data['metadata']['chunking']
     messages = chat_data['messages']
+    source_section = chat_data.get('source')  # v2.0 schema source section
     files_written = 0
 
     print(f"\nWriting chunk files to: {output_dir}/")
 
     for chunk_meta in chunking['chunk_metadata']:
         chunk_id = chunk_meta['chunk_id']
-        chunk_file = output_dir / f"{base_name}.{chunk_id}.yaml"
+        chunk_file = output_dir / f"{base_name}.{chunk_id}.yml"
 
         # Extract messages for this chunk
         msg_start, msg_end = chunk_meta['message_range']
@@ -499,7 +519,8 @@ def write_chunk_files(chat_data: Dict, input_path: Path, output_dir: Path, basen
             chunking,
             chunk_meta,
             chunk_messages,
-            input_path
+            input_path,
+            source_section
         )
 
         # Create chunk data (valid v2.0 structure)
