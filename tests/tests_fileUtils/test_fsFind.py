@@ -69,8 +69,9 @@ def test_verbose_help_output(capsys):
 
 
 def test_recursive_options_toggle():
-    assert parse_args('--no-recursive').recursive is False
-    assert parse_args('--recursive').recursive is True
+    assert parse_args('--no-recurse').recursive is False
+    assert parse_args('-nr').recursive is False
+    assert parse_args('.').recursive is True  # recursive is default
 
 
 def test_depth_arguments_parse():
@@ -418,6 +419,104 @@ def test_help_verbose_option_short_circuits():
     with mock.patch.object(findFiles, 'show_verbose_help') as show_verbose_help:
         findFiles.process_find_pipeline(args)
     show_verbose_help.assert_called_once()
+
+
+def test_ignore_case_option_parses():
+    args = parse_args('-i')
+    assert args.ignore_case is True
+
+    args = parse_args('--ignore-case')
+    assert args.ignore_case is True
+
+    args = parse_args('.')
+    assert args.ignore_case is False
+
+
+def test_substring_case_sensitive_by_default(tmp_path):
+    """Without -i, substring matching is case-sensitive."""
+    (tmp_path / 'TestFile.txt').write_text('x')
+    (tmp_path / 'test_file.py').write_text('x')
+    (tmp_path / 'OTHER.md').write_text('x')
+
+    finder = findFiles.EnhancedFileFinder()
+    results = sorted(Path(p).name for p in finder.find_files(
+        [str(tmp_path)], substrings=['test'], ignore_case=False
+    ))
+    assert results == ['test_file.py']
+
+
+def test_substring_case_insensitive_with_flag(tmp_path):
+    """With ignore_case=True, substring matching is case-insensitive."""
+    (tmp_path / 'TestFile.txt').write_text('x')
+    (tmp_path / 'test_file.py').write_text('x')
+    (tmp_path / 'MyTESTScript.sh').write_text('x')
+    (tmp_path / 'OTHER.md').write_text('x')
+
+    finder = findFiles.EnhancedFileFinder()
+    results = sorted(Path(p).name for p in finder.find_files(
+        [str(tmp_path)], substrings=['test'], ignore_case=True
+    ))
+    assert results == ['MyTESTScript.sh', 'TestFile.txt', 'test_file.py']
+
+
+def test_regex_case_insensitive_with_flag(tmp_path):
+    """With ignore_case=True, regex matching is case-insensitive."""
+    (tmp_path / 'Config.yaml').write_text('x')
+    (tmp_path / 'config.yml').write_text('x')
+    (tmp_path / 'CONFIG.JSON').write_text('x')
+    (tmp_path / 'data.txt').write_text('x')
+
+    finder = findFiles.EnhancedFileFinder()
+
+    # Case-sensitive regex
+    results_sensitive = sorted(Path(p).name for p in finder.find_files(
+        [str(tmp_path)], regex=r'^config', ignore_case=False
+    ))
+    assert results_sensitive == ['config.yml']
+
+    # Case-insensitive regex
+    results_insensitive = sorted(Path(p).name for p in finder.find_files(
+        [str(tmp_path)], regex=r'^config', ignore_case=True
+    ))
+    assert results_insensitive == ['CONFIG.JSON', 'Config.yaml', 'config.yml']
+
+
+def test_glob_pattern_case_insensitive_with_flag(tmp_path):
+    """With ignore_case=True, glob pattern matching is case-insensitive."""
+    (tmp_path / 'README.md').write_text('x')
+    (tmp_path / 'readme.txt').write_text('x')
+    (tmp_path / 'ReadMe.rst').write_text('x')
+    (tmp_path / 'other.md').write_text('x')
+
+    finder = findFiles.EnhancedFileFinder()
+
+    # Case-sensitive pattern
+    results_sensitive = sorted(Path(p).name for p in finder.find_files(
+        [str(tmp_path)], file_pattern='readme*', ignore_case=False
+    ))
+    assert results_sensitive == ['readme.txt']
+
+    # Case-insensitive pattern
+    results_insensitive = sorted(Path(p).name for p in finder.find_files(
+        [str(tmp_path)], file_pattern='readme*', ignore_case=True
+    ))
+    assert results_insensitive == ['README.md', 'ReadMe.rst', 'readme.txt']
+
+
+def test_ignore_case_passed_through_pipeline(tmp_path):
+    """Verify --ignore-case is passed through process_find_pipeline."""
+    (tmp_path / 'TestFile.txt').write_text('x')
+    (tmp_path / 'test_file.py').write_text('x')
+
+    args = parse_args(str(tmp_path), '-s', 'test', '-i', '--no-recurse')
+
+    with mock.patch('file_utils.fsFind.create_filter_from_args', return_value=None):
+        with mock.patch('file_utils.fsFind.EnhancedFileFinder.find_files', return_value=[]) as finder:
+            findFiles.process_find_pipeline(args)
+
+    finder.assert_called_once()
+    _, kwargs = finder.call_args
+    assert kwargs['ignore_case'] is True
 
 
 if __name__ == "__main__":

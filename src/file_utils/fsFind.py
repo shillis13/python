@@ -103,6 +103,7 @@ class EnhancedFileFinder:
         follow_symlinks: bool = False,
         min_depth: Optional[int] = None,
         max_depth: Optional[int] = None,
+        ignore_case: bool = False,
     ) -> Iterator[str]:
         """
         Enhanced file finder with filtering capabilities.
@@ -119,6 +120,7 @@ class EnhancedFileFinder:
             include_dirs: Whether to include directories in results
             include_files: Whether to include files in results
             follow_symlinks: Whether to follow symbolic links
+            ignore_case: Whether to use case-insensitive matching for substrings and regex
 
         Yields:
             str: File paths matching all criteria
@@ -171,6 +173,7 @@ class EnhancedFileFinder:
                 0,
                 min_depth=min_depth,
                 max_depth=max_depth,
+                ignore_case=ignore_case,
             )
 
     def _should_emit(
@@ -209,6 +212,7 @@ class EnhancedFileFinder:
         *,
         min_depth: Optional[int] = None,
         max_depth: Optional[int] = None,
+        ignore_case: bool = False,
     ) -> Iterator[str]:
         """Search a single directory."""
 
@@ -251,6 +255,7 @@ class EnhancedFileFinder:
                     file_types,
                     fs_filter,
                     root_path,
+                    ignore_case=ignore_case,
                 )
 
                 meets_min_depth = True
@@ -288,6 +293,7 @@ class EnhancedFileFinder:
                         current_depth,
                         min_depth=min_depth,
                         max_depth=max_depth,
+                        ignore_case=ignore_case,
                     )
 
                     state.matched_files = (
@@ -334,21 +340,34 @@ class EnhancedFileFinder:
         file_types: List[str],
         fs_filter: Optional[FileSystemFilter],
         root_path: Path,
+        *,
+        ignore_case: bool = False,
     ) -> bool:
         """Check if a path matches all specified criteria."""
         filename = path.name
 
         # File pattern check
-        if file_pattern and not fnmatch.fnmatch(filename, file_pattern):
-            return False
+        if file_pattern:
+            if ignore_case:
+                if not fnmatch.fnmatch(filename.lower(), file_pattern.lower()):
+                    return False
+            elif not fnmatch.fnmatch(filename, file_pattern):
+                return False
 
         # Substring check
-        if substrings and not any(sub in filename for sub in substrings):
-            return False
+        if substrings:
+            if ignore_case:
+                filename_lower = filename.lower()
+                if not any(sub.lower() in filename_lower for sub in substrings):
+                    return False
+            elif not any(sub in filename for sub in substrings):
+                return False
 
         # Regex check
-        if regex and not re.search(regex, filename):
-            return False
+        if regex:
+            flags = re.IGNORECASE if ignore_case else 0
+            if not re.search(regex, filename, flags):
+                return False
 
         # Extension check
         if extensions:
@@ -636,17 +655,11 @@ def add_args(parser: argparse.ArgumentParser) -> None:
         help="Directories to search (default: current directory)",
     )
     parser.add_argument(
-        "-r",
-        "--recursive",
-        dest="recursive",
-        action="store_true",
-        help="Search recursively in subdirectories",
-    )
-    parser.add_argument(
-        "--no-recursive",
+        "--no-recurse",
+        "-nr",
         dest="recursive",
         action="store_false",
-        help="Disable recursive search",
+        help="Disable recursive search (recursive is the default)",
     )
     parser.set_defaults(recursive=True)
     parser.add_argument(
@@ -710,7 +723,13 @@ def add_args(parser: argparse.ArgumentParser) -> None:
         "-s",
         action="append",
         default=[],
-        help="Case-sensitive substrings that must appear in names (repeatable)",
+        help="Substrings that must appear in names (repeatable; case-sensitive by default)",
+    )
+    parser.add_argument(
+        "--ignore-case",
+        "-i",
+        action="store_true",
+        help="Case-insensitive matching for --substr, --regex, and glob patterns",
     )
     parser.add_argument(
         "--regex",
@@ -1148,6 +1167,7 @@ def process_find_pipeline(args):
                 follow_symlinks=args.follow_symlinks,
                 min_depth=args.min_depth,
                 max_depth=args.max_depth,
+                ignore_case=args.ignore_case,
             )
         )
 
