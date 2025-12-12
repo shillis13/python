@@ -126,8 +126,26 @@ def load_yaml_from_string(content):
 """
 
 
+class _LiteralSafeDumper(yaml.SafeDumper):
+    """Custom dumper that preserves multiline strings as literal block scalars."""
+
+
+def _str_representer(dumper, data):
+    style = '|' if '\n' in data else None
+    return dumper.represent_scalar('tag:yaml.org,2002:str', data, style=style)
+
+
+_LiteralSafeDumper.add_representer(str, _str_representer)
+
+
 def to_yaml_string(data):
-    return yaml.dump(data, sort_keys=False, allow_unicode=True)
+    """Dump YAML while keeping multiline content readable."""
+    return yaml.dump(
+        data,
+        Dumper=_LiteralSafeDumper,
+        sort_keys=False,
+        allow_unicode=True,
+    )
 
 
 def compress_newlines(text: str, max_consecutive: int = 2) -> str:

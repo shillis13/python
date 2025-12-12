@@ -1,6 +1,6 @@
 import pytest
 
-from chat_processing.chat_chunker import chunk_chat
+from ai_utils.chat_processing.chat_chunker import chunk_chat
 
 
 def test_single_chunk_for_small_chat():

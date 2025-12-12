@@ -13,17 +13,17 @@ from pathlib import Path
 from typing import List, Optional
 import logging
 
-from chat_processing.lib_converters.conversion_framework import (
+from ai_utils.chat_processing.lib_converters.conversion_framework import (
     convert_to_v2, convert_batch, detect_format, detect_source,
     load_file, ParserRegistry
 )
-from chat_processing.lib_converters.lib_conversion_utils import clean_message_content
+from ai_utils.chat_processing.lib_converters.lib_conversion_utils import clean_message_content
 
 # Note: Chunking functionality has been removed from this CLI.
 # Use chat_chunker.py for chunking v2.0 YAML chat files.
 
 # Import all parsers to register them
-from chat_processing.lib_parsers import (
+from ai_utils.chat_processing.lib_parsers import (
     markdown_parser,
     json_parser,
     yaml_parser,
@@ -31,8 +31,8 @@ from chat_processing.lib_parsers import (
 )
 
 # Import formatters for output
-from chat_processing.lib_formatters.markdown_formatter import format_as_markdown
-from chat_processing.lib_formatters.html_formatter import format_as_html
+from ai_utils.chat_processing.lib_formatters.markdown_formatter import format_as_markdown
+from ai_utils.chat_processing.lib_formatters.html_formatter import format_as_html
 
 
 def setup_logging(verbose: bool = False):

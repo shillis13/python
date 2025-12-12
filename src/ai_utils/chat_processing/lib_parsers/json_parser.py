@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
 import logging
 
-from chat_processing.lib_converters.conversion_framework import BaseParser, ParserRegistry, validate_v2_schema
+from ai_utils.chat_processing.lib_converters.conversion_framework import BaseParser, ParserRegistry, validate_v2_schema
 
 logger = logging.getLogger(__name__)
 

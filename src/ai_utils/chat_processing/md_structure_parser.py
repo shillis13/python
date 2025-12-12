@@ -21,15 +21,15 @@ from typing import Dict, List, Any, Tuple, Optional
 
 
 def parse_markdown_structure(content: str, file_path: str) -> Dict[str, Any]:
-    """
-    Parse Markdown content into structured YAML data.
+    """Parse Markdown content into a structured representation.
 
-    Args:
-        content: Markdown file content
-        file_path: Path to source file (for type inference)
-
-    Returns:
-        Dictionary with metadata, table_of_contents, and sections
+    The parser supports the v3.0 convention of:
+    - `## Metadata` bullet fields -> `metadata` dict
+    - `## Section` -> section key
+    - `### Subsection` -> nested under parent
+    - Lists -> YAML arrays
+    - Tables -> list-of-dicts
+    - Code fences -> preserved as literal block strings
     """
     # 1. Extract frontmatter if present
     metadata, content_without_frontmatter = extract_frontmatter(content)
@@ -39,42 +39,243 @@ def parse_markdown_structure(content: str, file_path: str) -> Dict[str, Any]:
     if title and 'title' not in metadata:
         metadata['title'] = title
 
-    # 3. Parse bold-field metadata from content
+    # 3. Parse bold-field metadata from intro (pre-first heading)
     bold_metadata = extract_bold_fields(content_without_frontmatter)
     metadata.update(bold_metadata)
 
-    # 3.5 Add reasonable defaults for missing required fields
+    # 4. Walk the document to build sections/subsections and metadata section fields
+    sections, toc, metadata_section_fields = _build_section_structure(content_without_frontmatter)
+    if metadata_section_fields:
+        metadata.update(metadata_section_fields)
+
+    # 5. Defaults and provenance
     if 'created' in metadata and 'last_updated' not in metadata:
         metadata['last_updated'] = metadata['created']
-
-    if 'status' not in metadata:
-        # Infer status from context or use default
-        metadata['status'] = 'active'
-
-    # 4. Detect file type
-    file_type = infer_file_type(file_path, metadata)
-    metadata["type"] = file_type
-
-    # 4. Parse heading hierarchy
-    headings = extract_headings(content_without_frontmatter)
-
-    # 5. Segment content by sections
-    sections = segment_by_headings(content_without_frontmatter, headings)
-
-    # 6. Generate TOC
-    toc = generate_toc(headings)
-
-    # 7. Add provenance
+    metadata.setdefault('status', 'active')
+    metadata["type"] = infer_file_type(file_path, metadata)
     metadata["source_file"] = os.path.basename(file_path)
-
-    # 8. Normalize dates
     metadata = normalize_dates(metadata)
 
-    return {
+    result: Dict[str, Any] = {
+        "title": title,
         "metadata": metadata,
-        "table_of_contents": toc,
-        "sections": sections
+        "sections": sections,
     }
+
+    if toc:
+        result["table_of_contents"] = toc
+
+    return result
+
+
+def _normalize_field_name(name: str) -> str:
+    """Normalize metadata keys to snake_case."""
+    key = name.strip().lower()
+    key = re.sub(r'[^a-z0-9\s_-]', '', key)
+    key = re.sub(r'[\s-]+', '_', key)
+    return key
+
+
+def _parse_metadata_line(line: str, following_lines: List[str], start_index: int) -> Tuple[Optional[Tuple[str, Any]], int]:
+    """Parse a metadata bullet line of the form '- **key:** value'."""
+    match = re.match(r'^\s*[-*]\s*\*\*([^*]+)\*\*:\s*(.*)$', line)
+    if not match:
+        return None, start_index
+
+    raw_key = match.group(1)
+    value = match.group(2).strip()
+    key = _normalize_field_name(raw_key)
+
+    # Collect indented list items for multi-line metadata values
+    items = []
+    i = start_index + 1
+    while i < len(following_lines):
+        next_line = following_lines[i]
+        list_match = re.match(r'^\s{2,}[-*]\s+(.*)$', next_line)
+        if not list_match:
+            break
+        items.append(list_match.group(1).strip())
+        i += 1
+
+    if items:
+        return (key, items), i
+
+    return (key, value), start_index + 1
+
+
+def _is_table_header(lines: List[str], idx: int) -> bool:
+    """Detect Markdown table header starting at idx."""
+    if idx + 1 >= len(lines):
+        return False
+    header = lines[idx].strip()
+    divider = lines[idx + 1].strip()
+    if not header.startswith('|') or not divider.startswith('|'):
+        return False
+    return bool(re.match(r'^\|\s*[:-]-{2,}', divider))
+
+
+def _parse_table_block(lines: List[str], start: int) -> Tuple[Dict[str, Any], int]:
+    headers = [cell.strip() for cell in lines[start].strip().strip('|').split('|')]
+    i = start + 2  # skip divider
+    rows: List[Dict[str, Any]] = []
+
+    while i < len(lines):
+        if not lines[i].strip().startswith('|'):
+            break
+        cells = [cell.strip() for cell in lines[i].strip().strip('|').split('|')]
+        if len(cells) < len(headers):
+            cells.extend([''] * (len(headers) - len(cells)))
+        row = {headers[idx]: cells[idx] for idx in range(min(len(headers), len(cells)))}
+        rows.append(row)
+        i += 1
+
+    return {"type": "table", "headers": headers, "rows": rows}, i
+
+
+def _parse_list_block(lines: List[str], start: int) -> Tuple[Dict[str, Any], int]:
+    items: List[str] = []
+    i = start
+    while i < len(lines):
+        match = re.match(r'^\s*[-*]\s+(.*)$', lines[i])
+        if not match:
+            break
+        items.append(match.group(1).strip())
+        i += 1
+    return {"type": "list", "items": items}, i
+
+
+def _parse_code_block(lines: List[str], start: int) -> Tuple[Dict[str, Any], int]:
+    fence = lines[start].strip()
+    language = fence[3:].strip() if len(fence) > 3 else None
+    code_lines: List[str] = []
+    i = start + 1
+
+    while i < len(lines):
+        if lines[i].strip().startswith("```"):
+            return {"type": "code", "language": language, "content": "\n".join(code_lines)}, i + 1
+        code_lines.append(lines[i])
+        i += 1
+
+    # Unclosed fence; treat collected lines as code
+    return {"type": "code", "language": language, "content": "\n".join(code_lines)}, i
+
+
+def _parse_paragraph_block(lines: List[str], start: int) -> Tuple[Dict[str, Any], int]:
+    parts: List[str] = []
+    i = start
+    while i < len(lines):
+        line = lines[i]
+        if not line.strip():
+            break
+        if re.match(r'^\s*[-*]\s+', line) or line.strip().startswith('```') or _is_table_header(lines, i):
+            break
+        parts.append(line.rstrip())
+        i += 1
+    return {"type": "paragraph", "text": "\n".join(parts).strip()}, i
+
+
+def _build_section_structure(content: str) -> Tuple[Dict[str, Any], List[Dict[str, Any]], Dict[str, Any]]:
+    """Build sections, subsections, TOC, and metadata fields."""
+    lines = content.splitlines()
+    sections: Dict[str, Any] = {}
+    toc: List[Dict[str, Any]] = []
+    metadata_fields: Dict[str, Any] = {}
+
+    current_section_key: Optional[str] = None
+    current_subsection_key: Optional[str] = None
+    metadata_mode = False
+
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        heading_match = re.match(r'^(#{1,6})\s+(.+)$', line)
+
+        if heading_match:
+            level = len(heading_match.group(1))
+            heading_text = heading_match.group(2).strip()
+
+            if level == 1:
+                i += 1
+                continue  # Title already handled
+
+            if level == 2:
+                current_section_key = generate_section_key(heading_text)
+                current_subsection_key = None
+                sections[current_section_key] = {
+                    "heading": heading_text,
+                    "blocks": [],
+                    "subsections": {},
+                }
+                metadata_mode = heading_text.lower() == "metadata"
+
+                toc_entry = {"section": heading_text, "key": current_section_key}
+                toc.append(toc_entry)
+
+            elif level == 3 and current_section_key:
+                current_subsection_key = generate_section_key(heading_text)
+                sections[current_section_key]["subsections"][current_subsection_key] = {
+                    "heading": heading_text,
+                    "blocks": [],
+                }
+                # Attach subsection name to TOC
+                if toc:
+                    toc_entry = toc[-1]
+                    toc_entry.setdefault("subsections", []).append(heading_text)
+
+            i += 1
+            continue
+
+        # Skip everything until we encounter a section
+        if not current_section_key:
+            i += 1
+            continue
+
+        if metadata_mode:
+            parsed, next_idx = _parse_metadata_line(line, lines, i)
+            if parsed:
+                key, value = parsed
+                metadata_fields[key] = value
+                i = next_idx
+                continue
+
+        target = (
+            sections[current_section_key]["subsections"].get(current_subsection_key)
+            if current_subsection_key
+            else sections[current_section_key]
+        )
+
+        stripped = line.strip()
+        if not stripped:
+            i += 1
+            continue
+
+        if stripped.startswith("```"):
+            block, i = _parse_code_block(lines, i)
+            target["blocks"].append(block)
+            continue
+
+        if _is_table_header(lines, i):
+            block, i = _parse_table_block(lines, i)
+            target["blocks"].append(block)
+            continue
+
+        if re.match(r'^\s*[-*]\s+', line):
+            block, i = _parse_list_block(lines, i)
+            target["blocks"].append(block)
+            continue
+
+        block, i = _parse_paragraph_block(lines, i)
+        if block["text"]:
+            target["blocks"].append(block)
+        else:
+            i += 1
+
+    # Drop empty subsections arrays for cleaner output
+    for entry in toc:
+        if "subsections" in entry and not entry["subsections"]:
+            del entry["subsections"]
+
+    return sections, toc, metadata_fields
 
 
 def extract_frontmatter(content: str) -> Tuple[Dict[str, Any], str]:

@@ -23,22 +23,13 @@ except ImportError:
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-# Use absolute imports when running as script
-if __name__ == "__main__":
-    from lib_converters.conversion_framework import convert_to_v2
-    from lib_formatters.markdown_formatter import format_as_markdown
-    from lib_formatters.html_formatter import format_as_html
-    from lib_parsers import (
-        markdown_parser, json_parser, yaml_parser, html_parser
-    )
-else:
-    # Use relative imports when imported as module
-    from ..lib_converters.conversion_framework import convert_to_v2
-    from ..lib_formatters.markdown_formatter import format_as_markdown
-    from ..lib_formatters.html_formatter import format_as_html
-    from ..lib_parsers import (
-        markdown_parser, json_parser, yaml_parser, html_parser
-    )
+# Use absolute imports for pytest compatibility
+from ai_utils.chat_processing.lib_converters.conversion_framework import convert_to_v2
+from ai_utils.chat_processing.lib_formatters.markdown_formatter import format_as_markdown
+from ai_utils.chat_processing.lib_formatters.html_formatter import format_as_html
+from ai_utils.chat_processing.lib_parsers import (
+    markdown_parser, json_parser, yaml_parser, html_parser
+)
 
 
 def normalize_content(text):

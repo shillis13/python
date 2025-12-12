@@ -5,13 +5,13 @@ import sys
 from pathlib import Path
 
 # Add to path
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
-from src.chat_processing.tests.test_roundtrip_conversions import roundtrip_test
-from src.chat_processing.converters.conversion_framework import convert_to_v2
+from ai_utils.chat_processing.tests.test_roundtrip_conversions import roundtrip_test
+from ai_utils.chat_processing.lib_converters.conversion_framework import convert_to_v2
 
 # Import parsers to register them
-from src.chat_processing.converters.parsers import (
+from ai_utils.chat_processing.lib_parsers import (
     markdown_parser, json_parser, yaml_parser, html_parser
 )
 
