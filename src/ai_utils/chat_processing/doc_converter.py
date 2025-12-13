@@ -11,11 +11,14 @@ import os
 import sys
 from typing import Tuple
 
-from .lib_converters import lib_doc_converter as converter
-from .lib_converters import lib_conversion_utils as utils
-from .lib_converters.lib_doc_converter import yaml_to_markdown
-from .lib_formatters.markdown_formatter import format_as_markdown as chat_format_md
-from .lib_formatters.html_formatter import format_as_html as chat_format_html
+# Add package path for standalone script execution
+sys.path.insert(0, os.path.expanduser("~/bin/all_languages/python/src"))
+
+from ai_utils.chat_processing.lib_converters import lib_doc_converter as converter
+from ai_utils.chat_processing.lib_converters import lib_conversion_utils as utils
+from ai_utils.chat_processing.lib_converters.lib_doc_converter import yaml_to_markdown
+from ai_utils.chat_processing.lib_formatters.markdown_formatter import format_as_markdown as chat_format_md
+from ai_utils.chat_processing.lib_formatters.html_formatter import format_as_html as chat_format_html
 from textwrap import dedent
 
 
@@ -89,8 +92,15 @@ def run_doc_conversion(args):
         if input_ext == "yaml":
             input_ext = "yml"
 
-        # Use structured parsing for markdown if requested
-        use_structured = getattr(args, 'structured', False) and input_ext == "md"
+        # Determine output format early for auto-structured logic
+        output_format = _normalize_format(args.format)
+
+        # Use structured parsing for markdown:
+        # - Always if --structured flag is set
+        # - Auto-enable when converting MD to YML/JSON (structured output needs structured input)
+        use_structured = input_ext == "md" and (
+            getattr(args, 'structured', False) or output_format in ('yml', 'json')
+        )
 
         try:
             metadata, content, root = converter.parse_document(input_path, input_ext, structured=use_structured)
@@ -111,8 +121,6 @@ def run_doc_conversion(args):
                 "_",
                 " ",
             )
-
-        output_format = _normalize_format(args.format)
 
         # For structured markdown, content is already a complete dict with metadata, TOC, sections
         if use_structured and isinstance(content, dict):
@@ -231,7 +239,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--structured",
         action="store_true",
-        help="Parse markdown files into structured format (metadata, TOC, sections). Recommended for YAML/JSON output.",
+        help="Parse markdown files into structured format (metadata, TOC, sections). Auto-enabled for YAML/JSON output.",
     )
     parser.add_argument(
         "--version",

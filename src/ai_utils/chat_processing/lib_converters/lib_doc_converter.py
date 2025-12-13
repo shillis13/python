@@ -37,6 +37,128 @@ def _is_prose_block(value) -> bool:
     return True
 
 
+def _is_structured_format(data: dict) -> bool:
+    """Check if data is in the structured document format (from MD→YML conversion)."""
+    if not isinstance(data, dict):
+        return False
+    return 'sections' in data and isinstance(data.get('sections'), dict)
+
+
+def _render_block(block: dict) -> str:
+    """Render a single block based on its type."""
+    block_type = block.get('type', 'paragraph')
+    
+    if block_type == 'paragraph':
+        text = block.get('text', '')
+        return f"{text}\n" if text else ""
+    
+    elif block_type == 'code':
+        content = block.get('content', '')
+        language = block.get('language') or ''
+        return f"```{language}\n{content}\n```\n"
+    
+    elif block_type == 'list':
+        items = block.get('items', [])
+        lines = [f"- {item}" for item in items]
+        return '\n'.join(lines) + '\n'
+    
+    elif block_type == 'table':
+        headers = block.get('headers', [])
+        rows = block.get('rows', [])
+        if not headers:
+            return ""
+        
+        # Build markdown table
+        lines = []
+        lines.append('| ' + ' | '.join(headers) + ' |')
+        lines.append('|' + '|'.join(['---'] * len(headers)) + '|')
+        
+        for row in rows:
+            if isinstance(row, dict):
+                # Row is a dict with header keys
+                cells = [str(row.get(h, row.get(h.lower(), ''))) for h in headers]
+            elif isinstance(row, list):
+                cells = [str(c) for c in row]
+            else:
+                cells = [str(row)]
+            lines.append('| ' + ' | '.join(cells) + ' |')
+        
+        return '\n'.join(lines) + '\n'
+    
+    else:
+        # Unknown type - render as paragraph
+        text = block.get('text', block.get('content', ''))
+        return f"{text}\n" if text else ""
+
+
+def _render_section(section: dict, level: int = 2) -> str:
+    """Render a section with its heading, blocks, and subsections."""
+    lines = []
+    
+    # Use original_level if section was an H1 in the source document
+    actual_level = section.get('original_level', level)
+    header_prefix = '#' * min(actual_level, 6)
+    
+    # Render heading
+    heading = section.get('heading', '')
+    if heading:
+        lines.append(f"\n{header_prefix} {heading}\n")
+    
+    # Render blocks
+    blocks = section.get('blocks', [])
+    for block in blocks:
+        if isinstance(block, dict):
+            rendered = _render_block(block)
+            if rendered:
+                lines.append(rendered)
+    
+    # Render subsections recursively
+    subsections = section.get('subsections', {})
+    if isinstance(subsections, dict):
+        for key, subsection in subsections.items():
+            if isinstance(subsection, dict):
+                lines.append(_render_section(subsection, level + 1))
+    
+    return '\n'.join(lines)
+
+
+def _format_structured_to_markdown(data: dict) -> str:
+    """Convert structured document format back to proper Markdown.
+    
+    Handles the format produced by MD→YML conversion:
+    - sections dict with heading, blocks, subsections
+    - blocks array with type-specific content
+    """
+    lines = []
+    
+    # Title
+    title = data.get('title') or data.get('metadata', {}).get('title')
+    if title:
+        lines.append(f"# {title}\n")
+    
+    # Metadata line (status, version, etc.)
+    metadata = data.get('metadata', {})
+    if isinstance(metadata, dict):
+        meta_parts = []
+        for key in ['status', 'version', 'type']:
+            if key in metadata and key != 'title':
+                meta_parts.append(f"**{key.title()}:** {metadata[key]}")
+        if meta_parts:
+            lines.append(' | '.join(meta_parts) + '\n')
+    
+    # Render all sections
+    sections = data.get('sections', {})
+    for key, section in sections.items():
+        if isinstance(section, dict):
+            lines.append(_render_section(section, level=2))
+    
+    # Clean up excessive blank lines
+    result = '\n'.join(lines)
+    result = re.sub(r'\n{3,}', '\n\n', result)
+    
+    return result.strip() + '\n'
+
+
 def _format_yaml_to_markdown(data_item, level: int = 1, parent_key: str = None, skip_metadata: bool = False) -> str:
     """Recursively converts a Python object (from YAML/JSON) into Markdown prose.
 
@@ -129,6 +251,10 @@ def yaml_to_markdown(data: dict, title: str = None) -> str:
     Returns:
         str: Complete Markdown document with headers, prose, and lists.
     """
+    # If this is structured format from MD→YML, use dedicated converter
+    if _is_structured_format(data):
+        return _format_structured_to_markdown(data)
+    
     lines = []
 
     # Extract title from metadata if available

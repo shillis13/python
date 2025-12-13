@@ -44,7 +44,7 @@ def parse_markdown_structure(content: str, file_path: str) -> Dict[str, Any]:
     metadata.update(bold_metadata)
 
     # 4. Walk the document to build sections/subsections and metadata section fields
-    sections, toc, metadata_section_fields = _build_section_structure(content_without_frontmatter)
+    sections, toc, metadata_section_fields = _build_section_structure(content_without_frontmatter, title=title)
     if metadata_section_fields:
         metadata.update(metadata_section_fields)
 
@@ -174,7 +174,7 @@ def _parse_paragraph_block(lines: List[str], start: int) -> Tuple[Dict[str, Any]
     return {"type": "paragraph", "text": "\n".join(parts).strip()}, i
 
 
-def _build_section_structure(content: str) -> Tuple[Dict[str, Any], List[Dict[str, Any]], Dict[str, Any]]:
+def _build_section_structure(content: str, title: str = None) -> Tuple[Dict[str, Any], List[Dict[str, Any]], Dict[str, Any]]:
     """Build sections, subsections, TOC, and metadata fields."""
     lines = content.splitlines()
     sections: Dict[str, Any] = {}
@@ -195,8 +195,27 @@ def _build_section_structure(content: str) -> Tuple[Dict[str, Any], List[Dict[st
             heading_text = heading_match.group(2).strip()
 
             if level == 1:
+                # Skip the title H1 (already extracted separately)
+                # but preserve additional H1s as sections
+                if title and heading_text == title:
+                    i += 1
+                    continue
+                # Additional H1s become top-level sections to preserve content
+                current_section_key = generate_section_key(heading_text)
+                current_subsection_key = None
+                sections[current_section_key] = {
+                    "heading": heading_text,
+                    "blocks": [],
+                    "subsections": {},
+                    "original_level": 1,  # Mark as originally H1
+                }
+                metadata_mode = False  # H1 sections aren't metadata
+                
+                toc_entry = {"section": heading_text, "key": current_section_key}
+                toc.append(toc_entry)
+                
                 i += 1
-                continue  # Title already handled
+                continue
 
             if level == 2:
                 current_section_key = generate_section_key(heading_text)
