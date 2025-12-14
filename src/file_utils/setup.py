@@ -18,17 +18,17 @@ setup(
     python_requires=">=3.8",
     packages=find_packages(),
     include_package_data=True,
-    # Console scripts - auto-generated
+    # Console scripts
     entry_points={
         'console_scripts': [
-            'fsFormat=file_utils/.fsFormat:main',
-            'fsFind=file_utils/.fsFind:main',
-            'gen_random_files_dirs=file_utils/.gen_random_files_dirs:main',
-            'renameFiles=file_utils/.renameFiles:main',
-            'fsFilters=file_utils/.fsFilters:main',
-            'pygrep=file_utils/.pygrep:main',
-            'treePrint=file_utils/.treePrint:main',
-            'fsActions=file_utils/.fsActions:main',
+            'fsFormat=file_utils.fsFormat:main',
+            'fsFind=file_utils.fsFind:main',
+            'gen_random_files_dirs=file_utils.gen_random_files_dirs:main',
+            'renameFiles=file_utils.renameFiles:main',
+            'fsFilters=file_utils.fsFilters:main',
+            'pygrep=file_utils.pygrep:main',
+            'treePrint=file_utils.treePrint:main',
+            'fsActions=file_utils.fsActions:main',
         ],
     },
 

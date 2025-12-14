@@ -36,19 +36,10 @@ ${BLUE}EXAMPLES:${NC}
     ./install_packages.sh --rebuild yaml_utils
 
 ${BLUE}AVAILABLE PACKAGES:${NC}
-    ai_utils            AI utilities (chat processing, codex manager)
-    archive_utils       Archive management tools
-    DataTableFunctions  Data table manipulation
-    dev_utils           Development utilities
-    doc_utils           Document processing
-    email_tools         Email handling tools
-    file_utils          File system utilities (fsfind, treeprint, etc.)
-    json_utils          JSON processing
-    metadata_utils      Metadata extraction
-    repo_tools          Repository/Git utilities
-    terminal_utils      Terminal utilities
-    yaml_utils          YAML processing (16+ commands)
-    zip_client          ZIP archive tools
+    Auto-discovered from directories containing setup.py.
+    Run without arguments to see what will be installed.
+    
+    Excluded directories: .claude, misc, utils, progressbar, packager, rpatool_master
 
 ${BLUE}WHAT IS EDITABLE MODE?${NC}
     The -e flag installs packages as links to source code, so changes
@@ -105,22 +96,42 @@ NC='\033[0m' # No Color
 # Get the directory where this script lives
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# List of all packages (directories with setup.py)
-ALL_PACKAGES=(
-    "ai_utils"
-    "archive_utils"
-    "DataTableFunctions"
-    "dev_utils"
-    "doc_utils"
-    "email_tools"
-    "file_utils"
-    "json_utils"
-    "metadata_utils"
-    "repo_tools"
-    "terminal_utils"
-    "yaml_utils"
-    "zip_client"
+# Directories to exclude from auto-discovery
+EXCLUDE_PACKAGES=(
+    ".claude"
+    "misc"
+    "utils"
+    "progressbar"
+    "packager"
+    "rpatool_master"
 )
+
+# Auto-discover packages (directories with setup.py)
+ALL_PACKAGES=()
+for dir in "$SCRIPT_DIR"/*/; do
+    dir_name=$(basename "$dir")
+    
+    # Skip excluded directories
+    skip=false
+    for exclude in "${EXCLUDE_PACKAGES[@]}"; do
+        if [[ "$dir_name" == "$exclude" ]]; then
+            skip=true
+            break
+        fi
+    done
+    [[ "$skip" == "true" ]] && continue
+    
+    # Skip .egg-info directories
+    [[ "$dir_name" == *.egg-info ]] && continue
+    
+    # Include if it has setup.py
+    if [[ -f "$dir/setup.py" ]]; then
+        ALL_PACKAGES+=("$dir_name")
+    fi
+done
+
+# Sort for consistent ordering
+IFS=$'\n' ALL_PACKAGES=($(sort <<<"${ALL_PACKAGES[*]}")); unset IFS
 
 # Function to check if a directory has setup.py
 has_setup() {
@@ -312,13 +323,17 @@ rebuild_setup_py() {
         # Keep script name as-is (with underscores)
         local cmd_name="$script"
 
-        # If script is at top level (no subdirectory), use just the module name
-        # Otherwise, prefix with package name
-        if [[ "$module_path" == *"/"* ]] || [[ "$module_path" == *"."* ]]; then
-            # Script is in a subdirectory, use full path
+        # Determine if this is a package (has __init__.py) or flat modules
+        local is_package=false
+        if [[ -f "$pkg_dir/__init__.py" ]]; then
+            is_package=true
+        fi
+
+        # For packages, always prefix with package name
+        # For flat modules, use module name directly
+        if [[ "$is_package" == "true" ]]; then
             entry_points+="            '$cmd_name=${pkg}.${module_path}:main',\n"
         else
-            # Script is at top level, just use module name directly
             entry_points+="            '$cmd_name=${module_path}:main',\n"
         fi
     done
