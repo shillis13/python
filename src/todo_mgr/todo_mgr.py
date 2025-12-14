@@ -23,7 +23,9 @@ SCRIPT_PATH = Path(__file__).resolve()
 SCRIPTS_DIR = SCRIPT_PATH.parent
 APPLE_SCRIPT_DIR = SCRIPTS_DIR / "applescripts"
 DEFAULT_APPLESCRIPT = APPLE_SCRIPT_DIR / "todo_mgr_demo.applescript"
-DEFAULT_ROOT = Path(os.environ.get("TODO_ROOT", SCRIPTS_DIR.parent)).resolve()
+# Default to the actual todos directory, not the script's parent
+_FALLBACK_ROOT = Path.home() / "Documents" / "AI" / "ai_root" / "ai_general" / "todos"
+DEFAULT_ROOT = Path(os.environ.get("TODO_ROOT", _FALLBACK_ROOT)).resolve()
 CURRENT_ROOT = DEFAULT_ROOT
 
 STATUS_ORDER = [
@@ -185,6 +187,10 @@ def build_reference_map(todos: dict[Path, Todo]) -> dict[str, Path]:
 
 
 def render_kanban(todos: dict[Path, Todo]) -> str:
+    # Build reference map for quick codes (IP1, RD2, etc.)
+    ref_map = build_reference_map(todos)
+    inverse_ref = {path: ref for ref, path in ref_map.items()}
+    
     grouped: dict[str, list[Todo]] = defaultdict(list)
     for todo in todos.values():
         grouped[todo.status].append(todo)
@@ -198,13 +204,14 @@ def render_kanban(todos: dict[Path, Todo]) -> str:
             lines.append("  (none)")
         else:
             for todo in items:
+                ref = inverse_ref.get(todo.path, "??")
                 flags = " ".join(f"⚑{flag}" for flag in todo.flags)
                 tags = " ".join(f"#{tag}" for tag in todo.tags)
                 summary = todo.summary or ""
                 rel = todo.rel_path.as_posix()
-                lines.append(f"  · {rel} {flags} {tags}".rstrip())
+                lines.append(f"  {ref}. {rel} {flags} {tags}".rstrip())
                 if summary:
-                    lines.append(f"    {summary[:90]}")
+                    lines.append(f"       {summary[:90]}")
         lines.append("")
     return "\n".join(lines).rstrip()
 
@@ -242,9 +249,13 @@ def resolve_target(token: str, todos: dict[Path, Todo], refs: dict[str, Path]) -
 
 
 def run_script(script_name: str, *args: str) -> None:
-    script_path = SCRIPTS_DIR / script_name
+    # Look for scripts in CURRENT_ROOT/scripts, not SCRIPTS_DIR
+    script_path = CURRENT_ROOT / "scripts" / script_name
     if not script_path.exists():
-        raise FileNotFoundError(f"Script not found: {script_path}")
+        # Fallback to SCRIPTS_DIR for backwards compatibility
+        script_path = SCRIPTS_DIR / script_name
+    if not script_path.exists():
+        raise FileNotFoundError(f"Script not found in {CURRENT_ROOT}/scripts or {SCRIPTS_DIR}")
     cmd = [str(script_path), *args]
     subprocess.run(cmd, check=True, cwd=CURRENT_ROOT)
 
