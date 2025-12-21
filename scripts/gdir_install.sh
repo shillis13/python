@@ -7,7 +7,7 @@ WRAPPER_END="# --- gdir wrapper (END MANAGED BLOCK) ---"
 install_bash() {
   local rc_file="$HOME/.bashrc"
   local block
-  read -r -d '' block <<'EOF'
+  block=$(cat <<'EOF'
 # --- gdir wrapper (BEGIN MANAGED BLOCK) ---
 gdir() {
   case "$1" in
@@ -16,7 +16,7 @@ gdir() {
       target="$(command gdir "$@")" || return $?
       [ -z "$target" ] && return 2
       cd "$target" || return $?
-      eval "$(command gdir env --format sh)"
+      eval "$(command gdir env --format sh --per-key)"
       ;;
     *)
       command gdir "$@"
@@ -26,6 +26,7 @@ gdir() {
 trap 'command gdir save >/dev/null 2>&1' EXIT
 # --- gdir wrapper (END MANAGED BLOCK) ---
 EOF
+)
   ensure_block "$rc_file" "$block"
   install_bash_completion
   printf 'Installed gdir wrapper in %s\n' "$rc_file"
@@ -34,7 +35,7 @@ EOF
 install_zsh() {
   local rc_file="$HOME/.zshrc"
   local block
-  read -r -d '' block <<'EOF'
+  block=$(cat <<'EOF'
 # --- gdir wrapper (BEGIN MANAGED BLOCK) ---
 function gdir() {
   case "$1" in
@@ -43,7 +44,7 @@ function gdir() {
       target="$(command gdir "$@")" || return $?
       [[ -z "$target" ]] && return 2
       cd "$target" || return $?
-      eval "$(command gdir env --format sh)"
+      eval "$(command gdir env --format sh --per-key)"
       ;;
     *)
       command gdir "$@"
@@ -53,6 +54,7 @@ function gdir() {
 trap 'command gdir save >/dev/null 2>&1' EXIT
 # --- gdir wrapper (END MANAGED BLOCK) ---
 EOF
+)
   ensure_block "$rc_file" "$block"
   install_zsh_completion
   printf 'Installed gdir wrapper in %s\n' "$rc_file"
@@ -70,7 +72,7 @@ function gdir
       or return $status
       test -z "$target"; and return 2
       cd $target; or return $status
-      command gdir env --format fish | source
+      command gdir env --format fish --per-key | source
     case '*'
       command gdir $argv
   end
