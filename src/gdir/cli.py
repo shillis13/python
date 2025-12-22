@@ -216,10 +216,14 @@ def cmd_clear(store: MappingStore, confirmed: bool) -> int:
 
 def cmd_go(store: MappingStore, history: History, selector: str) -> int:
     entry = store.get(selector)
-    if entry is None:
-        print("Mapping not found.", file=sys.stderr)
-        return EXIT_INVALID
-    path = Path(entry.path)
+    if entry is not None:
+        path = Path(entry.path)
+    else:
+        # Try as a direct directory path
+        path = resolve_path(selector)
+        if not path.is_dir():
+            print("Mapping not found and not a valid directory.", file=sys.stderr)
+            return EXIT_INVALID
     if not path.exists():
         print("Target directory does not exist.", file=sys.stderr)
         return EXIT_INVALID
