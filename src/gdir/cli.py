@@ -53,7 +53,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     add_parser = subparsers.add_parser("add")
     add_parser.add_argument("key")
-    add_parser.add_argument("directory")
+    add_parser.add_argument("directory", nargs="?", default=".")
     add_parser.add_argument("--force", action="store_true", help="Allow missing directories")
 
     rm_parser = subparsers.add_parser("rm")
@@ -72,6 +72,8 @@ def build_parser() -> argparse.ArgumentParser:
     fwd_parser.add_argument("steps", nargs="?", type=int, default=1)
 
     hist_parser = subparsers.add_parser("hist")
+    hist_parser.add_argument("start", type=int, nargs="?", default=None)
+    hist_parser.add_argument("num", type=int, nargs="?", default=None)
     hist_parser.add_argument("--before", type=int, default=5)
     hist_parser.add_argument("--after", type=int, default=5)
 
@@ -96,8 +98,29 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Optional[Iterable[str]] = None) -> int:
+    # Handle shortcuts first
+    if argv is not None:
+        argv_list = list(argv)
+    else:
+        argv_list = sys.argv[1:]
+    
+    # Handle "-" and "+" shortcuts
+    if len(argv_list) == 1:
+        if argv_list[0] == "-":
+            argv_list = ["back"]
+        elif argv_list[0] == "+":
+            argv_list = ["fwd"]
+    
+    # Check if first argument is not a recognized command and not a flag
+    valid_commands = {"list", "add", "rm", "clear", "go", "back", "fwd", "hist", 
+                      "env", "save", "load", "import", "pick", "doctor", "help"}
+    
+    if argv_list and not argv_list[0].startswith("-") and argv_list[0] not in valid_commands:
+        # Treat as "gdir go {param}"
+        argv_list = ["go"] + argv_list
+    
     parser = build_parser()
-    args = parser.parse_args(list(argv) if argv is not None else None)
+    args = parser.parse_args(argv_list)
     if args.version and not args.command:
         print(__version__)
         return 0
@@ -125,7 +148,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         if args.command == "fwd":
             return cmd_forward(history, args.steps)
         if args.command == "hist":
-            return cmd_hist(history, args.before, args.after)
+            return cmd_hist(history, args.start, args.num, args.before, args.after)
         if args.command == "env":
             return cmd_env(store, history, args.format, args.per_key)
         if args.command == "save":
@@ -259,14 +282,51 @@ def cmd_forward(history: History, steps: int) -> int:
     return 0
 
 
-def cmd_hist(history: History, before: int, after: int) -> int:
-    if before < 0 or after < 0:
-        print("before/after must be non-negative.", file=sys.stderr)
-        return EXIT_USAGE
-    rows = history.window(before, after)
-    if not rows:
+def cmd_hist(history: History, start: Optional[int], num: Optional[int], before: int, after: int) -> int:
+    if not history.entries:
         print("History is empty.")
         return 0
+    
+    # Handle new start/num parameters
+    if start is not None and num is not None:
+        # Calculate the actual indices based on start and num
+        total_entries = len(history.entries)
+        
+        if start >= 0:
+            # Positive start: offset from beginning
+            start_idx = start
+        else:
+            # Negative start: offset from end
+            start_idx = total_entries + start
+        
+        # Clamp start_idx to valid range
+        start_idx = max(0, min(start_idx, total_entries - 1))
+        
+        if num >= 0:
+            # Positive num: go forward from start
+            end_idx = min(start_idx + num, total_entries)
+            indices = list(range(start_idx, end_idx))
+        else:
+            # Negative num: go backward from start
+            end_idx = max(0, start_idx + num)
+            indices = list(range(start_idx, end_idx, -1))
+        
+        # Build rows from selected indices
+        rows = []
+        for idx in indices:
+            is_current = idx == history.pointer
+            rows.append((idx, history.entries[idx], is_current))
+    else:
+        # Use traditional before/after window
+        if before < 0 or after < 0:
+            print("before/after must be non-negative.", file=sys.stderr)
+            return EXIT_USAGE
+        rows = history.window(before, after)
+    
+    if not rows:
+        print("No history entries in specified range.")
+        return 0
+    
     index_width = len(str(len(history.entries)))
     header = f"{'index'.rjust(index_width)}  visited_at                directory"
     print(header)
