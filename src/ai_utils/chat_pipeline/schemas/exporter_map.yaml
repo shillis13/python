@@ -1,8 +1,0 @@
-# Map of chrome-extension IDs and filename patterns to exporter names.
-chrome_extensions:
-  # abcdefghijklmnopqrstuvwxyzabcdef: chatgpt_super_exporter
-filename_patterns:
-  - pattern: "^ChatGPT_conversation_.*\.(json|md)$"
-    exporter: native_chatgpt
-  - pattern: "^Claude Chat_\d{4}_\d{2}_\d{2}_.*\.md$"
-    exporter: native_claude
