@@ -23,6 +23,7 @@ setup(
         'console_scripts': [
             'fsFormat=file_utils.fsFormat:main',
             'fsFind=file_utils.fsFind:main',
+            'fsStats=file_utils.fsStats:main',
             'gen_random_files_dirs=file_utils.gen_random_files_dirs:main',
             'renameFiles=file_utils.renameFiles:main',
             'fsFilters=file_utils.fsFilters:main',
