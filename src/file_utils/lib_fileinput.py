@@ -42,12 +42,51 @@ def _normalize_input_path(raw_path: str) -> str:
 
 
 def get_file_paths_from_input(args) -> Tuple[List[str], bool]:
+    """
+    Determine file paths based on input source priority:
+    1. Positional arguments (directories/files on command line)
+    2. --from-file option
+    3. Stdin (piped input)
+
+    Args:
+        args: Parsed command-line arguments with optional 'directories' and 'from_file' attrs
+
+    Returns:
+        Tuple of (list of file paths, dry_run_detected boolean)
+    """
     file_paths = []
     dry_run_detected = getattr(args, "dry_run", False)
 
-    # ... (no change to logging or stdin blocks) ...
+    # Priority 1: Explicit positional arguments (directories/files)
+    if hasattr(args, "directories") and args.directories:
+        for path in args.directories:
+            expanded_paths = expand_path(path)
+            file_paths.extend(expanded_paths)
+        return file_paths, dry_run_detected
+
+    # Priority 2: --from-file option
+    if hasattr(args, "from_file") and args.from_file:
+        try:
+            with open(args.from_file, "r", encoding="utf-8") as file:
+                for line in file:
+                    line = line.strip()
+                    if line and not line.startswith("#"):  # Skip empty lines and comments
+                        expanded_paths = expand_path(line)
+                        file_paths.extend(expanded_paths)
+        except FileNotFoundError:
+            try:
+                logging.error(f"File list not found: {args.from_file}")
+            except:
+                print(f"Error: File list not found: {args.from_file}", file=sys.stderr)
+        except Exception as e:
+            try:
+                logging.error(f"Error reading file list {args.from_file}: {e}")
+            except:
+                print(f"Error reading file list {args.from_file}: {e}", file=sys.stderr)
+        return file_paths, dry_run_detected
+
+    # Priority 3: Stdin (piped input) - only if not a tty
     if not sys.stdin.isatty():
-        # Handling piped input from stdin
         for line in sys.stdin:
             line = line.strip()
             if not line:
@@ -67,35 +106,6 @@ def get_file_paths_from_input(args) -> Tuple[List[str], bool]:
             else:
                 # Handle regular piped input (non-dry-run output)
                 file_paths.append(_normalize_input_path(line))
-
-    elif hasattr(args, "directories") and args.directories:
-        # MODIFIED: Was checking for 'args.files', which is a boolean flag.
-        # Now correctly checks for 'args.directories', which holds positional paths.
-        for path in args.directories:
-            expanded_paths = expand_path(path)
-            file_paths.extend(expanded_paths)
-
-    elif hasattr(args, "from_file") and args.from_file:
-        # Read file paths from a specified file
-        try:
-            with open(args.from_file, "r", encoding="utf-8") as file:
-                for line in file:
-                    line = line.strip()
-                    if line and not line.startswith(
-                        "#"
-                    ):  # Skip empty lines and comments
-                        expanded_paths = expand_path(line)
-                        file_paths.extend(expanded_paths)
-        except FileNotFoundError:
-            try:
-                logging.error(f"File list not found: {args.from_file}")
-            except:
-                print(f"Error: File list not found: {args.from_file}", file=sys.stderr)
-        except Exception as e:
-            try:
-                logging.error(f"Error reading file list {args.from_file}: {e}")
-            except:
-                print(f"Error reading file list {args.from_file}: {e}", file=sys.stderr)
 
     return file_paths, dry_run_detected
 
