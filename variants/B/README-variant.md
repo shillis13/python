@@ -1,0 +1,3 @@
+# Variant B
+
+Variant B delivers the same feature set through a flag-driven interface. Short flags keep frequent actions tight (`gdir -g proj`) and we still translate legacy subcommands for compatibility. Persistence leans on JSONL event files plus a dedicated pointer file, mirroring log-style durability while keeping the active index trivial to inspect or reset. The richer `-e` export adds `GDIR_<KEY>` variables alongside PREV/NEXT, making it easy to wire bookmarks straight into shell completions or prompts. History trimming and pointer writes are kept separate to highlight how the JSONL + state split works in practice.
