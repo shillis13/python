@@ -20,12 +20,9 @@ Examples:
 
 from __future__ import annotations
 
-import atexit
-import fnmatch
 import json
 import os
 import re
-import readline
 import shlex
 import shutil
 import subprocess
@@ -47,8 +44,7 @@ _FALLBACK_ROOT = Path.home() / "Documents" / "AI" / "ai_root" / "ai_general" / "
 DEFAULT_ROOT = Path(os.environ.get("TODO_ROOT", _FALLBACK_ROOT)).resolve()
 CURRENT_ROOT = DEFAULT_ROOT
 
-VERSION = "2.4.0"
-HISTORY_FILE = Path.home() / ".todo_mgr_history"
+VERSION = "2.3.0"
 
 def get_template_dirs() -> list[Path]:
     """Return list of possible template directories in priority order."""
@@ -176,6 +172,11 @@ def colored_ref(ref: str) -> str:
 
 # === Data Structures ===
 
+def get_template_dirs() -> list[Path]:
+    return [CURRENT_ROOT / "todo_item", CURRENT_ROOT / "task_item", 
+            CURRENT_ROOT / "_todo_item_template", CURRENT_ROOT / "template_todo_item"]
+
+
 def get_groups_dir() -> Path:
     path = CURRENT_ROOT / "groups"
     path.mkdir(exist_ok=True)
@@ -263,9 +264,9 @@ def load_todos() -> dict[Path, Todo]:
             updated=updated,
         )
     
-    # Populate children (guard against self-listing)
+    # Populate children
     for todo in todos.values():
-        if todo.parent and todo.parent in todos and todo.parent != todo.path:
+        if todo.parent and todo.parent in todos:
             todos[todo.parent].children.append(todo.path)
     
     return todos
@@ -458,146 +459,76 @@ def render_tree(todos: dict[Path, Todo], include_done: bool = False) -> str:
     return "\n".join(lines)
 
 
-def format_table(todos: list[Todo], sort_key: str = "status",
-                  indent_children: bool = True,
-                  show_dates: bool = False) -> str:
-    """Format todos as a table with aligned columns.
-
-    Args:
-        todos: List of Todo objects to display.
-        sort_key: Sort field - name, status, created, updated, ref, flags.
-        indent_children: If True, group children under parents with indentation.
-        show_dates: If True, include Created and Updated columns.
-
-    Returns:
-        Formatted table string.
-    """
+def format_table(todos: list[Todo]) -> str:
+    """Format todos as a table with aligned columns."""
     if not todos:
         return c("(no todos)", Colors.DIM)
-
+    
     import re
     ANSI_ESCAPE = re.compile(r'\x1b\[[0-9;]*m')
-
+    
     def visible_len(s: str) -> int:
         """Get visible length of string (excluding ANSI codes)."""
         return len(ANSI_ESCAPE.sub('', s))
-
+    
     def pad(s: str, width: int) -> str:
         """Pad string to width, accounting for ANSI codes."""
         padding = width - visible_len(s)
         return s + (" " * max(0, padding))
-
+    
     def truncate(s: str, w: int) -> str:
         """Truncate to width with ellipsis."""
         if len(s) <= w:
             return s
         return s[:w-2] + ".."
-
+    
     def extract_id(path) -> str:
         """Extract todo_NNNN_name from path."""
         return path.name
-
+    
     ref_map = build_reference_map({todo.path: todo for todo in todos})
     inverse_ref = {path: ref for ref, path in ref_map.items()}
-
-    # Build sort function
-    sort_funcs = {
-        "name": lambda t: (t.name.lower(),),
-        "status": lambda t: (STATUS_TO_CODE.get(t.status, "ZZ"), t.name),
-        "created": lambda t: (t.created or "9999", t.name),
-        "updated": lambda t: (t.updated or "9999", t.name),
-        "ref": lambda t: (inverse_ref.get(t.path, "ZZZ"),),
-        "flags": lambda t: (",".join(t.flags) if t.flags else "zzz", t.name),
-    }
-    sort_fn = sort_funcs.get(sort_key, sort_funcs["status"])
-
-    # Build display order with optional hierarchy
-    todo_paths = {t.path for t in todos}
-    todo_by_path = {t.path: t for t in todos}
-
-    if indent_children:
-        # Separate roots from children within the filtered list
-        children_map: dict[Path, list[Path]] = defaultdict(list)
-        roots = []
-        for t in todos:
-            if t.parent and t.parent in todo_paths:
-                children_map[t.parent].append(t.path)
-            else:
-                roots.append(t)
-
-        roots.sort(key=sort_fn)
-
-        # Recursively collect parent then children
-        def collect_hierarchy(todo: Todo, depth: int) -> list[tuple[Todo, int]]:
-            """Collect todo and its children recursively with depth."""
-            result = [(todo, depth)]
-            kids = children_map.get(todo.path, [])
-            kid_todos = [todo_by_path[p] for p in kids]
-            kid_todos.sort(key=sort_fn)
-            for child in kid_todos:
-                result.extend(collect_hierarchy(child, depth + 1))
-            return result
-
-        ordered: list[tuple[Todo, int]] = []
-        for root in roots:
-            ordered.extend(collect_hierarchy(root, 0))
-    else:
-        ordered = [(t, 0) for t in sorted(todos, key=sort_fn)]
-
+    
     # Column widths
     REF_W = 5
     ID_W = 35
     STATUS_W = 17
     FLAGS_W = 18
     TAGS_W = 25
-    DATE_W = 12
-
+    
     rows = []
-
+    
     # Header
-    hdr_parts = [
-        pad("Ref", REF_W), pad("ID", ID_W), pad("Status", STATUS_W),
-    ]
-    if show_dates:
-        hdr_parts.extend([pad("Created", DATE_W), pad("Updated", DATE_W)])
-    hdr_parts.extend([pad("Flags", FLAGS_W), "Tags"])
-    hdr = "  ".join(hdr_parts)
+    hdr = (
+        pad("Ref", REF_W) + "  " +
+        pad("ID", ID_W) + "  " +
+        pad("Status", STATUS_W) + "  " +
+        pad("Flags", FLAGS_W) + "  " +
+        "Tags"
+    )
     rows.append(c(hdr, Colors.DIM))
-
-    total_w = REF_W + ID_W + STATUS_W + FLAGS_W + TAGS_W + 8
-    if show_dates:
-        total_w += (DATE_W + 2) * 2
-    rows.append(c("─" * total_w, Colors.DIM))
-
-    for todo, indent_level in ordered:
+    rows.append(c("─" * (REF_W + ID_W + STATUS_W + FLAGS_W + TAGS_W + 8), Colors.DIM))
+    
+    for todo in sorted(todos, key=lambda t: (STATUS_TO_CODE.get(t.status, "ZZ"), t.name)):
         ref = inverse_ref.get(todo.path, "")
-        todo_id = extract_id(todo.path)
-
-        # Apply indent prefix for child todos
-        indent_prefix = "  " * indent_level
-        display_id = truncate(indent_prefix + todo_id, ID_W)
-
+        todo_id = truncate(extract_id(todo.path), ID_W)
         flags_str = truncate(",".join(todo.flags), FLAGS_W) if todo.flags else "-"
         tags_str = truncate(",".join(todo.tags), TAGS_W) if todo.tags else "-"
-
+        
         ref_colored = colored_ref(ref)
         status_colored = colored_status(todo.status)
         flags_display = c(flags_str, Colors.YELLOW) if todo.flags else c("-", Colors.DIM)
         tags_display = c(tags_str, Colors.BLUE) if todo.tags else c("-", Colors.DIM)
-
-        row_parts = [
-            pad(ref_colored, REF_W),
-            pad(display_id, ID_W),
-            pad(status_colored, STATUS_W),
-        ]
-        if show_dates:
-            created_str = truncate(todo.created or "-", DATE_W)
-            updated_str = truncate(todo.updated or "-", DATE_W)
-            row_parts.append(pad(c(created_str, Colors.DIM), DATE_W))
-            row_parts.append(pad(c(updated_str, Colors.DIM), DATE_W))
-        row_parts.extend([pad(flags_display, FLAGS_W), tags_display])
-        rows.append("  ".join(row_parts))
-
+        
+        row = (
+            pad(ref_colored, REF_W) + "  " +
+            pad(todo_id, ID_W) + "  " +
+            pad(status_colored, STATUS_W) + "  " +
+            pad(flags_display, FLAGS_W) + "  " +
+            tags_display
+        )
+        rows.append(row)
+    
     return "\n".join(rows)
 
 
@@ -616,12 +547,12 @@ def view_todo_detail(todo: Todo, refs: dict[str, Path]) -> str:
     # Metadata table
     lines.append(f"  {c('Reference:', Colors.DIM)}  {colored_ref(ref)}")
     lines.append(f"  {c('Status:', Colors.DIM)}     {colored_status(todo.status)}")
-    lines.append(f"  {c('Path:', Colors.DIM)}       {c(str(todo.rel_path), Colors.BRIGHT_BLACK)}")
-
+    lines.append(f"  {c('Path:', Colors.DIM)}       {todo.rel_path}")
+    
     if todo.created:
-        lines.append(f"  {c('Created:', Colors.DIM)}    {c(todo.created, Colors.GREEN)}")
+        lines.append(f"  {c('Created:', Colors.DIM)}    {todo.created}")
     if todo.updated:
-        lines.append(f"  {c('Updated:', Colors.DIM)}    {c(todo.updated, Colors.GREEN)}")
+        lines.append(f"  {c('Updated:', Colors.DIM)}    {todo.updated}")
     
     # Flags
     if todo.flags:
@@ -640,25 +571,37 @@ def view_todo_detail(todo: Todo, refs: dict[str, Path]) -> str:
     # Parent
     if todo.parent:
         parent_rel = todo.parent.relative_to(CURRENT_ROOT)
-        lines.append(f"  {c('Parent:', Colors.DIM)}     {c(str(parent_rel), Colors.CYAN)}")
+        lines.append(f"  {c('Parent:', Colors.DIM)}     {parent_rel}")
     
     # Children
     if todo.children:
         lines.append(f"  {c('Children:', Colors.DIM)}")
         for child in sorted(todo.children):
-            lines.append(f"    - {c(child.name, Colors.CYAN)}")
+            child_rel = child.relative_to(CURRENT_ROOT)
+            lines.append(f"    - {child_rel}")
     
     lines.append("")
     
-    # Sections from notes.md
+    # Description section
     notes_path = todo.path / "notes.md"
     if notes_path.exists():
-        sections = extract_populated_sections(notes_path)
-        for heading, content in sections.items():
-            lines.append(c(f"{heading}:", Colors.BOLD, Colors.YELLOW))
-            lines.append(indent(content, "  "))
+        desc = extract_section(notes_path, "Description")
+        if desc:
+            lines.append(c("Description:", Colors.BOLD))
+            lines.append(indent(desc.strip(), "  "))
             lines.append("")
-
+        
+        done_when = extract_section(notes_path, "Done When")
+        if done_when:
+            lines.append(c("Done When:", Colors.BOLD))
+            lines.append(indent(done_when.strip(), "  "))
+            lines.append("")
+        
+        notes_tail = tail_notes(notes_path)
+        if notes_tail:
+            lines.append(c("Recent Notes:", Colors.BOLD))
+            lines.append(indent(notes_tail.strip(), "  "))
+    
     return "\n".join(lines)
 
 
@@ -676,43 +619,6 @@ def extract_section(notes_path: Path, heading: str) -> str:
         if capture:
             collected.append(line)
     return "\n".join(collected) if collected else ""
-
-
-def _has_real_content(lines: list[str]) -> bool:
-    """Check if lines have content beyond just HTML comments and whitespace."""
-    text = "\n".join(lines)
-    text = re.sub(r'<!--.*?-->', '', text, flags=re.DOTALL)
-    return bool(text.strip())
-
-
-def extract_populated_sections(notes_path: Path) -> dict[str, str]:
-    """Extract all ## sections from notes.md that have actual content.
-
-    Args:
-        notes_path: Path to notes.md file.
-
-    Returns:
-        Dict mapping section heading to its content string.
-    """
-    sections: dict[str, str] = {}
-    current_section = None
-    current_content: list[str] = []
-
-    file_lines = notes_path.read_text().splitlines()
-    for line in file_lines:
-        if line.startswith("## "):
-            if current_section and _has_real_content(current_content):
-                sections[current_section] = "\n".join(current_content).strip()
-            current_section = line[3:].strip()
-            current_content = []
-        elif current_section is not None:
-            current_content.append(line)
-
-    # Handle last section
-    if current_section and _has_real_content(current_content):
-        sections[current_section] = "\n".join(current_content).strip()
-
-    return sections
 
 
 def tail_notes(notes_path: Path, num_lines: int = 8) -> str:
@@ -834,73 +740,17 @@ def cmd_tree(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) ->
 
 
 def cmd_list(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> str:
-    """List todos, optionally filtered by status.
-
-    Args:
-        args: Command arguments. Supports status filter, --sort, and --flat.
-        todos: Dict of path to Todo objects.
-        refs: Reference map.
-
-    Returns:
-        Formatted table string.
-    """
-    status_filter = None
-    sort_key = "status"
-    flat = False
-    show_dates = False
-    name_pattern = None
-
-    # Parse args
-    positional_args = []
-    i = 0
-    while i < len(args):
-        arg = args[i]
-        if arg.startswith("--sort="):
-            sort_key = arg.split("=", 1)[1]
-        elif arg == "--sort" and i + 1 < len(args):
-            i += 1
-            sort_key = args[i]
-        elif arg == "--flat":
-            flat = True
-        elif arg in ("--show-dates", "--dates"):
-            show_dates = True
-        elif not arg.startswith("--"):
-            positional_args.append(arg)
-        i += 1
-
-    # Validate sort key
-    valid_sorts = ("name", "status", "created", "updated", "ref", "flags")
-    if sort_key not in valid_sorts:
-        return c(f"Unknown sort key: {sort_key}. Valid: {', '.join(valid_sorts)}", Colors.RED)
-
-    # Auto-show dates when sorting by date fields
-    if sort_key in ("created", "updated"):
-        show_dates = True
-
-    # Classify positional args as status filter or name pattern
-    for pos_arg in positional_args:
-        if "*" in pos_arg or "?" in pos_arg:
-            name_pattern = pos_arg
-        elif status_filter is None:
-            status_filter = pos_arg
-
-    # Apply status filter
-    if status_filter:
-        sf = status_filter.lower()
-        if sf.upper() in STATUS_CODES:
-            sf = STATUS_CODES[sf.upper()].lower()
-        filtered = [t for t in todos.values() if t.status.lower() == sf]
+    """List todos, optionally filtered by status."""
+    if args:
+        status_filter = args[0].lower()
+        # Check if it's a status code
+        if status_filter.upper() in STATUS_CODES:
+            status_filter = STATUS_CODES[status_filter.upper()].lower()
+        filtered = [t for t in todos.values() if t.status.lower() == status_filter]
     else:
         # Default: exclude Done and Cancelled
         filtered = [t for t in todos.values() if t.status not in ("Done", "Cancelled")]
-
-    # Apply name pattern filter
-    if name_pattern:
-        filtered = [t for t in filtered
-                    if fnmatch.fnmatch(t.name.lower(), name_pattern.lower())]
-
-    return format_table(filtered, sort_key=sort_key, indent_children=not flat,
-                        show_dates=show_dates)
+    return format_table(filtered)
 
 
 def cmd_view(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> str:
@@ -927,23 +777,11 @@ def cmd_status(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) 
         path = resolve_target(args[0], todos, refs)
         new_status = args[1]
         
-        # Normalize status code to full name
+        # Normalize status
         if new_status.upper() in STATUS_CODES:
             new_status = STATUS_CODES[new_status.upper()]
-
-        # Validate against known statuses
-        valid_statuses = {s.lower() for s, _ in STATUS_ORDER}
-        if new_status.lower() not in valid_statuses:
-            valid_list = ", ".join(s for s, _ in STATUS_ORDER)
-            return c(f"Unknown status: {new_status}. Valid: {valid_list}", Colors.RED)
-
+        
         run_script("set_status", new_status.lower(), str(path))
-
-        # Clear flags when completing or cancelling
-        if new_status.lower() in ("done", "cancelled"):
-            for flag_file in path.glob("*.flag"):
-                flag_file.unlink()
-
         return c(f"Status updated: {path.name} → {new_status}", Colors.GREEN)
     except (ValueError, subprocess.CalledProcessError) as e:
         return c(f"Error: {e}", Colors.RED)
@@ -1015,18 +853,12 @@ def create_todo_from_template(name: str, parent_dir: Path) -> Path:
     slug = name.lower()
     slug = re.sub(r'[^a-z0-9_]+', '_', slug)
     slug = re.sub(r'_+', '_', slug).strip('_')
-
+    
     if not slug:
         raise ValueError("Invalid todo name - no valid characters")
-
-    # Truncate slug to stay within filesystem NAME_MAX (255)
-    prefix = f"todo_{num:04d}_"
-    max_slug_len = 255 - len(prefix)
-    if len(slug) > max_slug_len:
-        slug = slug[:max_slug_len].rstrip('_')
-
+    
     # Build directory name
-    dir_name = f"{prefix}{slug}"
+    dir_name = f"todo_{num:04d}_{slug}"
     target_dir = parent_dir / dir_name
     
     if target_dir.exists():
@@ -1055,9 +887,15 @@ def create_todo_from_template(name: str, parent_dir: Path) -> Path:
 
 ## Description
 
+TODO: Add description
+
 ## Requirements
 
+- [ ] Requirement 1
+
 ## Done When
+
+- [ ] Completion criteria
 
 ## Notes
 
@@ -1085,11 +923,6 @@ def create_todo_from_template(name: str, parent_dir: Path) -> Path:
             content = content.replace("__TODO_NAME__", display_name)
             content = content.replace("__TASK_NAME__", display_name)
             content = content.replace("__DATE__", today)
-
-            # Remove HTML comment placeholders from template
-            content = re.sub(r'\n*<!--\s*\n.*?\n-->\n*', '\n\n', content, flags=re.DOTALL)
-            # Collapse excessive blank lines left by removal
-            content = re.sub(r'\n{3,}', '\n\n', content)
             notes_path.write_text(content)
     
     # Ensure data directory and status file exist (required for loading)
@@ -1112,8 +945,7 @@ def cmd_create(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path], 
     status = "triaging"
     tags = []
     flags = []
-    description = ""
-
+    
     # Parse optional args
     i = 1
     while i < len(args):
@@ -1128,9 +960,6 @@ def cmd_create(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path], 
             i += 2
         elif args[i] == "--flags" and i + 1 < len(args):
             flags = [f.strip() for f in args[i + 1].split(",")]
-            i += 2
-        elif args[i] in ("--description", "-d") and i + 1 < len(args):
-            description = args[i + 1]
             i += 2
         else:
             i += 1
@@ -1158,13 +987,7 @@ def cmd_create(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path], 
         for flag in flags:
             if flag:
                 run_script("add_flag", flag, str(new_path))
-
-        # Set description if provided
-        if description:
-            notes_path = new_path / "notes.md"
-            if notes_path.exists():
-                update_notes_section(notes_path, "Description", description)
-
+        
         rel_path = new_path.relative_to(CURRENT_ROOT)
         return c(f"✓ Created: {rel_path}", Colors.GREEN)
     
@@ -1175,30 +998,16 @@ def cmd_create(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path], 
 def create_todo_interactive() -> str:
     """Interactive todo creation wizard."""
     print(c("\n=== Create New Todo ===", Colors.BOLD))
-
+    
     name = input(f"  {c('Name:', Colors.CYAN)} ").strip()
     if not name:
         return c("Cancelled - name required", Colors.YELLOW)
-
+    
     parent = input(f"  {c('Parent (blank for root):', Colors.CYAN)} ").strip() or "."
-
-    # Show available statuses
-    print(c("  Available statuses:", Colors.DIM))
-    for status_name, code in STATUS_ORDER:
-        print(f"    {c(code, Colors.CYAN)}: {status_name}")
     status = input(f"  {c('Status [triaging]:', Colors.CYAN)} ").strip() or "triaging"
-
-    # Show existing tags in use
-    todos = load_todos()
-    all_tags = set()
-    for t in todos.values():
-        all_tags.update(t.tags)
-    if all_tags:
-        print(c(f"  Existing tags: {', '.join(sorted(all_tags))}", Colors.DIM))
     tags = input(f"  {c('Tags (comma separated):', Colors.CYAN)} ").strip()
     flags = input(f"  {c('Flags (comma separated):', Colors.CYAN)} ").strip()
-    description = input(f"  {c('Description (optional):', Colors.CYAN)} ").strip()
-
+    
     args = [name]
     if parent and parent != ".":
         args.extend(["--parent", parent])
@@ -1208,11 +1017,8 @@ def create_todo_interactive() -> str:
         args.extend(["--tags", tags])
     if flags:
         args.extend(["--flags", flags])
-    if description:
-        args.extend(["--description", description])
     
-    refs = build_reference_map(todos)
-    return cmd_create(args, todos, refs, interactive=False)
+    return cmd_create(args, load_todos(), build_reference_map(load_todos()), interactive=False)
 
 
 def cmd_move(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> str:
@@ -1300,17 +1106,14 @@ def cmd_edit(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) ->
         todo = todos.get(path)
         if not todo:
             return c(f"Todo not found: {args[0]}", Colors.RED)
-
+        
         notes_path = path / "notes.md"
-
+        
         # If specific field given, edit just that
         if len(args) > 1:
             field = args[1].lower()
-            inline = " ".join(args[2:]) if len(args) > 2 else None
-            if field in ("child", "c"):
-                return edit_child(todo, todos, refs, inline)
-            return edit_field(todo, field, notes_path, inline)
-
+            return edit_field(todo, field, notes_path)
+        
         # Otherwise show menu
         return edit_menu(todo, notes_path)
     
@@ -1319,178 +1122,79 @@ def cmd_edit(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) ->
 
 
 def edit_menu(todo: Todo, notes_path: Path) -> str:
-    """Show interactive edit menu.
-
-    Supports inline parameters: type 'g api' to add tag directly,
-    's ready' to set status directly, etc.
-    """
+    """Show interactive edit menu."""
     while True:
         print(c(f"\n=== Edit: {todo.name} ===", Colors.BOLD))
         print()
-
-        # Current values - strip HTML comments for display
-        def _clean_section(name: str) -> str:
-            raw = extract_section(notes_path, name).strip()
-            cleaned = re.sub(r'<!--.*?-->', '', raw, flags=re.DOTALL).strip()
-            result = cleaned[:80] or "(empty)"
-            return result
-
-        desc = _clean_section("Description")
-        reqs = _clean_section("Requirements")
-        done_when = _clean_section("Done When")
-
-        # Field order matches view: title, status, flags, tags, then sections
-        children_str = ", ".join(ch.name for ch in sorted(
-            (todos[cp] for cp in todo.children if cp in todos),
-            key=lambda t: t.name)) or "(none)"
+        
+        # Current values
+        desc = extract_section(notes_path, "Description").strip()[:60] or "(empty)"
+        reqs = extract_section(notes_path, "Requirements").strip()[:60] or "(empty)"
+        done_when = extract_section(notes_path, "Done When").strip()[:60] or "(empty)"
+        
         fields = [
             ("t", "title", todo.title),
+            ("d", "description", desc + "..."),
             ("s", "status", todo.status),
-            ("f", "flags", ", ".join(todo.flags) or "(none)"),
             ("g", "tags", ", ".join(todo.tags) or "(none)"),
-            ("c", "child", children_str),
-            ("d", "description", desc),
-            ("r", "requirements", reqs),
-            ("w", "done_when", done_when),
+            ("f", "flags", ", ".join(todo.flags) or "(none)"),
+            ("r", "requirements", reqs + "..."),
+            ("w", "done_when", done_when + "..."),
             ("n", "notes", "Add timestamped note"),
             ("o", "open", "Open notes.md in $EDITOR"),
         ]
-
+        
         for key, name, value in fields:
-            print(f"  {c(f'[{key}]', Colors.CYAN)} {name:<16} "
-                  f"{c(str(value)[:80], Colors.DIM)}")
-
+            print(f"  {c(f'[{key}]', Colors.CYAN)} {name:<14} {c(str(value)[:50], Colors.DIM)}")
+        
         print()
         print(f"  {c('[q]', Colors.YELLOW)} quit editing")
         print()
-
-        choice_raw = input("Edit field: ").strip()
-
-        if not choice_raw or choice_raw.lower() in ("q", "quit"):
+        
+        choice = input(f"Edit field: ").strip().lower()
+        
+        if choice in ("q", "quit", ""):
             break
-
-        # Parse inline value (e.g., "g api" or "s ready")
-        parts = choice_raw.split(None, 1)
-        choice = parts[0].lower()
-        inline_value = parts[1] if len(parts) > 1 else None
-
+        
         for key, name, _ in fields:
             if choice == key or choice == name:
                 if name == "open":
                     editor = os.environ.get("EDITOR", "nano")
                     subprocess.run([editor, str(notes_path)])
-                    print(c("Opened in editor", Colors.GREEN))
-                    # Reload todo after editor closes
-                    todos = load_todos()
-                    if todo.path in todos:
-                        todo = todos[todo.path]
-                    break
-                elif name == "child":
-                    result = edit_child(todo, todos, refs, inline_value)
-                    print(result)
-                    # Reload todo
-                    todos = load_todos()
-                    refs = build_reference_map(todos)
-                    if todo.path in todos:
-                        todo = todos[todo.path]
-                        notes_path = todo.path / "notes.md"
-                    break
+                    return c("Opened in editor", Colors.GREEN)
                 else:
-                    result = edit_field(todo, name, notes_path, inline_value)
+                    result = edit_field(todo, name, notes_path)
                     print(result)
                     # Reload todo
                     todos = load_todos()
                     if todo.path in todos:
                         todo = todos[todo.path]
-                        notes_path = todo.path / "notes.md"
-                    else:
-                        # Directory was renamed (title edit), paths are stale
-                        return c("Done editing (directory renamed)", Colors.GREEN)
                 break
-
+    
     return c("Done editing", Colors.GREEN)
 
 
-def input_with_prefill(prompt: str, prefill: str = "") -> str:
-    """Prompt for input with a pre-filled editable default value.
-
-    Args:
-        prompt: The prompt string to display.
-        prefill: Text to pre-populate in the input buffer.
-
-    Returns:
-        The user's input string.
-    """
-    def hook():
-        readline.insert_text(prefill)
-        readline.redisplay()
-    readline.set_pre_input_hook(hook)
-    try:
-        result = input(prompt)
-    finally:
-        readline.set_pre_input_hook()
-    return result
-
-
-def edit_field(todo: Todo, field: str, notes_path: Path,
-               inline_value: str = None) -> str:
-    """Edit a specific field.
-
-    Args:
-        todo: The todo to edit.
-        field: Field name to edit.
-        notes_path: Path to notes.md.
-        inline_value: Optional pre-provided value (from inline edit command).
-    """
+def edit_field(todo: Todo, field: str, notes_path: Path) -> str:
+    """Edit a specific field."""
     if field == "title":
         print(f"  Current: {c(todo.title, Colors.DIM)}")
-        new_val = inline_value or input_with_prefill("  New title: ", todo.title).strip()
+        new_val = input("  New title: ").strip()
         if new_val:
             update_notes_field(notes_path, "title", new_val)
-
-            # Convert to slug and rename directory
-            new_slug = new_val.lower()
-            new_slug = re.sub(r'[^a-z0-9_]+', '_', new_slug)
-            new_slug = re.sub(r'_+', '_', new_slug).strip('_')
-
-            if new_slug:
-                match = re.match(r'^((?:todo|task)_\d{4}_)', todo.path.name)
-                if match:
-                    prefix = match.group(1)
-                    new_name = f"{prefix}{new_slug}"
-                    new_path = todo.path.parent / new_name
-
-                    if new_name != todo.path.name:
-                        if new_path.exists():
-                            return c(f"Title updated but rename skipped: "
-                                     f"{new_name} already exists", Colors.YELLOW)
-                        shutil.move(str(todo.path), str(new_path))
-                        return c(f"Title updated and renamed: "
-                                 f"{todo.path.name} -> {new_name}", Colors.GREEN)
-
-            return c("Title updated", Colors.GREEN)
-
+            return c(f"Title updated", Colors.GREEN)
+    
     elif field == "status":
         print(f"  Current: {colored_status(todo.status)}")
-        if not inline_value:
-            print(f"  Valid: {', '.join(s for s, _ in STATUS_ORDER)}")
-        new_val = inline_value or input("  New status: ").strip()
+        print(f"  Valid: {', '.join(s for s, _ in STATUS_ORDER)}")
+        new_val = input("  New status: ").strip()
         if new_val:
-            if new_val.upper() in STATUS_CODES:
-                new_val = STATUS_CODES[new_val.upper()]
-            valid_statuses = {s.lower() for s, _ in STATUS_ORDER}
-            if new_val.lower() not in valid_statuses:
-                valid_list = ", ".join(s for s, _ in STATUS_ORDER)
-                return c(f"Unknown status: {new_val}. Valid: {valid_list}",
-                         Colors.RED)
             run_script("set_status", new_val.lower(), str(todo.path))
             return c(f"Status updated to {new_val}", Colors.GREEN)
-
+    
     elif field == "tags":
         print(f"  Current: {', '.join(todo.tags) or '(none)'}")
-        if not inline_value:
-            print("  Enter tags (comma separated, prefix with - to remove):")
-        new_val = inline_value or input("  Tags: ").strip()
+        print("  Enter tags (comma separated, prefix with - to remove):")
+        new_val = input("  Tags: ").strip()
         if new_val:
             for tag in new_val.split(","):
                 tag = tag.strip()
@@ -1499,12 +1203,11 @@ def edit_field(todo: Todo, field: str, notes_path: Path,
                 elif tag:
                     run_script("add_tag", tag, str(todo.path))
             return c("Tags updated", Colors.GREEN)
-
+    
     elif field == "flags":
         print(f"  Current: {', '.join(todo.flags) or '(none)'}")
-        if not inline_value:
-            print("  Enter flags (comma separated, prefix with - to remove):")
-        new_val = inline_value or input("  Flags: ").strip()
+        print("  Enter flags (comma separated, prefix with - to remove):")
+        new_val = input("  Flags: ").strip()
         if new_val:
             for flag in new_val.split(","):
                 flag = flag.strip()
@@ -1513,16 +1216,15 @@ def edit_field(todo: Todo, field: str, notes_path: Path,
                 elif flag:
                     run_script("add_flag", flag, str(todo.path))
             return c("Flags updated", Colors.GREEN)
-
+    
     elif field in ("description", "requirements", "done_when"):
-        section_name = {"description": "Description", "requirements": "Requirements",
+        section_name = {"description": "Description", "requirements": "Requirements", 
                        "done_when": "Done When"}[field]
         current = extract_section(notes_path, section_name).strip()
-        display = re.sub(r'<!--.*?-->', '', current, flags=re.DOTALL).strip()
         print(f"  Current {section_name}:")
-        print(indent(display or "(empty)", "    "))
+        print(indent(current or "(empty)", "    "))
         print("  Enter new content (blank line to finish, 'keep' to cancel):")
-
+        
         lines = []
         while True:
             line = input("  > ")
@@ -1531,83 +1233,19 @@ def edit_field(todo: Todo, field: str, notes_path: Path,
             if line == "":
                 break
             lines.append(line)
-
+        
         if lines:
             update_notes_section(notes_path, section_name, "\n".join(lines))
             return c(f"{section_name} updated", Colors.GREEN)
-
+    
     elif field == "notes":
         print("  Add a timestamped note:")
-        new_val = inline_value or input("  Note: ").strip()
-        if new_val:
-            append_note(notes_path, new_val)
+        note = input("  Note: ").strip()
+        if note:
+            append_note(notes_path, note)
             return c("Note added", Colors.GREEN)
-
+    
     return c("No changes made", Colors.YELLOW)
-
-
-def edit_child(todo: Todo, todos: dict[Path, Todo],
-               refs: dict[str, Path], inline_value: str = None) -> str:
-    """Add a child to the current todo.
-
-    With a value (ref or name of existing todo): moves that todo as a child.
-    Without a value: creates a new child todo interactively.
-
-    Args:
-        todo: The parent todo.
-        todos: All loaded todos.
-        refs: Reference map.
-        inline_value: Optional ref/name of existing todo to move as child.
-
-    Returns:
-        Status message string.
-    """
-    if inline_value:
-        # Move existing todo as child of current
-        try:
-            child_path = resolve_target(inline_value, todos, refs)
-            if child_path == todo.path:
-                return c("Cannot make a todo its own child", Colors.RED)
-            dest = todo.path / child_path.name
-            if dest.exists():
-                return c(f"Already exists: {child_path.name}", Colors.RED)
-            shutil.move(str(child_path), str(dest))
-            return c(f"Moved {child_path.name} as child of {todo.name}", Colors.GREEN)
-        except ValueError as e:
-            return c(str(e), Colors.RED)
-
-    # No inline value — prompt for action
-    print(f"  {c('[m]', Colors.CYAN)} Move existing todo as child")
-    print(f"  {c('[n]', Colors.CYAN)} Create new child todo")
-    action = input("  Action: ").strip().lower()
-
-    if action in ("m", "move"):
-        ref_input = input("  Todo ref to move: ").strip()
-        if not ref_input:
-            return c("Cancelled", Colors.YELLOW)
-        try:
-            child_path = resolve_target(ref_input, todos, refs)
-            if child_path == todo.path:
-                return c("Cannot make a todo its own child", Colors.RED)
-            dest = todo.path / child_path.name
-            if dest.exists():
-                return c(f"Already exists: {child_path.name}", Colors.RED)
-            shutil.move(str(child_path), str(dest))
-            return c(f"Moved {child_path.name} as child of {todo.name}", Colors.GREEN)
-        except ValueError as e:
-            return c(str(e), Colors.RED)
-
-    elif action in ("n", "new", "create"):
-        child_name = input("  New child name: ").strip()
-        if not child_name:
-            return c("Cancelled", Colors.YELLOW)
-        try:
-            new_path = create_todo_from_template(child_name, todo.path)
-            return c(f"Created child: {new_path.name}", Colors.GREEN)
-        except (ValueError, OSError) as e:
-            return c(f"Error: {e}", Colors.RED)
-
-    return c("Cancelled", Colors.YELLOW)
 
 
 def update_notes_field(notes_path: Path, field: str, value: str) -> None:
@@ -1622,19 +1260,13 @@ def update_notes_field(notes_path: Path, field: str, value: str) -> None:
 
 
 def update_notes_section(notes_path: Path, section: str, new_content: str) -> None:
-    """Update a section in notes.md.
-
-    Args:
-        notes_path: Path to the notes.md file.
-        section: Section heading (without ##) to update.
-        new_content: New content for the section.
-    """
+    """Update a section in notes.md."""
     lines = notes_path.read_text().splitlines()
-
+    
     new_lines = []
     in_section = False
     section_written = False
-
+    
     for line in lines:
         if line.strip() == f"## {section}":
             new_lines.append(line)
@@ -1644,22 +1276,43 @@ def update_notes_section(notes_path: Path, section: str, new_content: str) -> No
             in_section = True
             section_written = True
             continue
-
+        
         if in_section and line.startswith("## "):
             in_section = False
-
+        
         if not in_section:
             new_lines.append(line)
-
-    # If section didn't exist, append it
-    if not section_written:
-        new_lines.append("")
-        new_lines.append(f"## {section}")
-        new_lines.append("")
-        new_lines.append(new_content)
-        new_lines.append("")
-
+    
     notes_path.write_text("\n".join(new_lines))
+
+
+def cmd_delete(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path], interactive: bool = True) -> str:
+    """Move todo to trash. Usage: delete <ref> [--force]"""
+    if not args:
+        return c("Usage: delete <ref> [--force]", Colors.RED)
+    
+    force = "--force" in args or "-f" in args
+    ref = args[0]
+    
+    try:
+        path = resolve_target(ref, todos, refs)
+        
+        if interactive and not force:
+            confirm = input(f"Delete {c(path.name, Colors.YELLOW)}? [y/N]: ").strip().lower()
+            if confirm != "y":
+                return c("Cancelled", Colors.YELLOW)
+        
+        trash_dir = CURRENT_ROOT / "trash"
+        trash_dir.mkdir(exist_ok=True)
+        
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        dest = trash_dir / f"{path.name}_{ts}"
+        shutil.move(str(path), str(dest))
+        
+        return c(f"Moved to trash: {dest.relative_to(CURRENT_ROOT)}", Colors.GREEN)
+    
+    except (ValueError, OSError) as e:
+        return c(f"Error: {e}", Colors.RED)
 
 
 def cmd_complete(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> str:
@@ -1672,11 +1325,7 @@ def cmd_complete(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]
         
         # Set status to Done
         run_script("set_status", "done", str(path), quiet=True)
-
-        # Clear all flags - no longer relevant once completed
-        for flag_file in path.glob("*.flag"):
-            flag_file.unlink()
-
+        
         # Move to completed
         completed_dir = CURRENT_ROOT / "completed"
         completed_dir.mkdir(exist_ok=True)
@@ -1841,7 +1490,7 @@ HELP_OVERVIEW = """
 {bold}COMMON COMMANDS:{reset}
     {cyan}kanban{reset}          Show kanban board (default view)
     {cyan}tree{reset}            Show hierarchical tree view
-    {cyan}list{reset} [status] [pattern] [options]  List todos (--sort, --flat, --show-dates)
+    {cyan}list{reset} [status]   List todos (optionally by status)
     {cyan}view{reset} <ref>      Show todo details
     {cyan}create{reset} <name>   Create new todo
     {cyan}status{reset} <r> <s>  Change todo status
@@ -1875,16 +1524,9 @@ HELP_EXAMPLES = """
     kanban                   # Board view (excludes Done/Cancelled)
     kanban --all             # Board view with all statuses
     tree                     # Hierarchical tree view
-    list                     # All active todos (children indented)
+    list                     # All active todos as table
     list ready               # Only Ready todos
     list IP                  # Only In_Progress (by code)
-    list --sort name         # Sort alphabetically by name
-    list --sort created      # Sort by creation date
-    list --flat              # Flat list (no child indentation)
-    list --show-dates        # Show created/updated date columns
-    list ready --sort name   # Filter + sort combined
-    list '*memory*'          # Filter by name pattern (glob)
-    list '*api*' --sort name # Pattern + sort combined
     view IP2                 # By reference code
     view 0038                # By todo number
     view tool_arch           # By partial name match
@@ -1937,12 +1579,9 @@ HELP_VERBOSE = """
       Show hierarchical tree view of todos with parent/child relationships.
       --all        Include Done and Cancelled
 
-  {cyan}list{reset} [status] [pattern] [--sort key] [--flat] [--show-dates]
-      List todos as a table. Children are indented under parents.
-      Optional status filter, name pattern (glob), sort key, --flat, --show-dates.
-      Patterns use * and ? wildcards (e.g., *memory*, todo_00?? ).
-      Dates shown automatically when sorting by created/updated.
-      Examples: list, list ready, list --sort name, list '*memory*'
+  {cyan}list{reset} [status]
+      List todos as a table. Optional status filter.
+      Examples: list, list ready, list IP, list blocked
 
   {cyan}view{reset} <ref|path>
       Show detailed information about a specific todo including
@@ -1976,16 +1615,15 @@ HELP_VERBOSE = """
 
   {cyan}edit{reset} <ref> [field]
       Interactive editor for todo fields.
-      Fields: title, description, status, tags, flags, child, requirements, done_when, notes
+      Fields: title, description, status, tags, flags, requirements, done_when, notes
       Without field arg, shows menu of all editable fields.
-      Child: move existing todo as child, or create new child.
 
 {bold}ORGANIZATION COMMANDS{reset}
 
   {cyan}move{reset} <ref> <new_parent|root>
       Move a todo to become a child of another todo, or back to root level.
       Use 'root', '.', or '/' to move to root (unparent).
-
+      
       {dim}move vs link:{reset}
       - move: Physically relocates the todo directory (changes hierarchy)
       - link: Creates a symlink relationship (todos stay in place)
@@ -2046,38 +1684,6 @@ By default, excludes Done and Cancelled to focus on active work.
 {bold}Examples:{reset}
     kanban           # Active todos only
     kanban --all     # Everything including archived
-""",
-    "list": """
-{bold}list{reset} [status] [pattern] [--sort key] [--flat] [--show-dates]
-
-List todos as a table with children indented under parents.
-
-By default, excludes Done and Cancelled. Children of visible parents
-are indented with a 2-space prefix to show hierarchy.
-
-Supports glob patterns with * and ? wildcards to filter by name.
-
-{bold}Options:{reset}
-    --sort <key>    Sort by: name, status, created, updated, ref, flags
-                    Default: status (then name within status)
-    --flat          Disable child indentation (flat list)
-    --show-dates    Show Created and Updated date columns
-                    (automatic when --sort is created or updated)
-
-{bold}Examples:{reset}
-    list                     # Active todos, children indented
-    list ready               # Only Ready status
-    list IP                  # Only In_Progress (by code)
-    list --sort name         # Sort alphabetically
-    list --sort created      # Sort by creation date (dates shown)
-    list --show-dates        # Show date columns
-    list ready --sort name   # Filter and sort combined
-    list '*memory*'          # Filter by name pattern
-    list '*api*' --sort name # Pattern + sort
-    list --flat              # No indentation
-""",
-    "ls": """
-{bold}ls{reset} - Alias for {cyan}list{reset}. See: help list
 """,
     "tree": """
 {bold}tree{reset} [--all]
@@ -2140,106 +1746,20 @@ Without a field argument, shows a menu of all editable fields
 with current values and keyboard shortcuts.
 
 {bold}Fields:{reset}
-    [t] title         Title and directory slug (auto-renames directory)
-    [s] status        Current status
-    [f] flags         Workflow flags (comma separated)
-    [g] tags          Domain tags (comma separated)
-    [c] child         Add/move child todo
+    [t] title         The todo title/name
     [d] description   Main description text
+    [s] status        Current status
+    [g] tags          Domain tags (comma separated)
+    [f] flags         Workflow flags (comma separated)
     [r] requirements  Requirements section
     [w] done_when     Completion criteria
     [n] notes         Add a timestamped note
     [o] open          Open notes.md in $EDITOR
 
-Supports inline values: type 's ready' to set status directly,
-'g api,backend' to add tags, 'c IP3' to move IP3 as child, etc.
-
 {bold}Examples:{reset}
     edit IP2              # Interactive menu
     edit IP2 status       # Edit just status
-    edit IP2 s ready      # Set status directly
-    edit IP2 g api        # Add tag directly
-    edit IP2 c IP3        # Move IP3 as child of IP2
     edit IP2 tags         # Edit tags (prefix with - to remove)
-""",
-    "status": """
-{bold}status{reset} <ref> <new_status>
-
-Change the status of a todo.
-
-Accepts full status names or two-letter codes.
-
-{bold}Valid statuses:{reset}
-    TR  Triaging          NR  Needs_Research
-    ND  Needs_Derivation  RD  Ready
-    IP  In_Progress       RV  Reviewing
-    AC  Accepting         BL  Blocked
-    DN  Done              CN  Cancelled
-
-When status is set to Done or Cancelled, all flags are automatically cleared.
-
-{bold}Examples:{reset}
-    status IP2 reviewing     # By full name
-    status IP2 RV            # By code
-    status 0038 ready        # By todo number
-""",
-    "view": """
-{bold}view{reset} <ref|path>
-
-Show detailed information about a specific todo.
-
-Displays metadata (status, flags, tags, dates, parent, children)
-and all populated sections from notes.md.
-
-{bold}Examples:{reset}
-    view IP2            # By reference code
-    view 0038           # By todo number
-    view tool_arch      # By partial name match
-""",
-    "complete": """
-{bold}complete{reset} <ref>
-
-Mark a todo as Done and move it to the completed/ directory.
-All flags are automatically cleared on completion.
-
-{bold}Examples:{reset}
-    complete IP2        # By reference code
-    complete 0038       # By todo number
-""",
-    "delete": """
-{bold}delete{reset} <ref> [--force]
-
-Move a todo to the trash/ directory (soft delete).
-Can be recovered from trash/ if needed.
-
-{bold}Options:{reset}
-    --force, -f    Skip confirmation prompt
-
-{bold}Examples:{reset}
-    delete TR5            # With confirmation
-    delete TR5 --force    # Skip confirmation
-    rm 0038               # Alias for delete
-""",
-    "flag": """
-{bold}flag{reset} add|remove <ref> <flag_name>
-
-Add or remove a flag from a todo.
-
-{bold}Common flags:{reset}
-    high_priority, needs_testing, blocked_by_other, quick_win
-
-{bold}Examples:{reset}
-    flag add IP2 high_priority
-    flag remove IP2 needs_testing
-""",
-    "tag": """
-{bold}tag{reset} add|remove <ref> <tag_name>
-
-Add or remove a tag from a todo.
-
-{bold}Examples:{reset}
-    tag add IP2 api
-    tag remove IP2 legacy
 """,
     "create": """
 {bold}create{reset} <name> [--parent <ref>] [--status <s>] [--tags t1,t2] [--flags f1,f2]
@@ -2368,19 +1888,11 @@ def run_command(line: str, interactive: bool = True) -> str | None:
 
 def repl() -> None:
     """Interactive REPL mode."""
-    # Load command history
-    try:
-        readline.read_history_file(HISTORY_FILE)
-    except FileNotFoundError:
-        pass
-    readline.set_history_length(500)
-    atexit.register(readline.write_history_file, str(HISTORY_FILE))
-
     print(c(f"todo_mgr v{VERSION}", Colors.BOLD), f"- TODO_ROOT={CURRENT_ROOT}")
     print(run_command("kanban"))
     print()
     print(c("Type 'help' for commands, 'quit' to exit.", Colors.DIM))
-
+    
     while True:
         try:
             line = input(c("todo> ", Colors.CYAN)).strip()
