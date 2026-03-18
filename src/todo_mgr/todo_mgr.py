@@ -50,6 +50,10 @@ CURRENT_ROOT = DEFAULT_ROOT
 VERSION = "2.4.0"
 HISTORY_FILE = Path.home() / ".todo_mgr_history"
 
+# Ref cache: keeps refs stable between display commands in REPL mode.
+# Mutation commands use cached refs for resolution but ops layer loads fresh state.
+_ref_cache: dict = {"todos": None, "refs": None}
+
 def get_template_dirs() -> list[Path]:
     """Return list of possible template directories in priority order."""
     return [
@@ -71,8 +75,33 @@ STATUS_ORDER = [
 ]
 STATUS_CODES = {code: status for status, code in STATUS_ORDER}
 STATUS_TO_CODE = {status: code for status, code in STATUS_ORDER}
-ACTIVE_STATUSES = {"Triaging", "Needs_Research", "Needs_Derivation", "Ready", 
+ACTIVE_STATUSES = {"Triaging", "Needs_Research", "Needs_Derivation", "Ready",
                    "In_Progress", "Reviewing", "Accepting", "Blocked"}
+
+
+def resolve_status(status_input: str) -> str:
+    """Resolve status code, name, or abbreviation to canonical name.
+
+    Accepts: 'RD', 'rd', 'Ready', 'ready', 'READY', etc.
+    Returns: 'Ready' (canonical capitalized form)
+    Raises: ValueError if unrecognized.
+    """
+    s = status_input.strip()
+
+    # Check 2-letter codes (case-insensitive)
+    if s.upper() in STATUS_CODES:
+        return STATUS_CODES[s.upper()]
+
+    # Check full status names (case-insensitive)
+    for status_name, _ in STATUS_ORDER:
+        if status_name.lower() == s.lower():
+            return status_name
+
+    raise ValueError(
+        f"Invalid status: '{status_input}'. "
+        f"Valid: {', '.join(f'{s} ({c})' for s, c in STATUS_ORDER)}"
+    )
+
 
 # === Colors ===
 
@@ -217,11 +246,39 @@ class Todo:
         return len(self.rel_path.parts) - 1
 
 
-def load_todos() -> dict[Path, Todo]:
-    """Load all todos from filesystem."""
+def todo_to_dict(todo: Todo, ref: str = "") -> dict:
+    """Convert Todo dataclass to dict for JSON serialization."""
+    return {
+        "id": todo.name,
+        "ref": ref,
+        "path": str(todo.path),
+        "rel_path": str(todo.rel_path),
+        "status": todo.status,
+        "flags": todo.flags,
+        "tags": todo.tags,
+        "title": todo.title,
+        "summary": todo.summary,
+        "created": todo.created,
+        "updated": todo.updated,
+        "parent": str(todo.parent.relative_to(CURRENT_ROOT)) if todo.parent else None,
+        "children": [str(c.relative_to(CURRENT_ROOT)) for c in todo.children],
+    }
+
+
+def load_todos(include_completed: bool = False, include_trash: bool = False) -> dict[Path, Todo]:
+    """Load all todos from filesystem.
+
+    Args:
+        include_completed: If True, also load todos from completed/ directory.
+        include_trash: If True, also load todos from trash/ directory.
+    """
     todos: dict[Path, Todo] = {}
     template_names = {tpl.name for tpl in get_template_dirs() if tpl.exists()}
-    excluded_dirs = {"completed", "trash", "incoming", "groups", "scripts", "__pycache__"}
+    excluded_dirs = {"incoming", "groups", "scripts", "__pycache__"}
+    if not include_completed:
+        excluded_dirs.add("completed")
+    if not include_trash:
+        excluded_dirs.add("trash")
     
     for status_file in CURRENT_ROOT.rglob("*.status"):
         todo_dir = status_file.parent
@@ -544,13 +601,17 @@ def format_table(todos: list[Todo], sort_key: str = "status",
     else:
         ordered = [(t, 0) for t in sorted(todos, key=sort_fn)]
 
-    # Column widths
+    # Column widths — use terminal width for dynamic ID column
+    term_w = shutil.get_terminal_size((120, 24)).columns
     REF_W = 5
-    ID_W = 35
     STATUS_W = 17
     FLAGS_W = 18
     TAGS_W = 25
     DATE_W = 12
+    fixed_w = REF_W + STATUS_W + FLAGS_W + TAGS_W + 10  # 10 for separators
+    if show_dates:
+        fixed_w += (DATE_W + 2) * 2
+    ID_W = max(35, min(80, term_w - fixed_w))
 
     rows = []
 
@@ -818,18 +879,430 @@ def run_script(script_name: str, *args: str, quiet: bool = False) -> str:
         return ""
 
 
+# === Operations Layer ===
+# Pure operations returning structured dicts. Used by cmd_*() and MCP server.
+
+
+def ops_list(
+    status: str | None = None,
+    tag: str | None = None,
+    flag: str | None = None,
+    name_pattern: str | None = None,
+    sort_key: str | None = None,
+    include_all: bool = False,
+    include_done: bool = False,
+    include_cancelled: bool = False,
+) -> dict:
+    """List todos with filtering. Returns {"todos": [dict], "count": int}."""
+    needs_completed = include_all or include_done
+    if status and not needs_completed:
+        try:
+            needs_completed = resolve_status(status) in ("Done", "Cancelled")
+        except ValueError:
+            pass
+    todos = load_todos(include_completed=needs_completed)
+    refs = build_reference_map(todos)
+    inverse_ref = {path: ref for ref, path in refs.items()}
+
+    # Resolve status filter once
+    resolved_status = None
+    if status:
+        try:
+            resolved_status = resolve_status(status)
+        except ValueError:
+            return {"todos": [], "count": 0, "error": f"Unknown status: {status}"}
+
+    results = []
+    for path, todo in todos.items():
+        # Status visibility filtering
+        if not include_all:
+            if todo.status == "Done" and not include_done:
+                continue
+            if todo.status == "Cancelled" and not include_cancelled:
+                continue
+
+        # Explicit status filter
+        if resolved_status and todo.status != resolved_status:
+            continue
+
+        if tag and tag not in todo.tags:
+            continue
+        if flag and flag not in todo.flags:
+            continue
+        if name_pattern and not fnmatch.fnmatch(todo.name.lower(), name_pattern.lower()):
+            continue
+
+        ref = inverse_ref.get(path, "")
+        results.append(todo_to_dict(todo, ref))
+
+    # Sort
+    status_order = {s: i for i, (s, _) in enumerate(STATUS_ORDER)}
+    if sort_key == "created":
+        results.sort(key=lambda t: t.get("created", ""))
+    elif sort_key == "updated":
+        results.sort(key=lambda t: t.get("updated", ""))
+    elif sort_key == "name":
+        results.sort(key=lambda t: t["id"])
+    else:
+        results.sort(key=lambda t: (status_order.get(t["status"], 99), t["id"]))
+
+    return {"todos": results, "count": len(results)}
+
+
+def ops_get(identifier: str) -> dict:
+    """Get a single todo by identifier. Returns todo dict or error."""
+    todos = load_todos()
+    refs = build_reference_map(todos)
+    inverse_ref = {path: ref for ref, path in refs.items()}
+
+    try:
+        path = resolve_target(identifier, todos, refs)
+        todo = todos.get(path)
+        if not todo:
+            return {"success": False, "error": f"Todo not found: {identifier}"}
+
+        notes_path = todo.path / "notes.md"
+        notes_content = ""
+        if notes_path.exists():
+            notes_content = notes_path.read_text()
+
+        result = todo_to_dict(todo, inverse_ref.get(path, ""))
+        result["notes"] = notes_content
+        result["success"] = True
+        return result
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
+
+
+def ops_status(identifiers: list[str], new_status: str) -> dict:
+    """Change status for one or more todos."""
+    try:
+        resolved = resolve_status(new_status)
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
+
+    todos = load_todos()
+    refs = build_reference_map(todos)
+    results = []
+
+    for identifier in identifiers:
+        try:
+            path = resolve_target(identifier, todos, refs)
+            todo = todos.get(path)
+            if not todo:
+                results.append({"id": identifier, "success": False, "error": "Not found"})
+                continue
+            old_status = todo.status
+            run_script("set_status", resolved.lower(), str(todo.path), quiet=True)
+
+            # Clear flags when completing or cancelling
+            if resolved in ("Done", "Cancelled"):
+                for flag_file in path.glob("*.flag"):
+                    flag_file.unlink()
+
+            results.append({
+                "id": todo.name, "success": True,
+                "old_status": old_status, "new_status": resolved
+            })
+        except (ValueError, subprocess.CalledProcessError) as e:
+            results.append({"id": identifier, "success": False, "error": str(e)})
+
+    return {"success": all(r["success"] for r in results), "results": results}
+
+
+def ops_flag(action: str, identifier: str, flag_name: str) -> dict:
+    """Add or remove a flag. action: 'add' or 'remove'."""
+    todos = load_todos()
+    refs = build_reference_map(todos)
+    try:
+        path = resolve_target(identifier, todos, refs)
+        todo = todos.get(path)
+        if not todo:
+            return {"success": False, "error": f"Todo not found: {identifier}"}
+
+        flag_slug = re.sub(r'[^a-z0-9_]+', '_', flag_name.lower()).strip('_')
+        if not flag_slug:
+            return {"success": False, "error": "Invalid flag name"}
+
+        if action == "add":
+            if flag_slug in todo.flags:
+                return {"success": True, "todo_id": todo.name, "flag": flag_slug, "already_exists": True}
+            run_script("add_flag", flag_slug, str(todo.path), quiet=True)
+        elif action == "remove":
+            if flag_slug not in todo.flags:
+                return {"success": True, "todo_id": todo.name, "flag": flag_slug, "not_found": True}
+            run_script("remove_flag", flag_slug, str(todo.path), quiet=True)
+        else:
+            return {"success": False, "error": f"Invalid action: {action}. Use 'add' or 'remove'."}
+
+        return {"success": True, "todo_id": todo.name, "action": action, "flag": flag_slug}
+    except (ValueError, subprocess.CalledProcessError) as e:
+        return {"success": False, "error": str(e)}
+
+
+def ops_tag(action: str, identifier: str, tag_name: str) -> dict:
+    """Add or remove a tag. action: 'add' or 'remove'."""
+    todos = load_todos()
+    refs = build_reference_map(todos)
+    try:
+        path = resolve_target(identifier, todos, refs)
+        todo = todos.get(path)
+        if not todo:
+            return {"success": False, "error": f"Todo not found: {identifier}"}
+
+        tag_slug = re.sub(r'[^a-z0-9_]+', '_', tag_name.lower()).strip('_')
+        if not tag_slug:
+            return {"success": False, "error": "Invalid tag name"}
+
+        if action == "add":
+            if tag_slug in todo.tags:
+                return {"success": True, "todo_id": todo.name, "tag": tag_slug, "already_exists": True}
+            run_script("add_tag", tag_slug, str(todo.path), quiet=True)
+        elif action == "remove":
+            if tag_slug not in todo.tags:
+                return {"success": True, "todo_id": todo.name, "tag": tag_slug, "not_found": True}
+            run_script("remove_tag", tag_slug, str(todo.path), quiet=True)
+        else:
+            return {"success": False, "error": f"Invalid action: {action}. Use 'add' or 'remove'."}
+
+        return {"success": True, "todo_id": todo.name, "action": action, "tag": tag_slug}
+    except (ValueError, subprocess.CalledProcessError) as e:
+        return {"success": False, "error": str(e)}
+
+
+def ops_create(
+    name: str,
+    parent: str = ".",
+    status: str = "triaging",
+    tags: list[str] | None = None,
+    flags: list[str] | None = None,
+    description: str = "",
+) -> dict:
+    """Create a new todo. Returns created todo dict."""
+    if not name or not name.strip():
+        return {"success": False, "error": "Name required"}
+
+    try:
+        todos = load_todos()
+        refs = build_reference_map(todos)
+
+        # Resolve parent
+        if parent in (".", "/", "root"):
+            parent_dir = CURRENT_ROOT
+        else:
+            parent_dir = resolve_target(parent, todos, refs)
+
+        new_path = create_todo_from_template(name, parent_dir)
+
+        # Set status (uses resolve_status to handle codes like 'RD')
+        resolved = resolve_status(status)
+        if resolved != "Triaging":
+            run_script("set_status", resolved.lower(), str(new_path), quiet=True)
+
+        # Add tags
+        for tag in (tags or []):
+            tag_slug = re.sub(r'[^a-z0-9_]+', '_', tag.lower()).strip('_')
+            if tag_slug:
+                run_script("add_tag", tag_slug, str(new_path), quiet=True)
+
+        # Add flags
+        for flag in (flags or []):
+            flag_slug = re.sub(r'[^a-z0-9_]+', '_', flag.lower()).strip('_')
+            if flag_slug:
+                run_script("add_flag", flag_slug, str(new_path), quiet=True)
+
+        # Set description
+        if description:
+            notes_path = new_path / "notes.md"
+            if notes_path.exists():
+                update_notes_section(notes_path, "Description", description)
+
+        # Reload and return
+        todos = load_todos()
+        refs = build_reference_map(todos)
+        inverse_ref = {p: r for r, p in refs.items()}
+        todo = todos.get(new_path)
+
+        return {
+            "success": True,
+            "todo": todo_to_dict(todo, inverse_ref.get(new_path, "")) if todo else {},
+            "message": f"Created: {new_path.name}",
+        }
+    except (ValueError, OSError, subprocess.CalledProcessError) as e:
+        return {"success": False, "error": str(e)}
+
+
+def ops_complete(identifier: str) -> dict:
+    """Mark todo Done and move to completed/."""
+    todos = load_todos()
+    refs = build_reference_map(todos)
+    try:
+        path = resolve_target(identifier, todos, refs)
+        todo = todos.get(path)
+        if not todo:
+            return {"success": False, "error": f"Todo not found: {identifier}"}
+
+        run_script("set_status", "done", str(todo.path), quiet=True)
+
+        # Clear flags
+        for flag_file in path.glob("*.flag"):
+            flag_file.unlink()
+
+        completed_dir = CURRENT_ROOT / "completed"
+        completed_dir.mkdir(exist_ok=True)
+        dest = completed_dir / todo.path.name
+        if dest.exists():
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            dest = completed_dir / f"{todo.path.name}_{ts}"
+
+        shutil.move(str(todo.path), str(dest))
+
+        return {"success": True, "todo_id": todo.name, "moved_to": str(dest)}
+    except (ValueError, OSError, subprocess.CalledProcessError) as e:
+        return {"success": False, "error": str(e)}
+
+
+def ops_trash(identifier: str) -> dict:
+    """Move todo to trash/ (soft delete)."""
+    todos = load_todos()
+    refs = build_reference_map(todos)
+    try:
+        path = resolve_target(identifier, todos, refs)
+        todo = todos.get(path)
+        if not todo:
+            return {"success": False, "error": f"Todo not found: {identifier}"}
+
+        trash_dir = CURRENT_ROOT / "trash"
+        trash_dir.mkdir(exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        dest = trash_dir / f"{todo.path.name}_{ts}"
+
+        shutil.move(str(todo.path), str(dest))
+
+        return {"success": True, "todo_id": todo.name, "moved_to": str(dest)}
+    except (ValueError, OSError) as e:
+        return {"success": False, "error": str(e)}
+
+
+def ops_kanban(include_done: bool = False, include_cancelled: bool = False) -> dict:
+    """Get kanban board as structured data."""
+    todos = load_todos(include_completed=include_done or include_cancelled)
+    refs = build_reference_map(todos)
+    inverse_ref = {path: ref for ref, path in refs.items()}
+
+    columns = {}
+    for status_name, code in STATUS_ORDER:
+        if status_name == "Done" and not include_done:
+            continue
+        if status_name == "Cancelled" and not include_cancelled:
+            continue
+        if status_name not in ACTIVE_STATUSES and not include_done and not include_cancelled:
+            continue
+        columns[code] = {"status": status_name, "todos": []}
+
+    for path, todo in todos.items():
+        code = STATUS_TO_CODE.get(todo.status)
+        if code and code in columns:
+            ref = inverse_ref.get(path, "")
+            columns[code]["todos"].append({
+                "ref": ref,
+                "id": todo.name,
+                "title": todo.title or todo.name,
+                "flags": todo.flags,
+                "tags": todo.tags[:3],
+                "summary": todo.summary[:80] if todo.summary else "",
+            })
+
+    for col in columns.values():
+        col["todos"].sort(key=lambda t: t["ref"])
+
+    summary = {code: len(col["todos"]) for code, col in columns.items()}
+    return {"columns": columns, "summary": summary, "total_active": sum(summary.values())}
+
+
+def ops_move(identifier: str, new_parent: str) -> dict:
+    """Move todo to new parent."""
+    todos = load_todos()
+    refs = build_reference_map(todos)
+    try:
+        source = resolve_target(identifier, todos, refs)
+
+        if new_parent.lower() in ("root", ".", "/"):
+            new_parent_path = CURRENT_ROOT
+        else:
+            new_parent_path = resolve_target(new_parent, todos, refs)
+
+        dest = new_parent_path / source.name
+        if dest.exists():
+            return {"success": False, "error": f"Destination already exists: {dest.relative_to(CURRENT_ROOT)}"}
+
+        shutil.move(str(source), str(dest))
+        return {
+            "success": True,
+            "todo_id": source.name,
+            "new_location": str(dest.relative_to(CURRENT_ROOT)),
+        }
+    except (ValueError, OSError) as e:
+        return {"success": False, "error": str(e)}
+
+
+def ops_duplicate(identifier: str, new_name: str) -> dict:
+    """Duplicate a todo with a new name."""
+    if not new_name or not new_name.strip():
+        return {"success": False, "error": "New name required"}
+
+    todos = load_todos()
+    refs = build_reference_map(todos)
+    try:
+        path = resolve_target(identifier, todos, refs)
+
+        new_dir = path.parent / f"todo_{new_name}"
+        if new_dir.exists():
+            return {"success": False, "error": f"Already exists: {new_dir.name}"}
+
+        shutil.copytree(path, new_dir, symlinks=True)
+
+        # Update notes.md
+        notes_path = new_dir / "notes.md"
+        if notes_path.exists():
+            text = notes_path.read_text()
+            today = datetime.now().strftime("%Y-%m-%d")
+            text = text.replace(path.name, new_name, 1)
+            text = re.sub(r'\*\*Created:\*\* .+', f'**Created:** {today}', text)
+            text = re.sub(r'\*\*Updated:\*\* .+', f'**Updated:** {today}', text)
+            notes_path.write_text(text)
+
+        run_script("set_status", "triaging", str(new_dir), quiet=True)
+
+        # Reload and return
+        todos = load_todos()
+        refs = build_reference_map(todos)
+        inverse_ref = {p: r for r, p in refs.items()}
+        todo = todos.get(new_dir)
+
+        return {
+            "success": True,
+            "todo": todo_to_dict(todo, inverse_ref.get(new_dir, "")) if todo else {},
+            "message": f"Duplicated: {new_dir.relative_to(CURRENT_ROOT)}",
+        }
+    except (ValueError, OSError, subprocess.CalledProcessError) as e:
+        return {"success": False, "error": str(e)}
+
+
 # === Commands ===
 
 def cmd_kanban(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> str:
     """Show kanban board. Use --all to include Done/Cancelled."""
     include_done = "--all" in args or "--done" in args
     include_cancelled = "--all" in args or "--cancelled" in args
+    if include_done or include_cancelled:
+        todos = load_todos(include_completed=True)
     return render_kanban(todos, include_done=include_done, include_cancelled=include_cancelled)
 
 
 def cmd_tree(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> str:
-    """Show tree view of todo hierarchy."""
-    include_done = "--all" in args
+    """Show tree view of todo hierarchy. Use --all to include Done/Cancelled."""
+    include_done = "--all" in args or "--done" in args
     return render_tree(todos, include_done=include_done)
 
 
@@ -848,6 +1321,9 @@ def cmd_list(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) ->
     sort_key = "status"
     flat = False
     show_dates = False
+    show_all = False
+    show_done = False
+    show_cancelled = False
     name_pattern = None
 
     # Parse args
@@ -864,6 +1340,12 @@ def cmd_list(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) ->
             flat = True
         elif arg in ("--show-dates", "--dates"):
             show_dates = True
+        elif arg == "--all":
+            show_all = True
+        elif arg == "--done":
+            show_done = True
+        elif arg == "--cancelled":
+            show_cancelled = True
         elif not arg.startswith("--"):
             positional_args.append(arg)
         i += 1
@@ -884,15 +1366,31 @@ def cmd_list(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) ->
         elif status_filter is None:
             status_filter = pos_arg
 
+    # Reload with completed/ if needed
+    needs_completed = show_all or show_done
+    if status_filter and not needs_completed:
+        try:
+            needs_completed = resolve_status(status_filter) in ("Done", "Cancelled")
+        except ValueError:
+            pass
+    if needs_completed:
+        todos = load_todos(include_completed=True)
+
     # Apply status filter
     if status_filter:
         sf = status_filter.lower()
         if sf.upper() in STATUS_CODES:
             sf = STATUS_CODES[sf.upper()].lower()
         filtered = [t for t in todos.values() if t.status.lower() == sf]
+    elif show_all:
+        filtered = list(todos.values())
     else:
-        # Default: exclude Done and Cancelled
-        filtered = [t for t in todos.values() if t.status not in ("Done", "Cancelled")]
+        excluded = set()
+        if not show_done:
+            excluded.add("Done")
+        if not show_cancelled:
+            excluded.add("Cancelled")
+        filtered = [t for t in todos.values() if t.status not in excluded]
 
     # Apply name pattern filter
     if name_pattern:
@@ -919,70 +1417,69 @@ def cmd_view(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) ->
 
 
 def cmd_status(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> str:
-    """Change todo status. Usage: status <ref> <new_status>"""
+    """Change todo status. Usage: status <new_status> <ref> [ref2 ...]"""
     if len(args) < 2:
-        return c("Usage: status <ref> <new_status>", Colors.RED)
-    
+        return c("Usage: status <new_status> <ref> [ref2 ...]", Colors.RED)
+
+    # First arg is the status, remaining are identifiers
+    new_status_input = args[0]
+    identifiers = args[1:]
+
     try:
-        path = resolve_target(args[0], todos, refs)
-        new_status = args[1]
-        
-        # Normalize status code to full name
-        if new_status.upper() in STATUS_CODES:
-            new_status = STATUS_CODES[new_status.upper()]
+        resolved = resolve_status(new_status_input)
+    except ValueError as e:
+        return c(str(e), Colors.RED)
 
-        # Validate against known statuses
-        valid_statuses = {s.lower() for s, _ in STATUS_ORDER}
-        if new_status.lower() not in valid_statuses:
-            valid_list = ", ".join(s for s, _ in STATUS_ORDER)
-            return c(f"Unknown status: {new_status}. Valid: {valid_list}", Colors.RED)
+    results = []
+    for identifier in identifiers:
+        try:
+            path = resolve_target(identifier, todos, refs)
+            run_script("set_status", resolved.lower(), str(path))
 
-        run_script("set_status", new_status.lower(), str(path))
+            # Clear flags when completing or cancelling
+            if resolved in ("Done", "Cancelled"):
+                for flag_file in path.glob("*.flag"):
+                    flag_file.unlink()
 
-        # Clear flags when completing or cancelling
-        if new_status.lower() in ("done", "cancelled"):
-            for flag_file in path.glob("*.flag"):
-                flag_file.unlink()
+            results.append(c(f"  ✓ {path.name} → {resolved}", Colors.GREEN))
+        except (ValueError, subprocess.CalledProcessError) as e:
+            results.append(c(f"  ✗ {identifier}: {e}", Colors.RED))
 
-        return c(f"Status updated: {path.name} → {new_status}", Colors.GREEN)
-    except (ValueError, subprocess.CalledProcessError) as e:
-        return c(f"Error: {e}", Colors.RED)
+    if len(results) == 1:
+        return results[0].strip()
+    return "\n".join(results)
 
 
 def cmd_flag(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> str:
     """Add or remove flags. Usage: flag add|remove <ref> <flag_name>"""
     if len(args) < 3:
         return c("Usage: flag add|remove <ref> <flag_name>", Colors.RED)
-    
+
     action, ref, flag_name = args[0], args[1], args[2]
-    if action not in ("add", "remove"):
-        return c("Action must be 'add' or 'remove'", Colors.RED)
-    
-    try:
-        path = resolve_target(ref, todos, refs)
-        script = f"{'add' if action == 'add' else 'remove'}_flag"
-        run_script(script, flag_name, str(path))
-        return c(f"Flag {action}ed: {flag_name} on {path.name}", Colors.GREEN)
-    except (ValueError, subprocess.CalledProcessError) as e:
-        return c(f"Error: {e}", Colors.RED)
+    result = ops_flag(action, ref, flag_name)
+    if not result["success"]:
+        return c(f"Error: {result['error']}", Colors.RED)
+    if result.get("already_exists"):
+        return c(f"Flag already exists: {result['flag']} on {result['todo_id']}", Colors.YELLOW)
+    if result.get("not_found"):
+        return c(f"Flag not present: {result['flag']} on {result['todo_id']}", Colors.YELLOW)
+    return c(f"Flag {action}ed: {result['flag']} on {result['todo_id']}", Colors.GREEN)
 
 
 def cmd_tag(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> str:
     """Add or remove tags. Usage: tag add|remove <ref> <tag_name>"""
     if len(args) < 3:
         return c("Usage: tag add|remove <ref> <tag_name>", Colors.RED)
-    
+
     action, ref, tag_name = args[0], args[1], args[2]
-    if action not in ("add", "remove"):
-        return c("Action must be 'add' or 'remove'", Colors.RED)
-    
-    try:
-        path = resolve_target(ref, todos, refs)
-        script = f"{'add' if action == 'add' else 'remove'}_tag"
-        run_script(script, tag_name, str(path))
-        return c(f"Tag {action}ed: {tag_name} on {path.name}", Colors.GREEN)
-    except (ValueError, subprocess.CalledProcessError) as e:
-        return c(f"Error: {e}", Colors.RED)
+    result = ops_tag(action, ref, tag_name)
+    if not result["success"]:
+        return c(f"Error: {result['error']}", Colors.RED)
+    if result.get("already_exists"):
+        return c(f"Tag already exists: {result['tag']} on {result['todo_id']}", Colors.YELLOW)
+    if result.get("not_found"):
+        return c(f"Tag not present: {result['tag']} on {result['todo_id']}", Colors.YELLOW)
+    return c(f"Tag {action}ed: {result['tag']} on {result['todo_id']}", Colors.GREEN)
 
 
 def get_next_todo_number() -> int:
@@ -1134,42 +1631,12 @@ def cmd_create(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path], 
             i += 2
         else:
             i += 1
-    
-    try:
-        # Resolve parent directory
-        if parent in (".", "/", "root"):
-            parent_dir = CURRENT_ROOT
-        else:
-            parent_dir = resolve_target(parent, todos, refs)
-        
-        # Create the todo with auto-numbering
-        new_path = create_todo_from_template(name, parent_dir)
-        
-        # Set status if not default triaging
-        if status.lower() not in ("triaging", "incoming"):
-            run_script("set_status", status.lower(), str(new_path))
-        
-        # Add tags
-        for tag in tags:
-            if tag:
-                run_script("add_tag", tag, str(new_path))
-        
-        # Add flags
-        for flag in flags:
-            if flag:
-                run_script("add_flag", flag, str(new_path))
 
-        # Set description if provided
-        if description:
-            notes_path = new_path / "notes.md"
-            if notes_path.exists():
-                update_notes_section(notes_path, "Description", description)
-
-        rel_path = new_path.relative_to(CURRENT_ROOT)
-        return c(f"✓ Created: {rel_path}", Colors.GREEN)
-    
-    except (ValueError, OSError) as e:
-        return c(f"Error: {e}", Colors.RED)
+    result = ops_create(name=name, parent=parent, status=status,
+                        tags=tags, flags=flags, description=description)
+    if result["success"]:
+        return c(f"✓ {result['message']}", Colors.GREEN)
+    return c(f"Error: {result['error']}", Colors.RED)
 
 
 def create_todo_interactive() -> str:
@@ -1217,31 +1684,16 @@ def create_todo_interactive() -> str:
 
 def cmd_move(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> str:
     """Move todo to new parent. Usage: move <ref> <new_parent|root>
-    
+
     Use 'root', '.', or '/' as new_parent to move to root level (unparent).
     """
     if len(args) < 2:
         return c("Usage: move <ref> <new_parent|root>", Colors.RED)
-    
-    try:
-        source = resolve_target(args[0], todos, refs)
-        new_parent_arg = args[1]
-        
-        # Handle moving to root
-        if new_parent_arg.lower() in ("root", ".", "/"):
-            new_parent_path = CURRENT_ROOT
-        else:
-            new_parent_path = resolve_target(new_parent_arg, todos, refs)
-        
-        dest = new_parent_path / source.name
-        if dest.exists():
-            return c(f"Destination already exists: {dest.relative_to(CURRENT_ROOT)}", Colors.RED)
-        
-        shutil.move(str(source), str(dest))
-        return c(f"Moved: {source.name} → {dest.relative_to(CURRENT_ROOT)}", Colors.GREEN)
-    
-    except (ValueError, OSError) as e:
-        return c(f"Error: {e}", Colors.RED)
+
+    result = ops_move(args[0], args[1])
+    if result["success"]:
+        return c(f"Moved: {result['todo_id']} → {result['new_location']}", Colors.GREEN)
+    return c(f"Error: {result['error']}", Colors.RED)
 
 
 def cmd_link(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> str:
@@ -1356,9 +1808,11 @@ def edit_menu(todo: Todo, notes_path: Path) -> str:
             ("o", "open", "Open notes.md in $EDITOR"),
         ]
 
+        edit_val_w = max(60, shutil.get_terminal_size((120, 24)).columns - 30)
+        edit_val_w = min(edit_val_w, 200)
         for key, name, value in fields:
             print(f"  {c(f'[{key}]', Colors.CYAN)} {name:<16} "
-                  f"{c(str(value)[:80], Colors.DIM)}")
+                  f"{c(str(value)[:edit_val_w], Colors.DIM)}")
 
         print()
         print(f"  {c('[q]', Colors.YELLOW)} quit editing")
@@ -1666,69 +2120,39 @@ def cmd_complete(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]
     """Mark todo as Done and move to completed/. Usage: complete <ref>"""
     if not args:
         return c("Usage: complete <ref>", Colors.RED)
-    
-    try:
-        path = resolve_target(args[0], todos, refs)
-        
-        # Set status to Done
-        run_script("set_status", "done", str(path), quiet=True)
 
-        # Clear all flags - no longer relevant once completed
-        for flag_file in path.glob("*.flag"):
-            flag_file.unlink()
-
-        # Move to completed
-        completed_dir = CURRENT_ROOT / "completed"
-        completed_dir.mkdir(exist_ok=True)
-        
-        dest = completed_dir / path.name
-        if dest.exists():
-            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            dest = completed_dir / f"{path.name}_{ts}"
-        
-        shutil.move(str(path), str(dest))
-        return c(f"Completed: {path.name} → completed/", Colors.GREEN)
-    
-    except (ValueError, OSError, subprocess.CalledProcessError) as e:
-        return c(f"Error: {e}", Colors.RED)
+    result = ops_complete(args[0])
+    if result["success"]:
+        return c(f"Completed: {result['todo_id']} → completed/", Colors.GREEN)
+    return c(f"Error: {result['error']}", Colors.RED)
 
 
 def cmd_delete(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path], interactive: bool = True) -> str:
     """Move todo to trash/. Usage: delete <ref> [--force]
-    
+
     Soft delete - moves to trash/ for potential recovery.
     Use 'purge' for permanent deletion.
     """
     if not args:
         return c("Usage: delete <ref> [--force]", Colors.RED)
-    
+
     force = "--force" in args or "-f" in args
     ref_arg = [a for a in args if not a.startswith("-")][0]
-    
-    try:
-        path = resolve_target(ref_arg, todos, refs)
-        todo_name = path.name
-        
-        # Confirm unless forced
-        if interactive and not force:
-            confirm = input(f"  {c('Delete', Colors.YELLOW)} {todo_name}? [y/N] ").strip().lower()
+
+    # Confirm unless forced (need to resolve name for prompt)
+    if interactive and not force:
+        try:
+            path = resolve_target(ref_arg, todos, refs)
+            confirm = input(f"  {c('Delete', Colors.YELLOW)} {path.name}? [y/N] ").strip().lower()
             if confirm not in ("y", "yes"):
                 return c("Cancelled", Colors.DIM)
-        
-        # Move to trash
-        trash_dir = CURRENT_ROOT / "trash"
-        trash_dir.mkdir(exist_ok=True)
-        
-        dest = trash_dir / path.name
-        if dest.exists():
-            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            dest = trash_dir / f"{path.name}_{ts}"
-        
-        shutil.move(str(path), str(dest))
-        return c(f"Deleted: {todo_name} → trash/", Colors.YELLOW)
-    
-    except (ValueError, OSError) as e:
-        return c(f"Error: {e}", Colors.RED)
+        except ValueError as e:
+            return c(f"Error: {e}", Colors.RED)
+
+    result = ops_trash(ref_arg)
+    if result["success"]:
+        return c(f"Deleted: {result['todo_id']} → trash/", Colors.YELLOW)
+    return c(f"Error: {result['error']}", Colors.RED)
 
 
 def cmd_purge(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path], interactive: bool = True) -> str:
@@ -1768,64 +2192,27 @@ def cmd_duplicate(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path
     """Duplicate a todo. Usage: duplicate <ref> [new_name]"""
     if not args:
         return c("Usage: duplicate <ref> [new_name]", Colors.RED)
-    
-    try:
-        path = resolve_target(args[0], todos, refs)
-        
-        if len(args) > 1:
-            new_name = args[1]
-        elif interactive:
-            new_name = input("New name (without prefix): ").strip()
-        else:
-            return c("New name required in non-interactive mode", Colors.RED)
-        
-        if not new_name:
-            return c("Name required", Colors.YELLOW)
-        
-        new_dir = path.parent / f"todo_{new_name}"
-        if new_dir.exists():
-            return c(f"Already exists: {new_dir.name}", Colors.RED)
-        
-        shutil.copytree(path, new_dir, symlinks=True)
-        
-        # Update notes.md
-        notes_path = new_dir / "notes.md"
-        if notes_path.exists():
-            text = notes_path.read_text()
-            today = datetime.now().strftime("%Y-%m-%d")
-            text = text.replace(path.name, new_name, 1)
-            text = re.sub(r'\*\*Created:\*\* .+', f'**Created:** {today}', text)
-            text = re.sub(r'\*\*Updated:\*\* .+', f'**Updated:** {today}', text)
-            notes_path.write_text(text)
-        
-        run_script("set_status", "triaging", str(new_dir))
-        return c(f"Duplicated: {new_dir.relative_to(CURRENT_ROOT)}", Colors.GREEN)
-    
-    except (ValueError, OSError, subprocess.CalledProcessError) as e:
-        return c(f"Error: {e}", Colors.RED)
+
+    if len(args) > 1:
+        new_name = args[1]
+    elif interactive:
+        new_name = input("New name (without prefix): ").strip()
+    else:
+        return c("New name required in non-interactive mode", Colors.RED)
+
+    if not new_name:
+        return c("Name required", Colors.YELLOW)
+
+    result = ops_duplicate(args[0], new_name)
+    if result["success"]:
+        return c(f"Duplicated: {result['message']}", Colors.GREEN)
+    return c(f"Error: {result['error']}", Colors.RED)
 
 
 def cmd_json(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> str:
     """Output todos as JSON."""
-    inverse_ref = {path: ref for ref, path in refs.items()}
-    
-    payload = []
-    for path, todo in todos.items():
-        ref = inverse_ref.get(path, "")
-        payload.append({
-            "ref": ref,
-            "name": todo.name,
-            "path": todo.rel_path.as_posix(),
-            "status": todo.status,
-            "flags": todo.flags,
-            "tags": todo.tags,
-            "summary": todo.summary,
-            "title": todo.title,
-            "parent": str(todo.parent.relative_to(CURRENT_ROOT)) if todo.parent else None,
-            "children": [str(c.relative_to(CURRENT_ROOT)) for c in todo.children],
-        })
-    
-    return json.dumps(payload, indent=2)
+    result = ops_list(include_all="--all" in args)
+    return json.dumps(result["todos"], indent=2)
 
 
 # === Help System ===
@@ -2163,11 +2550,12 @@ Supports inline values: type 's ready' to set status directly,
     edit IP2 tags         # Edit tags (prefix with - to remove)
 """,
     "status": """
-{bold}status{reset} <ref> <new_status>
+{bold}status{reset} <new_status> <ref> [ref2 ...]
 
-Change the status of a todo.
+Change the status of one or more todos.
 
-Accepts full status names or two-letter codes.
+Status comes first, then one or more todo references.
+Accepts full status names or two-letter codes (case-insensitive).
 
 {bold}Valid statuses:{reset}
     TR  Triaging          NR  Needs_Research
@@ -2179,9 +2567,10 @@ Accepts full status names or two-letter codes.
 When status is set to Done or Cancelled, all flags are automatically cleared.
 
 {bold}Examples:{reset}
-    status IP2 reviewing     # By full name
-    status IP2 RV            # By code
-    status 0038 ready        # By todo number
+    status reviewing IP2     # By full name
+    status RV IP2            # By code
+    status ready 0038        # By todo number
+    status IP RD1 RD2 RD3    # Multiple todos at once
 """,
     "view": """
 {bold}view{reset} <ref|path>
@@ -2309,42 +2698,53 @@ def run_command(line: str, interactive: bool = True) -> str | None:
     
     cmd = parts[0].lower()
     args = parts[1:]
-    
-    # Load fresh state for each command
-    todos = load_todos()
-    refs = build_reference_map(todos)
-    
+
+    # Resolve aliases
+    COMMAND_ALIASES = {
+        "ls": "list", "show": "view", "new": "create", "rm": "delete",
+        "done": "complete", "dup": "duplicate", "?": "help",
+        "mv": "move",
+    }
+    cmd = COMMAND_ALIASES.get(cmd, cmd)
+
+    # Commands that refresh the display cache (refs become current)
+    DISPLAY_COMMANDS = {"kanban", "list", "tree", "view", "json", "home", "reload"}
+
+    # In interactive mode, use cached refs for stability (todo_0081 item 9).
+    # Display commands and CLI mode always load fresh state.
+    if interactive and cmd not in DISPLAY_COMMANDS and _ref_cache["todos"] is not None:
+        todos = _ref_cache["todos"]
+        refs = _ref_cache["refs"]
+    else:
+        todos = load_todos()
+        refs = build_reference_map(todos)
+        _ref_cache["todos"] = todos
+        _ref_cache["refs"] = refs
+
     # Command dispatch
     commands: dict[str, Callable] = {
         "kanban": lambda: cmd_kanban(args, todos, refs),
         "tree": lambda: cmd_tree(args, todos, refs),
         "list": lambda: cmd_list(args, todos, refs),
-        "ls": lambda: cmd_list(args, todos, refs),
         "view": lambda: cmd_view(args, todos, refs),
-        "show": lambda: cmd_view(args, todos, refs),
         "status": lambda: cmd_status(args, todos, refs),
         "flag": lambda: cmd_flag(args, todos, refs),
         "tag": lambda: cmd_tag(args, todos, refs),
         "create": lambda: cmd_create(args, todos, refs, interactive),
-        "new": lambda: cmd_create(args, todos, refs, interactive),
         "move": lambda: cmd_move(args, todos, refs),
         "link": lambda: cmd_link(args, todos, refs),
         "edit": lambda: cmd_edit(args, todos, refs),
         "delete": lambda: cmd_delete(args, todos, refs, interactive),
-        "rm": lambda: cmd_delete(args, todos, refs, interactive),
         "purge": lambda: cmd_purge(args, todos, refs, interactive),
         "complete": lambda: cmd_complete(args, todos, refs),
-        "done": lambda: cmd_complete(args, todos, refs),
         "duplicate": lambda: cmd_duplicate(args, todos, refs, interactive),
-        "dup": lambda: cmd_duplicate(args, todos, refs, interactive),
         "json": lambda: cmd_json(args, todos, refs),
         "help": lambda: cmd_help(args),
-        "?": lambda: cmd_help(args),
     }
-    
+
     if cmd in commands:
         return commands[cmd]()
-    
+
     # REPL-only commands
     if interactive:
         if cmd == "home":
@@ -2353,12 +2753,16 @@ def run_command(line: str, interactive: bool = True) -> str | None:
             if args:
                 try:
                     set_current_root(Path(args[0]))
+                    _ref_cache["todos"] = None  # Invalidate cache on root change
+                    _ref_cache["refs"] = None
                     return c(f"Switched to: {CURRENT_ROOT}", Colors.GREEN)
                 except Exception as e:
                     return c(f"Error: {e}", Colors.RED)
             else:
                 return f"Current root: {CURRENT_ROOT}"
         elif cmd == "reload":
+            _ref_cache["todos"] = None
+            _ref_cache["refs"] = None
             return c("State reloaded", Colors.GREEN)
         elif cmd in ("quit", "exit", "q"):
             return None  # Signal to exit
@@ -2376,6 +2780,15 @@ def repl() -> None:
     readline.set_history_length(500)
     atexit.register(readline.write_history_file, str(HISTORY_FILE))
 
+    # Bind ESC-ESC (double escape) to clear the current input line.
+    # Single ESC can't be used — it's the prefix for arrow key sequences.
+    # Ctrl+U also clears the line (built-in, no binding needed).
+    esc = chr(27)
+    if "libedit" in (readline.__doc__ or ""):
+        readline.parse_and_bind(f'bind "{esc}{esc}" em-kill-line')
+    else:
+        readline.parse_and_bind(f'"{esc}{esc}": kill-whole-line')
+
     print(c(f"todo_mgr v{VERSION}", Colors.BOLD), f"- TODO_ROOT={CURRENT_ROOT}")
     print(run_command("kanban"))
     print()
@@ -2383,7 +2796,13 @@ def repl() -> None:
 
     while True:
         try:
-            line = input(c("todo> ", Colors.CYAN)).strip()
+            # Wrap ANSI codes in \001..\002 so readline knows they're
+            # non-printing — fixes cursor offset on arrow-key history navigation
+            if Colors.enabled():
+                prompt = f"\001{Colors.CYAN}\002todo> \001{Colors.RESET}\002"
+            else:
+                prompt = "todo> "
+            line = input(prompt).strip()
         except (EOFError, KeyboardInterrupt):
             print("\nExiting.")
             break
