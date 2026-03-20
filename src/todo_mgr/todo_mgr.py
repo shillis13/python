@@ -662,7 +662,8 @@ def format_table(todos: list[Todo], sort_key: str = "status",
     return "\n".join(rows)
 
 
-def view_todo_detail(todo: Todo, refs: dict[str, Path]) -> str:
+def view_todo_detail(todo: Todo, refs: dict[str, Path],
+                     todos: dict[Path, "Todo"] | None = None) -> str:
     """Render detailed view of a single todo."""
     inverse_ref = {path: ref for ref, path in refs.items()}
     ref = inverse_ref.get(todo.path, "")
@@ -706,8 +707,13 @@ def view_todo_detail(todo: Todo, refs: dict[str, Path]) -> str:
     # Children
     if todo.children:
         lines.append(f"  {c('Children:', Colors.DIM)}")
-        for child in sorted(todo.children):
-            lines.append(f"    - {c(child.name, Colors.CYAN)}")
+        for child_path in sorted(todo.children):
+            child_todo = todos.get(child_path) if todos else None
+            if child_todo and child_todo.status:
+                status_str = f"  [{colored_status(child_todo.status)}]"
+            else:
+                status_str = ""
+            lines.append(f"    - {c(child_path.name, Colors.CYAN)}{status_str}")
     
     lines.append("")
     
@@ -1070,6 +1076,61 @@ def ops_tag(action: str, identifier: str, tag_name: str) -> dict:
         return {"success": False, "error": str(e)}
 
 
+def verify_todo(todo_path: Path, expected: dict) -> dict:
+    """Read-back verification of a todo against expected state.
+
+    Args:
+        todo_path: Path to the todo directory.
+        expected: Dict with expected values. Keys: status, tags, flags, parent_name.
+
+    Returns:
+        Dict with verified (bool) and mismatches (list of strings).
+    """
+    mismatches = []
+
+    if not todo_path.is_dir():
+        return {"verified": False, "mismatches": ["directory does not exist"]}
+
+    notes_path = todo_path / "notes.md"
+    if not notes_path.exists():
+        mismatches.append("notes.md missing")
+    elif notes_path.stat().st_size == 0:
+        mismatches.append("notes.md is empty")
+    else:
+        content = notes_path.read_text()
+        for placeholder in ("__DATE__", "__TODO_NAME__", "__TASK_NAME__"):
+            if placeholder in content:
+                mismatches.append(f"unresolved template placeholder: {placeholder}")
+
+    # Check status file
+    status_files = list(todo_path.glob("*.status"))
+    if not status_files:
+        mismatches.append("no .status file")
+    elif len(status_files) > 1:
+        mismatches.append(f"multiple .status files: {[f.name for f in status_files]}")
+    elif "status" in expected:
+        actual_status = status_files[0].stem
+        expected_status = expected["status"]
+        if actual_status.lower() != expected_status.lower():
+            mismatches.append(f"status: expected '{expected_status}', got '{actual_status}'")
+
+    # Check tags
+    if "tags" in expected:
+        actual_tags = sorted(f.stem for f in todo_path.glob("*.tag"))
+        expected_tags = sorted(expected["tags"])
+        if actual_tags != expected_tags:
+            mismatches.append(f"tags: expected {expected_tags}, got {actual_tags}")
+
+    # Check flags
+    if "flags" in expected:
+        actual_flags = sorted(f.stem for f in todo_path.glob("*.flag"))
+        expected_flags = sorted(expected["flags"])
+        if actual_flags != expected_flags:
+            mismatches.append(f"flags: expected {expected_flags}, got {actual_flags}")
+
+    return {"verified": len(mismatches) == 0, "mismatches": mismatches}
+
+
 def ops_create(
     name: str,
     parent: str = ".",
@@ -1078,7 +1139,7 @@ def ops_create(
     flags: list[str] | None = None,
     description: str = "",
 ) -> dict:
-    """Create a new todo. Returns created todo dict."""
+    """Create a new todo. Returns created todo dict with verification."""
     if not name or not name.strip():
         return {"success": False, "error": "Name required"}
 
@@ -1117,6 +1178,20 @@ def ops_create(
             if notes_path.exists():
                 update_notes_section(notes_path, "Description", description)
 
+        # Build expected state for verification
+        resolved_status = resolve_status(status)
+        expected_tags = sorted(
+            re.sub(r'[^a-z0-9_]+', '_', t.lower()).strip('_')
+            for t in (tags or []) if re.sub(r'[^a-z0-9_]+', '_', t.lower()).strip('_')
+        )
+        expected_flags = sorted(
+            re.sub(r'[^a-z0-9_]+', '_', f.lower()).strip('_')
+            for f in (flags or []) if re.sub(r'[^a-z0-9_]+', '_', f.lower()).strip('_')
+        )
+        expected = {"status": resolved_status, "tags": expected_tags, "flags": expected_flags}
+
+        verification = verify_todo(new_path, expected)
+
         # Reload and return
         todos = load_todos()
         refs = build_reference_map(todos)
@@ -1127,8 +1202,45 @@ def ops_create(
             "success": True,
             "todo": todo_to_dict(todo, inverse_ref.get(new_path, "")) if todo else {},
             "message": f"Created: {new_path.name}",
+            "verification": verification,
         }
     except (ValueError, OSError, subprocess.CalledProcessError) as e:
+        return {"success": False, "error": str(e)}
+
+
+def ops_update(
+    identifier: str,
+    section: str,
+    content: str,
+) -> dict:
+    """Update a section in a todo's notes.md.
+
+    Args:
+        identifier: Todo ID, number, or reference code
+        section: Section heading (without ##), e.g. 'Description', 'Notes'
+        content: New content for the section (replaces existing content)
+
+    Returns:
+        Result dict with success status
+    """
+    try:
+        todos = load_todos()
+        refs = build_reference_map(todos)
+        target = resolve_target(identifier, todos, refs)
+        notes_path = target / "notes.md"
+
+        if not notes_path.exists():
+            return {"success": False, "error": f"No notes.md found at {target}"}
+
+        update_notes_section(notes_path, section, content)
+
+        return {
+            "success": True,
+            "todo_id": target.name,
+            "section": section,
+            "message": f"Updated section '{section}' in {target.name}",
+        }
+    except (ValueError, OSError) as e:
         return {"success": False, "error": str(e)}
 
 
@@ -1411,7 +1523,7 @@ def cmd_view(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) ->
         todo = todos.get(path)
         if not todo:
             return c(f"Todo not in cache: {args[0]}", Colors.RED)
-        return view_todo_detail(todo, refs)
+        return view_todo_detail(todo, refs, todos)
     except ValueError as e:
         return c(str(e), Colors.RED)
 
@@ -1635,7 +1747,15 @@ def cmd_create(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path], 
     result = ops_create(name=name, parent=parent, status=status,
                         tags=tags, flags=flags, description=description)
     if result["success"]:
-        return c(f"✓ {result['message']}", Colors.GREEN)
+        lines = [c(f"✓ {result['message']}", Colors.GREEN)]
+        v = result.get("verification", {})
+        if v.get("verified"):
+            lines.append(c("  ✓ Verified: all fields match", Colors.DIM))
+        elif v.get("mismatches"):
+            lines.append(c("  ⚠ Verification mismatches:", Colors.YELLOW))
+            for m in v["mismatches"]:
+                lines.append(c(f"    - {m}", Colors.YELLOW))
+        return "\n".join(lines)
     return c(f"Error: {result['error']}", Colors.RED)
 
 
