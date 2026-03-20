@@ -1514,18 +1514,28 @@ def cmd_list(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) ->
 
 
 def cmd_view(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> str:
-    """View detailed info about a todo."""
+    """View detailed info about a todo. Searches completed/trash if not found in active."""
     if not args:
         return c("Usage: view <ref|path>", Colors.RED)
-    
+
     try:
         path = resolve_target(args[0], todos, refs)
         todo = todos.get(path)
         if not todo:
             return c(f"Todo not in cache: {args[0]}", Colors.RED)
         return view_todo_detail(todo, refs, todos)
-    except ValueError as e:
-        return c(str(e), Colors.RED)
+    except ValueError:
+        # Not found in active todos — retry with completed and trash
+        try:
+            all_todos = load_todos(include_completed=True, include_trash=True)
+            all_refs = build_reference_map(all_todos)
+            path = resolve_target(args[0], all_todos, all_refs)
+            todo = all_todos.get(path)
+            if not todo:
+                return c(f"Todo not found: {args[0]}", Colors.RED)
+            return view_todo_detail(todo, all_refs, all_todos)
+        except ValueError as e:
+            return c(str(e), Colors.RED)
 
 
 def cmd_status(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> str:
