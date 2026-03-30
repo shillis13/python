@@ -76,16 +76,30 @@ def get_input_text(source: str, filepath: str | None) -> str:
         return result.stdout
 
 
-def parse_markdown_table(text: str) -> tuple[list[str], list[list[str]]]:
-    """Parse markdown table into headers and data rows.
-    
-    Separator rows (|---|---|) are discarded entirely.
+def parse_markdown_table(text: str) -> tuple[list[str], list[list[str]], set[int]]:
+    """Parse markdown table into headers, data rows, and separator positions.
+
+    Returns (headers, data_rows, separator_after) where:
+        separator_after: set of data row indices (0-based) that had a separator
+                         row AFTER them in the original input. An empty set means
+                         no inter-row separators existed (only the header separator).
     """
     lines = [line.strip() for line in text.strip().splitlines() if line.strip()]
-    
+
     all_rows = []
+    separator_after: set[int] = set()
+    header_sep_seen = False
+    data_row_index = -1  # -1 = still in header, 0+ = data rows
+
     for line in lines:
-        if re.match(r'^\|[\s\-:]+(\|[\s\-:]*)+\|?$', line):
+        is_sep = bool(re.match(r'^\|[\s\-:]+(\|[\s\-:]*)+\|?$', line))
+        if is_sep:
+            if not header_sep_seen:
+                header_sep_seen = True
+            else:
+                # Separator between data rows — record position
+                if data_row_index >= 0:
+                    separator_after.add(data_row_index)
             continue
         cells = [c.strip() for c in line.split('|')]
         if cells and cells[0] == '':
@@ -94,11 +108,13 @@ def parse_markdown_table(text: str) -> tuple[list[str], list[list[str]]]:
             cells = cells[:-1]
         if cells:
             all_rows.append(cells)
-    
+            if header_sep_seen:
+                data_row_index += 1
+
     if not all_rows:
-        return [], []
-    
-    return all_rows[0], all_rows[1:]
+        return [], [], set()
+
+    return all_rows[0], all_rows[1:], separator_after
 
 
 def strip_backticks(text: str) -> str:
@@ -204,34 +220,41 @@ def compute_col_widths(all_rows: list[list[str]], num_cols: int,
 
 
 def render_table(headers: list[str], data_rows: list[list[str]],
-                 max_width: int) -> str:
-    """Render headers + data_rows as a box-drawing table."""
+                 max_width: int, separator_after: set[int] | None = None) -> str:
+    """Render headers + data_rows as a box-drawing table.
+
+    If separator_after is provided and non-empty, only add row separators
+    at those positions. If empty or None, add separators between all rows
+    (original behavior).
+    """
     if not headers:
         return ''
-    
+
+    add_all_seps = separator_after is None or len(separator_after) == 0
+
     num_cols = len(headers)
     for r in data_rows:
         while len(r) < num_cols:
             r.append('')
-    
+
     headers = [strip_backticks(c) for c in headers]
     data_rows = [[strip_backticks(c) for c in r] for r in data_rows]
-    
+
     all_rows = [headers] + data_rows
     col_widths = compute_col_widths(all_rows, num_cols, max_width)
-    
+
     H, V = '─', '│'
     TL, TC, TR = '┌', '┬', '┐'
     ML, MC, MR = '├', '┼', '┤'
     BL, BC, BR = '└', '┴', '┘'
-    
+
     def h_line(left, mid, right):
         parts = [left]
         for i, w in enumerate(col_widths):
             parts.append(H * (w + 2))
             parts.append(mid if i < num_cols - 1 else right)
         return ''.join(parts)
-    
+
     def render_row_cells(cells: list[str]) -> list[str]:
         wrapped = []
         for i, cell in enumerate(cells):
@@ -247,17 +270,18 @@ def render_table(headers: list[str], data_rows: list[list[str]],
                 parts.append(V)
             lines.append(''.join(parts))
         return lines
-    
+
     output = []
     output.append(h_line(TL, TC, TR))
     output.extend(render_row_cells(headers))
     output.append(h_line(ML, MC, MR))
-    
+
     for row_idx, row in enumerate(data_rows):
         output.extend(render_row_cells(row))
         if row_idx < len(data_rows) - 1:
-            output.append(h_line(ML, MC, MR))
-    
+            if add_all_seps or row_idx in separator_after:
+                output.append(h_line(ML, MC, MR))
+
     output.append(h_line(BL, BC, BR))
     return '\n'.join(output)
 
@@ -269,13 +293,13 @@ def main():
     if not text.strip():
         sys.exit(0)
     
-    headers, data_rows = parse_markdown_table(text)
+    headers, data_rows, separator_after = parse_markdown_table(text)
     if not headers:
         # Not a markdown table — pass through unchanged
         print(text, end='')
         sys.exit(0)
-    
-    print(render_table(headers, data_rows, max_width))
+
+    print(render_table(headers, data_rows, max_width, separator_after))
 
 
 if __name__ == '__main__':
