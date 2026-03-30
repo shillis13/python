@@ -3,105 +3,236 @@
 md_table_reformat.py — Convert markdown tables to box-drawing tables.
 
 Usage:
-    pbpaste | python3 md_table_reformat.py | pbcopy
-    echo "| A | B |\n|---|---|\n| x | y |" | python3 md_table_reformat.py
+    python3 md_table_reformat.py [width]                  # from clipboard
+    python3 md_table_reformat.py --stdin [width]          # from stdin
+    python3 md_table_reformat.py --file path.md [width]   # from file
+    python3 md_table_reformat.py - [width]                # alias for --stdin
 
-Options (env vars):
-    TABLE_MAX_WIDTH   Total table width cap (default: 100)
-    TABLE_COL1_WIDTH  Force col1 width (default: auto-fit to content)
+    Output always goes to stdout.
+    Width 0 = auto-fit (no wrapping). Default: 100.
+
+Examples:
+    python3 md_table_reformat.py                          # clipboard, width 100
+    python3 md_table_reformat.py 0                        # clipboard, auto-fit
+    python3 md_table_reformat.py --stdin 80 < notes.md    # stdin, width 80
+    python3 md_table_reformat.py --file notes.md 120      # file, width 120
+    python3 md_table_reformat.py | pbcopy                 # clipboard in, clipboard out
 """
 
 import sys
 import re
-import os
+import subprocess
 import textwrap
 
 
-def parse_markdown_table(text: str) -> list[list[str]]:
-    """Parse markdown table into list of rows, each a list of cell strings."""
+def parse_args(argv: list[str]) -> tuple[str, str | None, int]:
+    """Parse CLI arguments.
+    
+    Returns (source, filepath, max_width) where:
+        source: 'clipboard' | 'stdin' | 'file'
+        filepath: path string (only when source == 'file')
+        max_width: integer width (0 = auto-fit)
+    """
+    source = 'clipboard'
+    filepath = None
+    max_width = 100
+    
+    args = argv[1:]
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg in ('--stdin', '-'):
+            source = 'stdin'
+        elif arg == '--file':
+            source = 'file'
+            i += 1
+            if i >= len(args):
+                print("Error: --file requires a path argument", file=sys.stderr)
+                sys.exit(1)
+            filepath = args[i]
+        elif arg.startswith('-'):
+            print(f"Error: unknown option '{arg}'", file=sys.stderr)
+            sys.exit(1)
+        else:
+            try:
+                max_width = int(arg)
+            except ValueError:
+                print(f"Error: invalid width '{arg}'", file=sys.stderr)
+                sys.exit(1)
+        i += 1
+    
+    return source, filepath, max_width
+
+
+def get_input_text(source: str, filepath: str | None) -> str:
+    """Read input from the specified source."""
+    if source == 'stdin':
+        return sys.stdin.read()
+    elif source == 'file':
+        with open(filepath, 'r') as f:
+            return f.read()
+    else:
+        result = subprocess.run(['pbpaste'], capture_output=True, text=True)
+        return result.stdout
+
+
+def parse_markdown_table(text: str) -> tuple[list[str], list[list[str]]]:
+    """Parse markdown table into headers and data rows.
+    
+    Separator rows (|---|---|) are discarded entirely.
+    """
     lines = [line.strip() for line in text.strip().splitlines() if line.strip()]
-    rows = []
+    
+    all_rows = []
     for line in lines:
-        # Skip separator rows like |---|---|
-        if re.match(r'^\|[\s\-:]+\|[\s\-:]*\|?$', line):
+        if re.match(r'^\|[\s\-:]+(\|[\s\-:]*)+\|?$', line):
             continue
-        # Split by pipe, strip outer empties from leading/trailing |
         cells = [c.strip() for c in line.split('|')]
-        # Remove empty strings from leading/trailing pipes
         if cells and cells[0] == '':
             cells = cells[1:]
         if cells and cells[-1] == '':
             cells = cells[:-1]
         if cells:
-            rows.append(cells)
-    return rows
+            all_rows.append(cells)
+    
+    if not all_rows:
+        return [], []
+    
+    return all_rows[0], all_rows[1:]
 
 
 def strip_backticks(text: str) -> str:
-    """Remove markdown backticks from cell content."""
     return text.replace('`', '')
 
 
+def expand_cell_newlines(text: str) -> list[str]:
+    """Split cell content on embedded newlines (<br>, <br/>, <br />, literal \\n)."""
+    normalized = re.sub(r'<br\s*/?>', '\n', text)
+    normalized = normalized.replace('\\n', '\n')
+    return normalized.split('\n')
+
+
+def cell_natural_width(text: str) -> int:
+    lines = expand_cell_newlines(text)
+    return max(len(line) for line in lines) if lines else 0
+
+
 def wrap_cell(text: str, width: int) -> list[str]:
-    """Wrap text to fit within width, returning list of lines."""
-    if len(text) <= width:
-        return [text]
-    wrapped = textwrap.wrap(text, width=width, break_long_words=True, break_on_hyphens=True)
-    return wrapped if wrapped else ['']
+    """Wrap cell text to fit within width, respecting embedded newlines."""
+    logical_lines = expand_cell_newlines(text)
+    result = []
+    for line in logical_lines:
+        if len(line) <= width:
+            result.append(line)
+        else:
+            wrapped = textwrap.wrap(line, width=width,
+                                    break_long_words=True,
+                                    break_on_hyphens=True)
+            result.extend(wrapped if wrapped else [''])
+    return result if result else ['']
 
 
-def render_table(rows: list[list[str]], max_width: int, force_col1: int | None = None) -> str:
-    """Render rows as a box-drawing table with word wrapping."""
-    if not rows:
+def compute_col_widths(all_rows: list[list[str]], num_cols: int,
+                       max_width: int) -> list[int]:
+    """Compute column widths with proportional distribution for overflow.
+    
+    Algorithm:
+        1. Natural width per column = max cell_natural_width across all rows.
+        2. If max_width == 0: return natural widths (auto-fit).
+        3. Overhead = borders + padding = (num_cols + 1) + (num_cols * 2).
+        4. If natural total fits within available: return natural widths.
+        5. Otherwise, iteratively:
+           a. Columns whose natural width <= fair_share keep natural width.
+           b. Redistribute remaining space proportionally among oversized columns.
+    """
+    natural = []
+    for col_idx in range(num_cols):
+        max_w = 0
+        for row in all_rows:
+            if col_idx < len(row):
+                max_w = max(max_w, cell_natural_width(row[col_idx]))
+        natural.append(max(max_w, 1))
+    
+    if max_width == 0:
+        return natural
+    
+    overhead = (num_cols + 1) + (num_cols * 2)
+    available = max_width - overhead
+    if available < num_cols:
+        available = num_cols
+    
+    if sum(natural) <= available:
+        return natural
+    
+    widths = list(natural)
+    locked = [False] * num_cols
+    
+    for _ in range(num_cols):
+        unlocked_count = sum(1 for i in range(num_cols) if not locked[i])
+        if unlocked_count == 0:
+            break
+        locked_space = sum(widths[i] for i in range(num_cols) if locked[i])
+        remaining = available - locked_space
+        fair_share = remaining // unlocked_count if unlocked_count > 0 else 0
+        
+        changed = False
+        for i in range(num_cols):
+            if locked[i]:
+                continue
+            if natural[i] <= fair_share:
+                widths[i] = natural[i]
+                locked[i] = True
+                changed = True
+        
+        if not changed:
+            locked_space = sum(widths[i] for i in range(num_cols) if locked[i])
+            remaining = available - locked_space
+            unlocked_naturals = sum(natural[i] for i in range(num_cols)
+                                    if not locked[i])
+            for i in range(num_cols):
+                if locked[i]:
+                    continue
+                if unlocked_naturals > 0:
+                    share = int(remaining * natural[i] / unlocked_naturals)
+                    widths[i] = max(share, 5)
+                else:
+                    widths[i] = max(remaining // unlocked_count, 5)
+                locked[i] = True
+            break
+    
+    return widths
+
+
+def render_table(headers: list[str], data_rows: list[list[str]],
+                 max_width: int) -> str:
+    """Render headers + data_rows as a box-drawing table."""
+    if not headers:
         return ''
-
-    num_cols = max(len(r) for r in rows)
-    # Pad rows to same number of columns
-    for r in rows:
+    
+    num_cols = len(headers)
+    for r in data_rows:
         while len(r) < num_cols:
             r.append('')
-
-    # Strip backticks from all cells
-    rows = [[strip_backticks(c) for c in r] for r in rows]
-
-    # Calculate column widths
-    # For 2-col tables: col1 = auto-fit, col2 = remainder
-    # For N-col: distribute proportionally
-    col_widths = []
-    for col_idx in range(num_cols):
-        max_content = max(len(r[col_idx]) for r in rows)
-        col_widths.append(max_content)
-
-    # Overhead: │ + space per col boundary = 1 + (3 * num_cols) + 1
-    #   │ cell │ cell │  =>  1 + 2+content+2 per col... simplified:
-    #   overhead = (num_cols + 1) border chars + (num_cols * 2) padding spaces
-    overhead = (num_cols + 1) + (num_cols * 2)
-
-    if force_col1 is not None and num_cols >= 2:
-        col_widths[0] = force_col1
-
-    total_content = sum(col_widths)
-    if total_content + overhead > max_width and num_cols >= 2:
-        # Shrink last column to fit
-        available = max_width - overhead - sum(col_widths[:-1])
-        col_widths[-1] = max(20, available)
-
-    # Box-drawing characters
-    H = '─'
-    V = '│'
+    
+    headers = [strip_backticks(c) for c in headers]
+    data_rows = [[strip_backticks(c) for c in r] for r in data_rows]
+    
+    all_rows = [headers] + data_rows
+    col_widths = compute_col_widths(all_rows, num_cols, max_width)
+    
+    H, V = '─', '│'
     TL, TC, TR = '┌', '┬', '┐'
     ML, MC, MR = '├', '┼', '┤'
     BL, BC, BR = '└', '┴', '┘'
-
+    
     def h_line(left, mid, right):
         parts = [left]
         for i, w in enumerate(col_widths):
             parts.append(H * (w + 2))
             parts.append(mid if i < num_cols - 1 else right)
         return ''.join(parts)
-
+    
     def render_row_cells(cells: list[str]) -> list[str]:
-        """Render a single logical row, potentially multi-line from wrapping."""
         wrapped = []
         for i, cell in enumerate(cells):
             wrapped.append(wrap_cell(cell, col_widths[i]))
@@ -116,40 +247,35 @@ def render_table(rows: list[list[str]], max_width: int, force_col1: int | None =
                 parts.append(V)
             lines.append(''.join(parts))
         return lines
-
-    # Assemble the table
+    
     output = []
     output.append(h_line(TL, TC, TR))
-
-    for row_idx, row in enumerate(rows):
+    output.extend(render_row_cells(headers))
+    output.append(h_line(ML, MC, MR))
+    
+    for row_idx, row in enumerate(data_rows):
         output.extend(render_row_cells(row))
-        if row_idx == 0:
-            # Header separator
+        if row_idx < len(data_rows) - 1:
             output.append(h_line(ML, MC, MR))
-        elif row_idx < len(rows) - 1:
-            # Row separator
-            output.append(h_line(ML, MC, MR))
-
+    
     output.append(h_line(BL, BC, BR))
     return '\n'.join(output)
 
 
 def main():
-    max_width = int(os.environ.get('TABLE_MAX_WIDTH', '100'))
-    force_col1_str = os.environ.get('TABLE_COL1_WIDTH', '')
-    force_col1 = int(force_col1_str) if force_col1_str else None
-
-    text = sys.stdin.read()
+    source, filepath, max_width = parse_args(sys.argv)
+    
+    text = get_input_text(source, filepath)
     if not text.strip():
         sys.exit(0)
-
-    rows = parse_markdown_table(text)
-    if not rows:
+    
+    headers, data_rows = parse_markdown_table(text)
+    if not headers:
         # Not a markdown table — pass through unchanged
         print(text, end='')
         sys.exit(0)
-
-    print(render_table(rows, max_width, force_col1))
+    
+    print(render_table(headers, data_rows, max_width))
 
 
 if __name__ == '__main__':
