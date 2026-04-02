@@ -126,7 +126,7 @@ def handle_create(args):
     """Handles the 'create' command."""
     lib_logging.log_info(f"Creating archive: {args.archive_name}")
 
-    # Use lib_fileinput to get file paths (pipeline-friendly)
+    # Use lib_fileInput to get file paths (pipeline-friendly)
     files_to_add, _ = get_file_paths_from_input(args)
 
     if not files_to_add:
