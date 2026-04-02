@@ -328,6 +328,238 @@ def test_pygit_yaml_utils():
     ]
 
 
+def test_dir_struct_discovery_functional():
+    """Functional tests: run dir_struct_discovery and verify real output."""
+    ANSI_RE = re.compile(r"\033\[")
+    BASE_CMD = "python3 -m metadata_utils.dir_struct_discovery common_utils --depth 0"
+    return [
+        {
+            "cmd": f"{BASE_CMD} 2>&1",
+            "check": lambda out: "[FILE] lib_outputColors.py" in out and "[FILE] lib_fileIO.py" in out,
+            "desc": "depth-0 scan lists lib_outputColors.py and lib_fileIO.py",
+        },
+        {
+            "cmd": f"{BASE_CMD} 2>&1",
+            "check": lambda out: bool(re.search(r"Documentation Coverage:\s+[\d.]+%", out)),
+            "desc": "output contains Documentation Coverage with a percentage",
+        },
+        {
+            "cmd": f"{BASE_CMD} --format json 2>&1",
+            "check": lambda out: (
+                "lib_outputColors.py" in out
+                and __import__("json").loads(
+                    out[out.index("{") : out.rindex("}") + 1]
+                ) is not None
+            ),
+            "desc": "--format json produces valid JSON containing lib_outputColors.py",
+        },
+        {
+            "cmd": f"{BASE_CMD} --format markdown 2>&1",
+            "check": lambda out: "| Path |" in out,
+            "desc": "--format markdown contains table header '| Path |'",
+        },
+        {
+            "cmd": f"{BASE_CMD} --stats-only 2>&1",
+            "check": lambda out: (
+                "├──" not in out
+                and "└──" not in out
+                and ("Total Files:" in out or "Documentation Coverage:" in out)
+            ),
+            "desc": "--stats-only has statistics but no tree lines",
+        },
+        {
+            "cmd": "NO_COLOR=1 python3 -m metadata_utils.dir_struct_discovery common_utils --help-examples 2>&1",
+            "check": lambda out, _re=ANSI_RE: len(out.strip()) > 0 and not _re.search(out),
+            "desc": "NO_COLOR=1 --help-examples has content but zero ANSI sequences",
+        },
+        {
+            "cmd": "script -q /dev/null python3 -m metadata_utils.dir_struct_discovery common_utils --help-examples 2>&1",
+            "check": lambda out, _re=ANSI_RE: bool(_re.search(out)),
+            "desc": "TTY mode --help-examples contains ANSI escape sequences",
+        },
+    ]
+
+
+def test_gdir_todo_mgr_functional():
+    """Functional tests: actually run gdir and todo_mgr scripts, verify real output."""
+    return [
+        # gdir functional tests
+        {
+            "cmd": "python3 -m gdir.cli help 2>&1",
+            "check": lambda out: (
+                "Traceback" not in out
+                and "list" in out.lower()
+                and "add" in out.lower()
+                and "go" in out.lower()
+            ),
+            "desc": "gdir help shows subcommands: list, add, go",
+        },
+        {
+            "cmd": "python3 -m gdir.cli list 2>&1",
+            "check": lambda out: (
+                "Traceback" not in out
+                and ("keyword" in out.lower() or "directory" in out.lower() or out.strip() == "")
+            ),
+            "desc": "gdir list runs without traceback and produces directory listing or empty",
+        },
+        # todo_mgr functional tests
+        {
+            "cmd": "python3 todo_mgr/todo_mgr.py help 2>&1",
+            "check": lambda out: (
+                "Traceback" not in out
+                and ("kanban" in out.lower() or "create" in out.lower() or "usage" in out.lower())
+            ),
+            "desc": "todo_mgr help shows subcommands or usage text",
+        },
+        {
+            "cmd": "python3 todo_mgr/todo_mgr.py help examples 2>&1",
+            "check": lambda out: (
+                "Traceback" not in out
+                and "example" in out.lower()
+            ),
+            "desc": "todo_mgr help examples shows example commands",
+        },
+        {
+            "cmd": "python3 todo_mgr/todo_mgr.py kanban --root /tmp/nonexistent_todo_test 2>&1",
+            "check": lambda out: "Traceback" not in out,
+            "desc": "todo_mgr kanban with missing dir handles gracefully (no traceback)",
+        },
+    ]
+
+
+def test_colors_functional():
+    """Functional tests: Colors class doing actual colorization work."""
+    return [
+        {
+            "cmd": 'python3 -c "from common_utils.lib_outputColors import Colors; Colors.enable(); print(Colors.colorize(\'RED\', Colors.RED))"',
+            "check": lambda out: "\033[31mRED\033[0m" in out,
+            "desc": "colorize single color (RED) produces correct escape sequence",
+        },
+        {
+            "cmd": 'python3 -c "from common_utils.lib_outputColors import Colors; Colors.enable(); print(Colors.colorize(\'MULTI\', Colors.BOLD, Colors.GREEN, Colors.BG_BLUE))"',
+            "check": lambda out: "\033[1m" in out and "\033[32m" in out and "\033[44m" in out,
+            "desc": "colorize multi-code (BOLD+GREEN+BG_BLUE) emits all three",
+        },
+        {
+            "cmd": 'python3 -c "from common_utils.lib_outputColors import Colors; Colors.disable(); print(repr(Colors.colorize(\'plain\', Colors.RED)))"',
+            "check": lambda out: out.strip() == "'plain'",
+            "desc": "colorize disabled returns plain text with no escapes",
+        },
+        {
+            "cmd": 'python3 -c "from common_utils.lib_outputColors import colorize_string, Colors; Colors.enable(); print(repr(colorize_string(\'x\', fore_color=\'red\', back_color=\'yellow\', style=\'bold\')))"',
+            "check": lambda out: "\\x1b[1m" in out and "\\x1b[43m" in out and "\\x1b[31m" in out,
+            "desc": "colorize_string with fore/back/style produces all three codes",
+        },
+        {
+            "cmd": 'python3 -c "from common_utils.lib_outputColors import colorize_string, Colors; Colors.enable(); print(repr(colorize_string(\'x\', fore_color=\'grey\')))"',
+            "check": lambda out: "\\x1b[90m" in out,
+            "desc": "colorize_string grey alias maps to \\033[90m",
+        },
+        {
+            "cmd": 'python3 -c "from common_utils.lib_outputColors import colorize_string, Colors; Colors.disable(); print(repr(colorize_string(\'x\', fore_color=\'red\', style=\'bright\')))"',
+            "check": lambda out: out.strip() == "'x'",
+            "desc": "colorize_string disabled returns plain text",
+        },
+        {
+            "cmd": 'python3 -c "from common_utils.lib_outputColors import print_colored, Colors; Colors.enable(); print_colored(\'hello\', fore_color=\'cyan\')"',
+            "check": lambda out: "\033[36m" in out,
+            "desc": "print_colored outputs cyan escape",
+        },
+        {
+            "cmd": 'TERM=dumb python3 -c "from common_utils.lib_outputColors import Colors; print(Colors.enabled())"',
+            "check": lambda out: out.strip() == "False",
+            "desc": "TERM=dumb disables color auto-detection",
+        },
+        {
+            "cmd": "python3 -c \"from common_utils.lib_fileIO import load_yaml; import tempfile, os; f=tempfile.NamedTemporaryFile(suffix='.yml',delete=False,mode='w'); f.write('key: value\\n'); f.close(); d=load_yaml(f.name); assert d=={'key':'value'}; os.unlink(f.name); print('OK')\"",
+            "check": lambda out: "OK" in out,
+            "desc": "load_yaml reads a real YAML file and returns correct dict",
+        },
+        {
+            "cmd": "python3 -c \"from common_utils.lib_fileIO import load_json; import tempfile, os, json; f=tempfile.NamedTemporaryFile(suffix='.json',delete=False,mode='w'); json.dump({'a':1},f); f.close(); d=load_json(f.name); assert d=={'a':1}; os.unlink(f.name); print('OK')\"",
+            "check": lambda out: "OK" in out,
+            "desc": "load_json reads a real JSON file and returns correct dict",
+        },
+    ]
+
+
+def test_pygit_yaml_utils_functional():
+    """Functional tests: pygit colour_text and yaml_utils color output."""
+    return [
+        {
+            "cmd": 'python3 -c "from repo_tools.pygit import colour_text; print(colour_text(\'hello\', \'green\', True))" 2>&1',
+            "check": lambda out: "\033[32m" in out and "hello" in out and "\033[0m" in out,
+            "desc": "colour_text enabled emits green ANSI, text, and reset",
+        },
+        {
+            "cmd": 'python3 -c "from repo_tools.pygit import colour_text; print(colour_text(\'hello\', \'green\', False))" 2>&1',
+            "check": lambda out: out.strip() == "hello" and "\033[" not in out,
+            "desc": "colour_text disabled returns plain text with no escapes",
+        },
+        {
+            "cmd": 'python3 -c "from repo_tools.pygit import colour_text; print(repr(colour_text(\'x\', \'nonexistent\', True)))" 2>&1',
+            "check": lambda out: "'x'" in out and "\\033[" not in out,
+            "desc": "colour_text with unknown color returns plain string",
+        },
+        {
+            "cmd": "python3 -m repo_tools.pygit --repo ~/bin/all_languages/python 2>&1",
+            "check": lambda out: len(out.strip()) > 0 and ("branch" in out.lower() or "modified" in out.lower() or "clean" in out.lower() or "feature/" in out or "main" in out),
+            "desc": "pygit on real git repo produces meaningful output",
+        },
+        {
+            "cmd": 'python3 -c "from yaml_utils.yaml_shell import Fore; print(f\'{Fore.RED}red{Fore.RESET}\')" 2>&1',
+            "check": lambda out: "\033[31m" in out,
+            "desc": "yaml_shell Fore.RED emits correct ANSI escape",
+        },
+        {
+            "cmd": 'python3 -c "from yaml_utils.yaml_tree_printer import Fore; print(f\'{Fore.CYAN}test{Fore.RESET}\')" 2>&1',
+            "check": lambda out: "\033[36m" in out,
+            "desc": "yaml_tree_printer Fore.CYAN emits correct ANSI escape",
+        },
+    ]
+
+
+def test_file_utils_functional():
+    """Functional tests: run file_utils scripts with real inputs, verify output."""
+    return [
+        {
+            "cmd": "python3 -m file_utils.treePrint common_utils/ --depth 0 --files 2>&1",
+            "check": lambda out: ("├" in out or "└" in out) and "lib_outputColors.py" in out,
+            "desc": "treePrint common_utils/ shows lib_outputColors.py with tree chars",
+        },
+        {
+            "cmd": "python3 -m file_utils.fsFormat common_utils/ --depth 0 --format list 2>&1",
+            "check": lambda out: len(out.strip()) > 0 and "common_utils" in out,
+            "desc": "fsFormat common_utils/ produces a file listing",
+        },
+        {
+            "cmd": 'python3 -m file_utils.fsFind common_utils/ --name "*.py" 2>&1',
+            "check": lambda out: "lib_outputColors.py" in out,
+            "desc": "fsFind common_utils/ --name *.py finds lib_outputColors.py",
+        },
+        {
+            "cmd": 'echo "common_utils/lib_outputColors.py" | python3 -m file_utils.fsStats 2>&1',
+            "check": lambda out: len(out.strip()) > 0 and "Traceback" not in out,
+            "desc": "fsStats on lib_outputColors.py produces output without error",
+        },
+        {
+            "cmd": "python3 -m file_utils.fsActions --help-examples 2>&1",
+            "check": lambda out: len(out.strip()) > 0 and "Traceback" not in out,
+            "desc": "fsActions --help-examples produces example text",
+        },
+        {
+            "cmd": "python3 -m file_utils.fsFilters --help-examples 2>&1",
+            "check": lambda out: len(out.strip()) > 0 and "Traceback" not in out,
+            "desc": "fsFilters --help-examples produces example text",
+        },
+        {
+            "cmd": "python3 -m file_utils.renameFiles --help 2>&1",
+            "check": lambda out: "--dry-run" in out and "Traceback" not in out,
+            "desc": "renameFiles --help contains --dry-run flag",
+        },
+    ]
+
+
 def test_file_utils():
     """Verify file_utils modules use common_utils and lib_fileInput."""
     return [
@@ -381,12 +613,19 @@ def test_file_utils():
 
 def main():
     groups = [
+        # Unit / import tests
         ("common_utils core", test_common_utils_core()),
-        ("metadata_utils/dir_struct_discovery", test_dir_struct_discovery()),
-        ("gdir", test_gdir()),
-        ("todo_mgr", test_todo_mgr()),
-        ("repo_tools/pygit + yaml_utils", test_pygit_yaml_utils()),
-        ("file_utils", test_file_utils()),
+        ("dir_struct_discovery imports", test_dir_struct_discovery()),
+        ("gdir imports", test_gdir()),
+        ("todo_mgr imports", test_todo_mgr()),
+        ("pygit + yaml_utils imports", test_pygit_yaml_utils()),
+        ("file_utils imports", test_file_utils()),
+        # Functional / regression tests
+        ("Colors functional", test_colors_functional()),
+        ("dir_struct_discovery functional", test_dir_struct_discovery_functional()),
+        ("gdir + todo_mgr functional", test_gdir_todo_mgr_functional()),
+        ("pygit + yaml_utils functional", test_pygit_yaml_utils_functional()),
+        ("file_utils functional", test_file_utils_functional()),
     ]
     sys.exit(run_tests(groups))
 
