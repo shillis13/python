@@ -21,8 +21,8 @@ if src_dir not in sys.path:
     sys.path.insert(0, src_dir)
 
 from archive_utils import lib_archive
-from dev_utils import lib_logging
-from file_utils import lib_fileinput
+from common_utils import lib_logging
+from file_utils.lib_fileInput import get_file_paths_from_input
 
 
 # =============================================================================
@@ -127,7 +127,7 @@ def handle_create(args):
     lib_logging.log_info(f"Creating archive: {args.archive_name}")
 
     # Use lib_fileinput to get file paths (pipeline-friendly)
-    files_to_add, _ = lib_fileinput.get_file_paths_from_input(args)
+    files_to_add, _ = get_file_paths_from_input(args)
 
     if not files_to_add:
         lib_logging.log_error("No input files or directories specified.")

@@ -32,7 +32,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 # Import from existing file_utils where possible
 try:
-    from file_utils.lib_fileinput import get_file_paths_from_input, _normalize_input_path
+    from file_utils.lib_fileInput import get_file_paths_from_input, _normalize_input_path
 except ImportError:
     # Fallback if run standalone
     def _normalize_input_path(raw_path: str) -> str:

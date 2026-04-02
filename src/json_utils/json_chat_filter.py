@@ -17,10 +17,7 @@ from datetime import datetime
 from typing import List, Dict, Any, Tuple
 
 # Use the established library for handling file inputs.
-try:
-    from lib_fileinput import get_file_paths_from_input
-except ImportError:
-    from .lib_fileinput import get_file_paths_from_input
+from file_utils.lib_fileInput import get_file_paths_from_input
 
 # --- Core Filtering Logic ---
 

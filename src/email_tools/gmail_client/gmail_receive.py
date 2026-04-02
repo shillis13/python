@@ -7,8 +7,8 @@ from typing import Dict, Iterable, List, Optional
 
 from googleapiclient.discovery import build
 
-from dev_utils.lib_logging import log_debug
-from dev_utils.lib_progressBar import ProgressBarContext
+from common_utils.lib_logging import log_debug
+from common_utils.lib_progressBar import ProgressBarContext
 
 from .gmail_auth import GmailAuth
 

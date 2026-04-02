@@ -10,9 +10,9 @@ from pathlib import Path
 from datetime import datetime
 from typing import List, Tuple
 
-from dev_utils.lib_logging import *
-from dev_utils.lib_argparse_registry import register_arguments, parse_known_args
-from file_utils.lib_fileinput import get_file_paths_from_input
+from common_utils.lib_logging import setup_logging, log_function, log_info, log_warn, log_error
+from common_utils.lib_argparse_registry import register_arguments, parse_known_args
+from file_utils.lib_fileInput import get_file_paths_from_input
 
 setup_logging(level=logging.ERROR)
 # setup_logging(level=logging.DEBUG)

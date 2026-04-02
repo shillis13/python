@@ -29,8 +29,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Set, Optional, Callable, Iterator
 
-from dev_utils.lib_logging import setup_logging, log_debug, log_info
-from dev_utils.lib_argparse_registry import register_arguments, parse_known_args
+from common_utils.lib_logging import setup_logging, log_debug, log_info
+from common_utils.lib_argparse_registry import register_arguments, parse_known_args
 from file_utils.lib_extensions import get_extension_data
 from file_utils.fsFilters import FileSystemFilter, apply_config_to_filter
 

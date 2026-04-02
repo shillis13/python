@@ -36,9 +36,9 @@ datetime = _datetime
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Set, Callable, Union, Type
 
-from dev_utils.lib_logging import setup_logging, log_debug, log_info
-from dev_utils.lib_argparse_registry import register_arguments, parse_known_args
-from file_utils.lib_fileinput import get_file_paths_from_input
+from common_utils.lib_logging import setup_logging, log_debug, log_info
+from common_utils.lib_argparse_registry import register_arguments, parse_known_args
+from file_utils.lib_fileInput import get_file_paths_from_input
 from file_utils.lib_extensions import get_extension_data
 
 setup_logging(level=logging.ERROR)
@@ -784,7 +784,7 @@ def load_config_file(
         try:  # pragma: no cover
             from .lib_filters import log_info as _log_info
         except Exception:  # pragma: no cover
-            from dev_utils.lib_logging import log_info as _log_info
+            from common_utils.lib_logging import log_info as _log_info
         _log_info(f"Could not load config file {config_path}: {e}")
         return {}
 

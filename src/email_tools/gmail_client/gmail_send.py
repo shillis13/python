@@ -7,8 +7,8 @@ from typing import Iterable, Optional
 
 from googleapiclient.discovery import build
 
-from dev_utils.lib_logging import log_debug
-from dev_utils.lib_dryrun import dry_run_decorator
+from common_utils.lib_logging import log_debug
+from common_utils.lib_dryrun import dry_run_decorator
 
 from .gmail_auth import GmailAuth
 

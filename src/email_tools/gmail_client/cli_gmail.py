@@ -2,9 +2,9 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from dev_utils.lib_argparse_registry import register_arguments, parse_known_args
-from dev_utils.lib_logging import log_info, setup_logging
-from dev_utils.lib_dryrun import get_kwarg
+from common_utils.lib_argparse_registry import register_arguments, parse_known_args
+from common_utils.lib_logging import log_info, setup_logging
+from common_utils.lib_dryrun import get_kwarg
 
 from .gmail_auth import GmailAuth
 from .gmail_send import send_email
