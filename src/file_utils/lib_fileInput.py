@@ -7,8 +7,8 @@ import logging
 from pathlib import Path
 from typing import List, Tuple, Union
 
-# Assuming dev_utils exists - adjust import as needed
-# from dev_utils import *
+# Assuming common_utils exists - adjust import as needed
+# from common_utils import *
 
 """
 Determines the file paths to be processed based on input source: command line, --from-file, or stdin.

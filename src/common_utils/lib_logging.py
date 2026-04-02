@@ -7,7 +7,7 @@ import argparse
 from contextlib import contextmanager
 from functools import wraps
 
-from dev_utils.lib_outputColors import *
+from common_utils.lib_outputColors import colorize_string, print_colored, Colors
 
 """
 Set up the basic configuration for the logging system.
