@@ -26,6 +26,8 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any, Set
 import yaml
 
+from common_utils.lib_outputColors import Colors
+
 
 DEFAULT_EXCLUDES = [
     "node_modules/",
@@ -520,16 +522,143 @@ Directory Statistics:
 """
 
 
+def print_help_examples():
+    """Print colorized usage examples with simulated output."""
+    # ANSI color codes
+    BOLD = Colors.BOLD if Colors.enabled() else ""
+    DIM = Colors.DIM if Colors.enabled() else ""
+    CYAN = Colors.CYAN if Colors.enabled() else ""
+    GREEN = Colors.GREEN if Colors.enabled() else ""
+    YELLOW = Colors.YELLOW if Colors.enabled() else ""
+    MAGENTA = Colors.MAGENTA if Colors.enabled() else ""
+    WHITE = Colors.WHITE if Colors.enabled() else ""
+    RESET = Colors.RESET if Colors.enabled() else ""
+
+    print(f"""
+{BOLD}{CYAN}Directory Structure Discovery — Usage Examples{RESET}
+{DIM}{'─' * 52}{RESET}
+
+{BOLD}{WHITE}1) Basic scan of current directory{RESET}
+{DIM}   Scans . to default depth 3, tree format{RESET}
+
+   {GREEN}${RESET} {CYAN}dir_struct_discovery.py{RESET}
+
+   {DIM}Scanning: /Users/me/project{RESET}
+
+   {YELLOW}Directory Statistics:{RESET}
+     Total Files: 12
+     Total Directories: 4
+     Documented Files: 7
+     Documented Directories: 2
+     Documentation Coverage: 56.2%
+
+   ├── [DIR]  src/ - Source code modules
+   ├── [DIR]  docs/ ⚠️ NO METADATA
+   ├── [FILE] README.md - Project overview and setup guide
+   └── [FILE] config.yml - Runtime configuration for the app
+
+{BOLD}{WHITE}2) Shallow scan with JSON output{RESET}
+{DIM}   Depth 1 keeps it brief; JSON for piping to jq{RESET}
+
+   {GREEN}${RESET} {CYAN}dir_struct_discovery.py{RESET} ~/projects {MAGENTA}--depth{RESET} 1 {MAGENTA}--format{RESET} json
+
+   {DIM}{{
+     "items": [
+       {{"name": "src", "path": "...", "type": "dir", "description": "Source modules", ...}},
+       {{"name": "README.md", "path": "...", "type": "file", "description": "Project overview", ...}}
+     ]
+   }}{RESET}
+
+{BOLD}{WHITE}3) Include hidden files{RESET}
+{DIM}   Shows dotfiles/dotdirs normally skipped{RESET}
+
+   {GREEN}${RESET} {CYAN}dir_struct_discovery.py{RESET} . {MAGENTA}--include-hidden{RESET}
+
+   ├── [DIR]  .github/ - CI/CD workflows
+   ├── [FILE] .gitignore ⚠️ NO METADATA
+   └── [FILE] .env ⚠️ NO METADATA
+
+{BOLD}{WHITE}4) Respect .gitignore rules{RESET}
+{DIM}   Uses git ls-files when in a repo; falls back to parsing .gitignore{RESET}
+
+   {GREEN}${RESET} {CYAN}dir_struct_discovery.py{RESET} . {MAGENTA}--respect-gitignore{RESET}
+
+{BOLD}{WHITE}5) Only git-tracked files{RESET}
+{DIM}   Excludes untracked files entirely (stricter than --respect-gitignore){RESET}
+
+   {GREEN}${RESET} {CYAN}dir_struct_discovery.py{RESET} . {MAGENTA}--only-tracked{RESET} {MAGENTA}--depth{RESET} 2
+
+{BOLD}{WHITE}6) Custom excludes (glob and regex){RESET}
+{DIM}   --exclude is repeatable; prefix re: for regex patterns{RESET}
+
+   {GREEN}${RESET} {CYAN}dir_struct_discovery.py{RESET} . {MAGENTA}--exclude{RESET} "*.log" {MAGENTA}--exclude{RESET} "re:test_.*\\.py"
+
+{BOLD}{WHITE}7) Exclude patterns from a file{RESET}
+{DIM}   One pattern per line; # comments and blank lines ignored{RESET}
+
+   {GREEN}${RESET} {CYAN}dir_struct_discovery.py{RESET} . {MAGENTA}--exclude-file{RESET} .discoveryignore
+
+   {DIM}# .discoveryignore
+   *.pyc
+   __pycache__/
+   build/
+   re:.*\\.egg-info{RESET}
+
+{BOLD}{WHITE}8) Markdown table output{RESET}
+{DIM}   Useful for pasting into docs or READMEs{RESET}
+
+   {GREEN}${RESET} {CYAN}dir_struct_discovery.py{RESET} . {MAGENTA}--format{RESET} markdown {MAGENTA}--depth{RESET} 1
+
+   | Path | Type | Description |
+   |------|------|-------------|
+   | `src` | dir | Source code modules |
+   | `README.md` | file | Project overview and setup guide |
+
+{BOLD}{WHITE}9) Statistics only (no tree){RESET}
+{DIM}   Quick documentation coverage check{RESET}
+
+   {GREEN}${RESET} {CYAN}dir_struct_discovery.py{RESET} ~/projects/myapp {MAGENTA}--stats-only{RESET}
+
+   {YELLOW}Directory Statistics:{RESET}
+     Total Files: 47
+     Total Directories: 11
+     Documented Files: 31
+     Documented Directories: 8
+     Documentation Coverage: 67.2%
+
+{BOLD}{WHITE}10) Combining options{RESET}
+{DIM}    Deep scan, hidden files, gitignore-aware, exclude logs{RESET}
+
+   {GREEN}${RESET} {CYAN}dir_struct_discovery.py{RESET} ~/workspace {MAGENTA}--depth{RESET} 5 {MAGENTA}--include-hidden{RESET} \\
+       {MAGENTA}--respect-gitignore{RESET} {MAGENTA}--exclude{RESET} "*.log" {MAGENTA}--format{RESET} tree
+""")
+
+
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(
-        description='Discover and document directory structures with metadata',
+        description=(
+            'Crawl a directory tree and produce an annotated structure view.\n'
+            '\n'
+            'For every file and directory encountered, the tool attempts to extract a\n'
+            'short description from embedded metadata — YAML/Markdown frontmatter,\n'
+            'JSON _meta fields, or the first sentence of a README. The result is a\n'
+            'tree (or JSON/Markdown table) where each entry is labeled with its\n'
+            'description, or flagged as undocumented.\n'
+            '\n'
+            'A documentation-coverage percentage is always printed, making this\n'
+            'useful for auditing how well a project or workspace is self-describing.\n'
+            '\n'
+            'Filtering honors .gitignore rules, custom glob/regex excludes, and\n'
+            'exclude-pattern files. Hidden files are skipped by default.'
+        ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
   %(prog)s ~/Documents/AI/Claude/claude_workspace
   %(prog)s . --depth 2 --format json
   %(prog)s ~/projects --include-hidden --stats-only
+  %(prog)s --help-examples  # Show colorized usage examples with output
   %(prog)s --help-verbose  # Show file conventions guide
         """
     )
@@ -589,9 +718,19 @@ Examples:
         action='store_true',
         help='Show file conventions guide'
     )
-    
+    parser.add_argument(
+        '--help-examples',
+        action='store_true',
+        help='Show colorized usage examples with sample output'
+    )
+
     args = parser.parse_args()
     
+    # Show examples help
+    if args.help_examples:
+        print_help_examples()
+        return 0
+
     # Show verbose help
     if args.help_verbose:
         conventions_path = Path(__file__).parent.parent.parent / 'readmes' / 'file_conventions.md'

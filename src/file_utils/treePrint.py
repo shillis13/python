@@ -26,10 +26,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Set, Optional, Callable
 
-from dev_utils.lib_argparse_registry import register_arguments, parse_known_args
-from dev_utils.lib_logging import setup_logging, log_debug
-from dev_utils.lib_outputColors import colorize_string
-from file_utils.lib_fileinput import get_file_paths_from_input
+from common_utils.lib_argparse_registry import register_arguments, parse_known_args
+from common_utils.lib_logging import setup_logging, log_debug
+from common_utils.lib_outputColors import colorize_string
+from file_utils.lib_fileInput import get_file_paths_from_input
 
 # Tree drawing characters
 TREE_CHARS = {

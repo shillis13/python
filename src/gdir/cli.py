@@ -11,6 +11,8 @@ from pathlib import Path
 from shutil import which
 from typing import Iterable, List, Optional
 
+from common_utils.lib_outputColors import Colors
+
 from . import __version__
 from .helptext import get_help_text
 from .store import (
@@ -26,21 +28,6 @@ from .store import (
 EXIT_USAGE = 64
 EXIT_INVALID = 2
 EXIT_INTERNAL = 70
-
-# ANSI color codes
-class Color:
-    RESET = "\033[0m"
-    BOLD = "\033[1m"
-    DIM = "\033[2m"
-    CYAN = "\033[36m"
-    GREEN = "\033[32m"
-    YELLOW = "\033[33m"
-    BLUE = "\033[34m"
-    MAGENTA = "\033[35m"
-
-    @classmethod
-    def enabled(cls) -> bool:
-        return sys.stdout.isatty()
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -184,18 +171,18 @@ def cmd_list(store: MappingStore) -> int:
     index_width = len(str(len(entries)))
     key_width = max(len("keyword"), *(len(entry.key) for entry in entries))
 
-    if Color.enabled():
+    if Colors.enabled():
         header = (
-            f"{Color.DIM}{'index'.rjust(index_width)}  "
-            f"{'keyword'.ljust(key_width)}  directory{Color.RESET}"
+            f"{Colors.DIM}{'index'.rjust(index_width)}  "
+            f"{'keyword'.ljust(key_width)}  directory{Colors.RESET}"
         )
         print(header)
-        print(f"{Color.DIM}{'-' * (index_width + key_width + 14)}{Color.RESET}")
+        print(f"{Colors.DIM}{'-' * (index_width + key_width + 14)}{Colors.RESET}")
         for idx, entry in enumerate(entries, start=1):
             print(
-                f"{Color.YELLOW}{str(idx).rjust(index_width)}{Color.RESET}  "
-                f"{Color.CYAN}{Color.BOLD}{entry.key.ljust(key_width)}{Color.RESET}  "
-                f"{Color.GREEN}{entry.path}{Color.RESET}"
+                f"{Colors.YELLOW}{str(idx).rjust(index_width)}{Colors.RESET}  "
+                f"{Colors.CYAN}{Colors.BOLD}{entry.key.ljust(key_width)}{Colors.RESET}  "
+                f"{Colors.GREEN}{entry.path}{Colors.RESET}"
             )
     else:
         header = f"{'index'.rjust(index_width)}  {'keyword'.ljust(key_width)}  directory"

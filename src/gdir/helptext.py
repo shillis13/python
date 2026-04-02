@@ -4,31 +4,24 @@ from __future__ import annotations
 
 import sys
 
-# ANSI color codes
-RESET = "\033[0m"
-BOLD = "\033[1m"
-DIM = "\033[2m"
-CYAN = "\033[36m"
-GREEN = "\033[32m"
-YELLOW = "\033[33m"
-MAGENTA = "\033[35m"
+from common_utils.lib_outputColors import Colors
 
 
 def _c(text: str, *codes: str) -> str:
     """Apply color codes if stdout is a TTY."""
     if not sys.stdout.isatty():
         return text
-    return "".join(codes) + text + RESET
+    return "".join(codes) + text + Colors.RESET
 
 
 def get_help_text() -> str:
     """Generate help text with colors when appropriate."""
-    cmd = lambda t: _c(t, CYAN, BOLD)
-    arg = lambda t: _c(t, YELLOW)
-    path = lambda t: _c(t, GREEN)
-    section = lambda t: _c(t, MAGENTA, BOLD)
-    dim = lambda t: _c(t, DIM)
-    b = lambda t: _c(t, BOLD)
+    cmd = lambda t: _c(t, Colors.CYAN, Colors.BOLD)
+    arg = lambda t: _c(t, Colors.YELLOW)
+    path = lambda t: _c(t, Colors.GREEN)
+    section = lambda t: _c(t, Colors.MAGENTA, Colors.BOLD)
+    dim = lambda t: _c(t, Colors.DIM)
+    b = lambda t: _c(t, Colors.BOLD)
 
     return f"""
 {section("gdir")} — keyword-driven directory jumper

@@ -23,21 +23,18 @@ try:
 except ImportError:
     READLINE_AVAILABLE = False
 
-# Try to import colorama for colored output
-try:
-    from colorama import Fore, Style, init
+from common_utils.lib_outputColors import Colors
 
-    init(autoreset=True)
-    COLORS_AVAILABLE = True
-except ImportError:
+COLORS_AVAILABLE = Colors.enabled()
 
-    class Fore:
-        RED = GREEN = BLUE = YELLOW = CYAN = MAGENTA = WHITE = RESET = ""
+# Compatibility aliases for code using Fore.X / Style.X
+class Fore:
+    RED = Colors.RED; GREEN = Colors.GREEN; BLUE = Colors.BLUE
+    YELLOW = Colors.YELLOW; CYAN = Colors.CYAN; MAGENTA = Colors.MAGENTA
+    WHITE = Colors.WHITE; RESET = Colors.RESET
 
-    class Style:
-        BRIGHT = DIM = RESET_ALL = ""
-
-    COLORS_AVAILABLE = False
+class Style:
+    BRIGHT = Colors.BOLD; DIM = Colors.DIM; RESET_ALL = Colors.RESET
 
 
 class YamlShell:

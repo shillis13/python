@@ -18,21 +18,17 @@ from typing import Any, Dict, List, Union, Optional
 # this relative import is correct.
 from yaml_utils.yaml_helpers import load_yaml
 
-# Try to import colorama for colored output
-try:
-    from colorama import Fore, Style, init
+from common_utils.lib_outputColors import Colors
 
-    init(autoreset=True)
-    _COLORS_AVAILABLE = True
-except ImportError:
-    # Fallback if colorama not available
-    class Fore:
-        RED = GREEN = BLUE = YELLOW = CYAN = MAGENTA = WHITE = RESET = ""
+_COLORS_AVAILABLE = Colors.enabled()
 
-    class Style:
-        BRIGHT = DIM = RESET_ALL = ""
+class Fore:
+    RED = Colors.RED; GREEN = Colors.GREEN; BLUE = Colors.BLUE
+    YELLOW = Colors.YELLOW; CYAN = Colors.CYAN; MAGENTA = Colors.MAGENTA
+    WHITE = Colors.WHITE; RESET = Colors.RESET
 
-    _COLORS_AVAILABLE = False
+class Style:
+    BRIGHT = Colors.BOLD; DIM = Colors.DIM; RESET_ALL = Colors.RESET
 
 
 """

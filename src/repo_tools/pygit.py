@@ -15,23 +15,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Sequence
 
-
-RESET = "\033[0m"
-COLOR_MAP = {
-    "green": "\033[32m",
-    "blue": "\033[34m",
-    "yellow": "\033[33m",
-    "red": "\033[31m",
-}
+from common_utils.lib_outputColors import Colors
 
 
 def colour_text(text: str, colour: str, enabled: bool) -> str:
+    """Colorize text using Colors class."""
     if not enabled:
         return text
-    code = COLOR_MAP.get(colour)
+    code = getattr(Colors, colour.upper(), None)
     if not code:
         return text
-    return f"{code}{text}{RESET}"
+    return f"{code}{text}{Colors.RESET}"
 
 
 class GitError(RuntimeError):
