@@ -10,7 +10,8 @@ from pathlib import Path
 from datetime import datetime
 from typing import List, Tuple
 
-from common_utils.lib_logging import setup_logging, log_function, log_info, log_warn, log_error
+import logging
+from common_utils.lib_logging import setup_logging, log_function, log_info, log_error
 from common_utils.lib_argparse_registry import register_arguments, parse_known_args
 from file_utils.lib_fileInput import get_file_paths_from_input
 
@@ -60,7 +61,7 @@ def backup_files(
                     f"{'Would backup' if dry_run else 'Backed up'} {file_path} to {backup_path}. Use --exec or -x to execute"
                 )
             else:
-                log_warn(f"File not found: {file_path}")
+                logging.warning(f"File not found: {file_path}")
         except Exception as e:
             log_error(f"Error backing up {file_path_str}: {e}")
 
