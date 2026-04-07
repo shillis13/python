@@ -1758,17 +1758,23 @@ def create_todo_interactive() -> str:
 
 
 def cmd_move(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> str:
-    """Move todo to new parent. Usage: move <ref> <new_parent|root>
+    """Move todo(s) to target. Usage: move <target|root> <ref1> [ref2...]
 
-    Use 'root', '.', or '/' as new_parent to move to root level (unparent).
+    Use 'root', '.', or '/' as target to move to root level (unparent).
     """
     if len(args) < 2:
-        return c("Usage: move <ref> <new_parent|root>", Colors.RED)
+        return c("Usage: move <target|root> <ref1> [ref2...]", Colors.RED)
 
-    result = ops_move(args[0], args[1])
-    if result["success"]:
-        return c(f"Moved: {result['todo_id']} → {result['new_location']}", Colors.GREEN)
-    return c(f"Error: {result['error']}", Colors.RED)
+    target = args[0]
+    sources = args[1:]
+    lines = []
+    for src in sources:
+        result = ops_move(src, target)
+        if result["success"]:
+            lines.append(c(f"Moved: {result['todo_id']} → {result['new_location']}", Colors.GREEN))
+        else:
+            lines.append(c(f"Error ({src}): {result['error']}", Colors.RED))
+    return "\n".join(lines)
 
 
 def cmd_link(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> str:
@@ -2308,6 +2314,7 @@ HELP_OVERVIEW = """
     {cyan}create{reset} <name>   Create new todo
     {cyan}status{reset} <r> <s>  Change todo status
     {cyan}edit{reset} <ref>      Interactive editor
+    {cyan}move{reset} <target> <ref...>  Move todo(s) to target (or 'root')
     {cyan}complete{reset} <ref>  Mark done and archive
     {cyan}delete{reset} <ref>    Move to trash (alias: rm)
     {cyan}purge{reset} <ref>     Permanently delete (no recovery)
@@ -2368,9 +2375,9 @@ HELP_EXAMPLES = """
     edit IP2 description           # Edit specific field
 
 {bold}Organizing:{reset}
-    move IP2 todo_0050_parent      # Make IP2 a child of another todo
-    move IP2 root                  # Move IP2 back to root level
-    move IP2 .                     # Same - unparent
+    move todo_0050_parent IP2      # Make IP2 a child of another todo
+    move root IP2                  # Move IP2 back to root level
+    move . IP2 IP3                 # Unparent multiple todos at once
     link IP2 RD1 related_work      # Create symlink relationship
     duplicate IP2 ip2_copy         # Copy todo
 
@@ -2444,9 +2451,9 @@ HELP_VERBOSE = """
 
 {bold}ORGANIZATION COMMANDS{reset}
 
-  {cyan}move{reset} <ref> <new_parent|root>
-      Move a todo to become a child of another todo, or back to root level.
-      Use 'root', '.', or '/' to move to root (unparent).
+  {cyan}move{reset} <target|root> <ref1> [ref2...]
+      Move one or more todos to become children of target, or back to root level.
+      Use 'root', '.', or '/' as target to move to root (unparent).
 
       {dim}move vs link:{reset}
       - move: Physically relocates the todo directory (changes hierarchy)
@@ -2558,19 +2565,20 @@ how subtasks relate to their parent todos.
         └── TR1 [TR] Child Two
 """,
     "move": """
-{bold}move{reset} <ref> <new_parent|root>
+{bold}move{reset} <target|root> <ref1> [ref2...]
 
-Move a todo to become a child of another todo, or back to root.
+Move one or more todos to become children of target, or back to root.
 
 This physically relocates the directory. The todo's path changes.
 
 {bold}To move under a parent:{reset}
-    move IP2 todo_0050_epic      # IP2 becomes child of todo_0050_epic
+    move todo_0050_epic IP2       # IP2 becomes child of todo_0050_epic
+    move todo_0050_epic IP2 IP3   # Move multiple at once
 
 {bold}To move back to root (unparent):{reset}
-    move IP2 root    # Move to root level
-    move IP2 .       # Same
-    move IP2 /       # Same
+    move root IP2    # Move to root level
+    move . IP2       # Same
+    move / IP2 IP3   # Unparent multiple
 
 {bold}move vs link:{reset}
     move  - Changes directory location (hierarchy)

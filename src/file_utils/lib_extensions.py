@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 """
 Library for loading and querying file extension information from a configuration file.
 
@@ -29,10 +30,17 @@ sys.path.insert(0, str(_src_dir))
 # ========================================
 # region Reusable YAML Library Imports
 # ========================================
-# This will now correctly find the yaml_utils package within the src directory.
-from yaml_utils.yaml_helpers import load_yaml as load_yaml_file
-from yaml_utils.yaml_validate import validate_data
-from yaml_utils.yaml_tree_printer import yaml_tree_print
+# Lazy imports — yaml_utils requires jsonschema which may not be installed.
+# Only the YAML-based functions (get_extension_data, print_full_hierarchy,
+# print_type_query) need these. CSV-based ExtensionInfo does not.
+
+
+def _import_yaml_utils():
+    from yaml_utils.yaml_helpers import load_yaml as load_yaml_file
+    from yaml_utils.yaml_validate import validate_data
+    from yaml_utils.yaml_tree_printer import yaml_tree_print as print_tree
+    return load_yaml_file, validate_data, print_tree
+
 
 # ========================================
 # endregion
@@ -260,6 +268,7 @@ def get_extension_data() -> dict | None:
 
     print(f"Loading data from: {config_path}")
     print(f"Loading schema from: {schema_path}")
+    load_yaml_file, validate_data, _ = _import_yaml_utils()
     schema = load_yaml_file(schema_path)
     data = load_yaml_file(config_path)
 
@@ -340,6 +349,7 @@ def print_full_hierarchy(data: dict, show_extensions: bool):
         print("No source data to display.")
         return
 
+    _, _, print_tree = _import_yaml_utils()
     data_to_print = data["source"]["file_types"]
     if not show_extensions:
         data_to_print = _prune_extensions_recursive(data_to_print)
@@ -413,6 +423,7 @@ def print_type_query(
             parent = data["types"][current_type]["parent"]
 
     if descendants_tree:
+        _, _, print_tree = _import_yaml_utils()
         print(f"Descendant tree for '{type_name}':")
         q = [(data["source"]["file_types"], type_name)]
         sub_tree = None
