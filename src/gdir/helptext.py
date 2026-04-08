@@ -32,10 +32,10 @@ def get_help_text() -> str:
 
 {section("NAVIGATION COMMANDS")}
 
-  {cmd("go")} {arg("<key|index|dir>")}
+  {cmd("go")} {arg("<key|index|dir|#N>")}
       Change to the specified directory. Accepts a bookmark keyword, a 1-based
-      index from the mappings list, or a direct directory path. The target is
-      recorded in history for back/fwd navigation.
+      index from the mappings list, a direct directory path, or {arg("#N")} to
+      navigate to history entry N. The target is recorded in history.
 
   {cmd("back")} {dim("[N]")}
       Move backward N steps in the navigation history (default: 1).
@@ -87,40 +87,28 @@ def get_help_text() -> str:
 
 {section("ENVIRONMENT & SHELL INTEGRATION")}
 
-  {cmd("env")} {dim("[--format F] [--per-key]")}
+  {cmd("env")} {dim("[--format F] [--all] [--indices x,y,z] [--per-key]")}
       Export shell variables for integration. Used by the shell wrapper function
       to maintain state after navigation.
 
       {dim("Formats:")}  {dim("sh")} (default), {dim("fish")}, {dim("pwsh")}
 
+      {dim("Options:")}
+        {dim("--all")}          Export all keyword-dir pairs as GDIR_<KEY> variables
+        {dim("--indices x,y,z")} Export only entries at these 1-based indices
+        {dim("--per-key")}      Same as --all (kept for compatibility)
+
       {dim("Variables exported:")}
         {dim("GODIR_PREV")}     Path of the previous history entry
         {dim("GODIR_NEXT")}     Path of the next history entry
-        {dim("GODIR_<KEY>")}    Per-bookmark variables (with {dim("--per-key")})
+        {dim("GDIR_<KEY>")}     Per-bookmark variables (with {dim("--all")} or {dim("--indices")})
 
       {b("Shell function required:")} gdir is a Python program and cannot change
-      the parent shell's working directory directly. A shell wrapper function
-      must be defined that captures gdir's output and calls {b("cd")}. Add this
-      to your {path("~/.bashrc")} or {path("~/.bash_functions")}:
+      the parent shell's working directory directly. Run {cmd("gdir init")} to
+      install the wrapper automatically, or add it manually to your shell config.
 
-        {dim("gdir() {{")}
-        {dim("  local _nav=false")}
-        {dim("  case \"$1\" in")}
-        {dim("    go|back|fwd|pick|-|+) _nav=true ;;")}
-        {dim("    list|add|rm|clear|hist|env|save|load|import|doctor|help|\"\") ;;")}
-        {dim("    -*) ;;")}
-        {dim("    *)  _nav=true ;;")}
-        {dim("  esac")}
-        {dim("  if $_nav; then")}
-        {dim("    local target")}
-        {dim("    target=\"$(command gdir \"$@\")\" || return $?")}
-        {dim("    [ -z \"$target\" ] && return 2")}
-        {dim("    cd \"$target\" || return $?")}
-        {dim("    eval \"$(command gdir env --format sh --per-key)\"")}
-        {dim("  else")}
-        {dim("    command gdir \"$@\"")}
-        {dim("  fi")}
-        {dim("}}")}
+      The wrapper uses plain {b("cd")} (not {b("builtin cd")}), so directory
+      changers like {b("zoxide")} are respected if they override cd.
 
 {section("STATE MANAGEMENT")}
 
@@ -137,7 +125,13 @@ def get_help_text() -> str:
       Import bookmarks from another tool.
       Supported sources: {dim("cdargs")}, {dim("bashmarks")}
 
-{section("DIAGNOSTICS")}
+{section("SETUP & DIAGNOSTICS")}
+
+  {cmd("init")}
+      Install the gdir bash wrapper function into your shell config.
+      Checks (in order): {path("~/.bash_functions")}, {path("~/.bashFunctions")},
+      {path("~/.bashrc")}. Prompts for a path if none exist. Updates existing
+      wrapper blocks in place.
 
   {cmd("doctor")}
       Check configuration health: verifies config directory, mappings file,
@@ -147,13 +141,15 @@ def get_help_text() -> str:
 {section("SHORTCUTS")}
   gdir {cmd("-")}                     Alias for {cmd("gdir back")}
   gdir {cmd("+")}                     Alias for {cmd("gdir fwd")}
+  gdir {cmd("#N")}                    Navigate to history entry N
   gdir {arg("<name>")}                Implicit {cmd("gdir go")} {arg("<name>")} (any non-command argument)
 
 {section("SELECTORS")}
-  Bookmark commands accept selectors that resolve in this order:
-    1. {b("Keyword")} — exact match against bookmark keys
-    2. {b("Index")} — 1-based position in the mappings list
-    3. {b("Path")} — direct directory path (with ~ expansion)
+  Bookmark and go commands accept selectors that resolve in this order:
+    1. {b("#N")} — history entry at 1-based index N
+    2. {b("Keyword")} — exact match against bookmark keys
+    3. {b("Index")} — 1-based position in the mappings list
+    4. {b("Path")} — direct directory path (with ~ expansion)
 
 {section("CONFIGURATION")}
   Config directory: {path("~/.config/gdir/")} (or {dim("$XDG_CONFIG_HOME/gdir/")})
@@ -171,16 +167,19 @@ def get_help_text() -> str:
     {dim('{{"path": "/Users/me/work", "visited_at": "2026-..."}}')}
 
 {section("EXAMPLES")}
+  gdir {cmd("init")}                    {dim("# Install bash wrapper function")}
   gdir {cmd("add")} work                 {dim("# Bookmark current dir as 'work'")}
   gdir {cmd("add")} proj {path("~/projects")}     {dim("# Bookmark a specific path")}
   gdir work                    {dim("# Navigate to 'work' bookmark")}
   gdir 2                       {dim("# Navigate to 2nd bookmark")}
+  gdir {cmd("#5")}                     {dim("# Navigate to history entry 5")}
   gdir {path("~/Documents")}            {dim("# Navigate to a direct path")}
   gdir {cmd("-")}                      {dim("# Go back one step")}
   gdir {cmd("+")}                      {dim("# Go forward one step")}
   gdir {cmd("back")} 3                  {dim("# Go back 3 steps")}
   gdir {cmd("pick")}                    {dim("# Fuzzy-select a bookmark")}
-  gdir {cmd("env")} {dim("--format fish")}      {dim("# Export variables for fish shell")}
+  gdir {cmd("env")} {dim("--all")}              {dim("# Export all bookmarks as env vars")}
+  gdir {cmd("env")} {dim("--indices 1,3")}      {dim("# Export bookmarks 1 and 3 only")}
   gdir {cmd("doctor")}                  {dim("# Check for configuration issues")}
   gdir {cmd("save")} backup.json        {dim("# Export state to a file")}
   gdir {cmd("load")} backup.json        {dim("# Merge bookmarks from a file")}

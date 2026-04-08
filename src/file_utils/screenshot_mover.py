@@ -234,12 +234,21 @@ def main() -> int:
     if args is None:
         return 0
 
-    # macOS screenshot filenames contain \u202f (narrow no-break space)
-    # which can cause FileNotFoundError. Normalize to NFC.
-    src = Path(unicodedata.normalize("NFC", args.filepath))
+    src = Path(args.filepath)
     src_dir = Path(args.src).expanduser().resolve()
     dest_dir = Path(args.dest).expanduser().resolve()
     categories = [c.strip() for c in args.types.split(",")]
+
+    # macOS screenshot filenames contain \u202f (narrow no-break space)
+    # which Python's str may encode differently than the filesystem.
+    # If the file isn't found directly, try resolving via the parent dir.
+    if not src.is_file() and src.parent.is_dir():
+        # Normalize both sides and compare to find the real filename
+        target_norm = unicodedata.normalize("NFC", src.name)
+        for entry in src.parent.iterdir():
+            if unicodedata.normalize("NFC", entry.name) == target_norm:
+                src = entry
+                break
 
     # Ignore if file doesn't exist (transient, or already moved)
     if not src.is_file():
