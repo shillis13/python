@@ -582,7 +582,18 @@ def cmd_doctor(config_dir: Path, store: MappingStore, history: History) -> int:
 
 _BASH_WRAPPER = '''\
 # --- gdir wrapper (BEGIN MANAGED BLOCK) ---
-_GDIR_BIN="$(command -v gdir 2>/dev/null || echo "${HOME}/myenv/bin/gdir")"
+_GDIR_PREFERRED="${HOME}/myenv/bin/gdir"
+if [[ -x "$_GDIR_PREFERRED" ]]; then
+    _GDIR_BIN="$_GDIR_PREFERRED"
+else
+    _GDIR_BIN="$(command -v gdir 2>/dev/null || echo "${HOME}/myenv/bin/gdir")"
+fi
+if [[ -x /opt/homebrew/bin/gdir ]]; then
+    alias gnudir='/opt/homebrew/bin/gdir'
+fi
+if [[ -x "$_GDIR_BIN" ]]; then
+    eval "$("$_GDIR_BIN" env --format sh --all 2>/dev/null || true)"
+fi
 gdir() {
     local _gdir_nav=false
     local target
@@ -610,7 +621,7 @@ trap '"$_GDIR_BIN" save >/dev/null 2>&1' EXIT
 
 
 def cmd_init() -> int:
-    """Install the gdir bash wrapper function into a shell config file."""
+    """Install the gdir shell wrapper function into a shell config file."""
     marker = "# --- gdir wrapper (BEGIN MANAGED BLOCK) ---"
     end_marker = "# --- gdir wrapper (END MANAGED BLOCK) ---"
 
@@ -619,6 +630,8 @@ def cmd_init() -> int:
         Path.home() / ".bash_functions",
         Path.home() / ".bashFunctions",
         Path.home() / ".bashrc",
+        Path.home() / ".zshrc",
+        Path.home() / ".zprofile",
     ]
 
     # Check if already installed

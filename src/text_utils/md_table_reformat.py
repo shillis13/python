@@ -19,7 +19,7 @@ Examples:
     python3 md_table_reformat.py 0                        # clipboard, auto-fit
     python3 md_table_reformat.py --stdin 80 < notes.md    # stdin, width 80
     python3 md_table_reformat.py --file notes.md 120      # file, width 120
-    python3 md_table_reformat.py | pbcopy                 # clipboard in, clipboard out
+    python3 md_table_reformat.py | pbcopy                 # clipboard in, stdout redirected to clipboard
 """
 
 import sys
@@ -31,6 +31,13 @@ import tempfile
 import subprocess
 import textwrap
 from pathlib import Path
+
+
+def print_help() -> None:
+    """Print command help."""
+    help_text = (__doc__ or '').strip()
+    if help_text:
+        print(help_text)
 
 
 def parse_args(argv: list[str]) -> tuple[str, str | None, int]:
@@ -58,8 +65,12 @@ def parse_args(argv: list[str]) -> tuple[str, str | None, int]:
                 print("Error: --file requires a path argument", file=sys.stderr)
                 sys.exit(1)
             filepath = args[i]
+        elif arg in ('--help', '-h', '--hellp'):
+            print_help()
+            sys.exit(0)
         elif arg.startswith('-'):
             print(f"Error: unknown option '{arg}'", file=sys.stderr)
+            print("Use --help for usage.", file=sys.stderr)
             sys.exit(1)
         else:
             try:
@@ -72,6 +83,33 @@ def parse_args(argv: list[str]) -> tuple[str, str | None, int]:
     return source, filepath, max_width
 
 
+def read_clipboard_text() -> str:
+    """Read clipboard text robustly across Terminal and Keyboard Maestro contexts."""
+    clipboard_commands = [
+        ['/usr/bin/pbpaste'],
+        ['/usr/bin/osascript', '-e', 'return the clipboard as text'],
+    ]
+
+    for command in clipboard_commands:
+        try:
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=3,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            continue
+
+        if result.returncode != 0:
+            continue
+        if result.stdout:
+            return result.stdout
+
+    return ''
+
+
 def get_input_text(source: str, filepath: str | None) -> str:
     """Read input from the specified source."""
     if source == 'stdin':
@@ -80,8 +118,7 @@ def get_input_text(source: str, filepath: str | None) -> str:
         with open(filepath, 'r') as f:
             return f.read()
     else:
-        result = subprocess.run(['pbpaste'], capture_output=True, text=True)
-        return result.stdout
+        return read_clipboard_text()
 
 
 def get_cache_path() -> Path:
@@ -561,13 +598,20 @@ def render_table(headers: list[str], data_rows: list[list[str]],
 
     add_all_seps = separator_after is None or len(separator_after) == 0
 
-    num_cols = len(headers)
-    for r in data_rows:
-        while len(r) < num_cols:
-            r.append('')
-
     headers = [strip_backticks(c) for c in headers]
     data_rows = [[strip_backticks(c) for c in r] for r in data_rows]
+
+    num_cols = max(len(headers), max((len(row) for row in data_rows), default=0))
+    while len(headers) < num_cols:
+        headers.append('')
+
+    normalized_rows = []
+    for row in data_rows:
+        normalized = list(row)
+        while len(normalized) < num_cols:
+            normalized.append('')
+        normalized_rows.append(normalized)
+    data_rows = normalized_rows
 
     all_rows = [headers] + data_rows
     col_widths = compute_col_widths(all_rows, num_cols, max_width)
@@ -576,6 +620,7 @@ def render_table(headers: list[str], data_rows: list[list[str]],
     TL, TC, TR = '┌', '┬', '┐'
     ML, MC, MR = '├', '┼', '┤'
     BL, BC, BR = '└', '┴', '┘'
+    use_bold_headers = sys.stdout.isatty()
 
     def h_line(left, mid, right):
         parts = [left]
@@ -584,7 +629,7 @@ def render_table(headers: list[str], data_rows: list[list[str]],
             parts.append(mid if i < num_cols - 1 else right)
         return ''.join(parts)
 
-    def render_row_cells(cells: list[str]) -> list[str]:
+    def render_row_cells(cells: list[str], *, bold: bool = False) -> list[str]:
         wrapped = []
         for i, cell in enumerate(cells):
             wrapped.append(wrap_cell(cell, col_widths[i]))
@@ -595,14 +640,17 @@ def render_table(headers: list[str], data_rows: list[list[str]],
             for col_idx in range(num_cols):
                 w = wrapped[col_idx]
                 text = w[line_idx] if line_idx < len(w) else ''
-                parts.append(f' {text:<{col_widths[col_idx]}} ')
+                cell_text = f' {text:<{col_widths[col_idx]}} '
+                if bold and use_bold_headers:
+                    cell_text = f'\033[1m{cell_text}\033[0m'
+                parts.append(cell_text)
                 parts.append(V)
             lines.append(''.join(parts))
         return lines
 
     output = []
     output.append(h_line(TL, TC, TR))
-    output.extend(render_row_cells(headers))
+    output.extend(render_row_cells(headers, bold=True))
     output.append(h_line(ML, MC, MR))
 
     for row_idx, row in enumerate(data_rows):

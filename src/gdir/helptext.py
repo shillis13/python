@@ -106,6 +106,10 @@ def get_help_text() -> str:
       {b("Shell function required:")} gdir is a Python program and cannot change
       the parent shell's working directory directly. Run {cmd("gdir init")} to
       install the wrapper automatically, or add it manually to your shell config.
+      The wrapper also reloads saved {dim("GDIR_")} / {dim("GODIR_")} variables when
+      your shell starts, so bookmarks survive new shells and reboots. If Homebrew
+      also provides a {cmd("gdir")}, the wrapper keeps your bookmark tool on
+      {cmd("gdir")} and exposes the other one as {cmd("gnudir")}.
 
       The wrapper uses plain {b("cd")} (not {b("builtin cd")}), so directory
       changers like {b("zoxide")} are respected if they override cd.
@@ -128,10 +132,10 @@ def get_help_text() -> str:
 {section("SETUP & DIAGNOSTICS")}
 
   {cmd("init")}
-      Install the gdir bash wrapper function into your shell config.
+      Install the gdir shell wrapper function into your shell config.
       Checks (in order): {path("~/.bash_functions")}, {path("~/.bashFunctions")},
-      {path("~/.bashrc")}. Prompts for a path if none exist. Updates existing
-      wrapper blocks in place.
+      {path("~/.bashrc")}, {path("~/.zshrc")}, {path("~/.zprofile")}. Prompts
+      for a path if none exist. Updates existing wrapper blocks in place.
 
   {cmd("doctor")}
       Check configuration health: verifies config directory, mappings file,
