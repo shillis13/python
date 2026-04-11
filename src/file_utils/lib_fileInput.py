@@ -4,6 +4,7 @@ import sys
 import re
 import os
 import logging
+import subprocess
 from pathlib import Path
 from typing import List, Tuple, Union
 
@@ -39,6 +40,96 @@ def _normalize_input_path(raw_path: str) -> str:
         pass
 
     return str(path)
+
+
+def read_clipboard_text() -> str:
+    """Read text from the macOS clipboard.
+
+    Uses ``pbpaste`` first and falls back to AppleScript for contexts where
+    shell clipboard access behaves differently. Returns an empty string if no
+    text clipboard content can be read.
+    """
+    clipboard_commands = [
+        ["/usr/bin/pbpaste"],
+        ["/usr/bin/osascript", "-e", "return the clipboard as text"],
+    ]
+
+    for command in clipboard_commands:
+        try:
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=3,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            continue
+
+        if result.returncode == 0:
+            return result.stdout
+
+    return ""
+
+
+def add_text_input_arguments(parser, *, file_flags=("-f", "--file")) -> None:
+    """Add standard text input source arguments to an argparse parser.
+
+    Scripts using this helper can read from a file, stdin, or clipboard/paste.
+    ``-p`` and ``-v`` are both accepted as paste/clipboard shortcuts.
+    """
+    source_group = parser.add_mutually_exclusive_group()
+    source_group.add_argument(
+        *file_flags,
+        dest="input_file",
+        help="Read input text from this file.",
+    )
+    source_group.add_argument(
+        "--stdin",
+        action="store_true",
+        help="Read input text from stdin.",
+    )
+    source_group.add_argument(
+        "-p",
+        "--paste",
+        action="store_true",
+        help="Read input text from the clipboard.",
+    )
+    source_group.add_argument(
+        "-v",
+        "--clipboard",
+        action="store_true",
+        help="Read input text from the clipboard (alias for --paste).",
+    )
+
+
+def get_text_from_input(args, *, encoding: str = "utf-8", default_to_clipboard: bool = False) -> str:
+    """Read text from file, stdin, or clipboard based on parsed args.
+
+    Expected optional attributes on ``args``:
+      - input_file or file: path to read
+      - stdin: force stdin
+      - paste or clipboard: force clipboard
+
+    If no source is explicit and stdin is piped, stdin is used. If no source is
+    explicit and ``default_to_clipboard`` is true, clipboard is used.
+    """
+    input_file = getattr(args, "input_file", None) or getattr(args, "file", None)
+
+    if getattr(args, "paste", False) or getattr(args, "clipboard", False):
+        return read_clipboard_text()
+
+    if input_file:
+        with open(Path(input_file).expanduser(), "r", encoding=encoding) as file_obj:
+            return file_obj.read()
+
+    if getattr(args, "stdin", False) or not sys.stdin.isatty():
+        return sys.stdin.read()
+
+    if default_to_clipboard:
+        return read_clipboard_text()
+
+    return ""
 
 
 def get_file_paths_from_input(args) -> Tuple[List[str], bool]:
