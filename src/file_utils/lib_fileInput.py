@@ -4,6 +4,7 @@ import sys
 import re
 import os
 import logging
+import select
 import subprocess
 from pathlib import Path
 from typing import List, Tuple, Union
@@ -103,6 +104,20 @@ def add_text_input_arguments(parser, *, file_flags=("-f", "--file")) -> None:
     )
 
 
+def _stdin_ready(timeout_seconds: float = 0.05) -> bool:
+    """Return whether stdin appears readable without blocking."""
+    if sys.stdin.isatty():
+        return False
+
+    try:
+        readable, _, _ = select.select([sys.stdin], [], [], timeout_seconds)
+    except (OSError, ValueError):
+        # If readiness probing is unavailable, treat non-TTY stdin as readable.
+        return True
+
+    return bool(readable)
+
+
 def get_text_from_input(args, *, encoding: str = "utf-8", default_to_clipboard: bool = False) -> str:
     """Read text from file, stdin, or clipboard based on parsed args.
 
@@ -111,8 +126,10 @@ def get_text_from_input(args, *, encoding: str = "utf-8", default_to_clipboard: 
       - stdin: force stdin
       - paste or clipboard: force clipboard
 
-    If no source is explicit and stdin is piped, stdin is used. If no source is
-    explicit and ``default_to_clipboard`` is true, clipboard is used.
+    If no source is explicit and stdin has piped data ready, stdin is used even
+    without ``--stdin``. In automation contexts such as Keyboard Maestro, stdin
+    may be non-TTY but empty; when ``default_to_clipboard`` is true, empty
+    implicit stdin falls through to clipboard instead of returning empty text.
     """
     input_file = getattr(args, "input_file", None) or getattr(args, "file", None)
 
@@ -123,8 +140,13 @@ def get_text_from_input(args, *, encoding: str = "utf-8", default_to_clipboard: 
         with open(Path(input_file).expanduser(), "r", encoding=encoding) as file_obj:
             return file_obj.read()
 
-    if getattr(args, "stdin", False) or not sys.stdin.isatty():
+    if getattr(args, "stdin", False):
         return sys.stdin.read()
+
+    if _stdin_ready():
+        stdin_text = sys.stdin.read()
+        if stdin_text or not default_to_clipboard:
+            return stdin_text
 
     if default_to_clipboard:
         return read_clipboard_text()
