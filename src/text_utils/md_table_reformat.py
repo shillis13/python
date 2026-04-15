@@ -168,35 +168,33 @@ def remember_source(rendered_text: str, canonical_source: str) -> None:
 
 
 def parse_markdown_table(text: str) -> tuple[list[str], list[list[str]], set[int]]:
-    """Parse markdown table into headers, data rows, and separator positions.
-
-    Returns (headers, data_rows, separator_after) where:
-        separator_after: set of data row indices (0-based) that had a separator
-                         row AFTER them in the original input. An empty set means
-                         no inter-row separators existed (only the header separator).
-    """
-    lines = [line.strip() for line in text.strip().splitlines() if line.strip()]
+    """Parse markdown table into headers, data rows, and separator positions."""
+    lines = [line.rstrip() for line in text.splitlines() if line.strip()]
 
     all_rows = []
     separator_after: set[int] = set()
     header_sep_seen = False
-    data_row_index = -1  # -1 = still in header, 0+ = data rows
+    data_row_index = -1
 
     for line in lines:
-        is_sep = bool(re.match(r'^\|[\s\-:]+(\|[\s\-:]*)+\|?$', line))
+        # Regex to detect markdown table separator row: | --- | --- |
+        is_sep = bool(re.match(r'^\|?\s*[:\-]+\s*(\|?\s*[:\-]+\s*)*\|?$', line))
         if is_sep:
             if not header_sep_seen:
                 header_sep_seen = True
             else:
-                # Separator between data rows — record position
                 if data_row_index >= 0:
                     separator_after.add(data_row_index)
             continue
+        
+        # Split by | but allow escaped | if needed (though simple split usually suffices for markdown)
         cells = [c.strip() for c in line.split('|')]
+        # Clean up leading/trailing empty strings from | at start/end
         if cells and cells[0] == '':
             cells = cells[1:]
         if cells and cells[-1] == '':
             cells = cells[:-1]
+        
         if cells:
             all_rows.append(cells)
             if header_sep_seen:
@@ -626,7 +624,7 @@ def render_table(headers: list[str], data_rows: list[list[str]],
     TL, TC, TR = '┌', '┬', '┐'
     ML, MC, MR = '├', '┼', '┤'
     BL, BC, BR = '└', '┴', '┘'
-    use_bold_headers = sys.stdout.isatty()
+    use_bold_headers = True
 
     def h_line(left, mid, right):
         parts = [left]
@@ -648,6 +646,7 @@ def render_table(headers: list[str], data_rows: list[list[str]],
                 text = w[line_idx] if line_idx < len(w) else ''
                 cell_text = f' {text:<{col_widths[col_idx]}} '
                 if bold and use_bold_headers:
+                    # ANSI bold escape codes
                     cell_text = f'\033[1m{cell_text}\033[0m'
                 parts.append(cell_text)
                 parts.append(V)
