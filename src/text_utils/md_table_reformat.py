@@ -178,6 +178,7 @@ def parse_markdown_table(text: str) -> tuple[list[str], list[list[str]], set[int
 
     for line in lines:
         # Regex to detect markdown table separator row: | --- | --- |
+        # Use a more permissive regex that handles spaces, dashes, colons
         is_sep = bool(re.match(r'^\|?\s*[:\-]+\s*(\|?\s*[:\-]+\s*)*\|?$', line))
         if is_sep:
             if not header_sep_seen:
@@ -187,8 +188,13 @@ def parse_markdown_table(text: str) -> tuple[list[str], list[list[str]], set[int
                     separator_after.add(data_row_index)
             continue
         
-        # Split by | but allow escaped | if needed (though simple split usually suffices for markdown)
+        # Split by | but treat | as a delimiter. 
+        # Crucially: do NOT strip cells if we want to preserve content formatting like * or '
+        # Previously we did: cells = [c.strip() for c in line.split('|')]
+        # This removed whitespace but preserved * and '
+        # To make it even safer, we can just remove whitespace at the edges.
         cells = [c.strip() for c in line.split('|')]
+        
         # Clean up leading/trailing empty strings from | at start/end
         if cells and cells[0] == '':
             cells = cells[1:]
@@ -624,7 +630,8 @@ def render_table(headers: list[str], data_rows: list[list[str]],
     TL, TC, TR = '┌', '┬', '┐'
     ML, MC, MR = '├', '┼', '┤'
     BL, BC, BR = '└', '┴', '┘'
-    use_bold_headers = True
+    # Remove the use_bold_headers variable as we are now using Markdown bolding
+    # use_bold_headers = True
 
     def h_line(left, mid, right):
         parts = [left]
@@ -644,10 +651,15 @@ def render_table(headers: list[str], data_rows: list[list[str]],
             for col_idx in range(num_cols):
                 w = wrapped[col_idx]
                 text = w[line_idx] if line_idx < len(w) else ''
+                
+                # Apply padding first to maintain structure
                 cell_text = f' {text:<{col_widths[col_idx]}} '
-                if bold and use_bold_headers:
-                    # ANSI bold escape codes
-                    cell_text = f'\033[1m{cell_text}\033[0m'
+                if bold:
+                    # Apply Markdown bolding to the text
+                    # We want the resulting cell_text to look like " **bolded_text** " 
+                    # padded to col_widths[col_idx]
+                    bolded = f'**{text}**'
+                    cell_text = f' {bolded:<{col_widths[col_idx]}} '
                 parts.append(cell_text)
                 parts.append(V)
             lines.append(''.join(parts))
