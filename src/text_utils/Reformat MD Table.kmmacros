@@ -45,7 +45,8 @@
 						<key>Shell</key>
 						<string>/bin/zsh</string>
 						<key>Text</key>
-						<string>TABLE_MAX_WIDTH=$KMVAR_TableWidth pbpaste | python3 ~/bin/python/src/text_utils/md_table_reformat.py | pbcopy</string>
+						<string>export TABLE_MAX_WIDTH=$KMVAR_TableWidth
+/usr/bin/pbpaste | python3 ~/bin/python/src/text_utils/md_table_reformat.py | /usr/bin/pbcopy</string>
 					</dict>
 					<!-- Action 3: Paste from Clipboard -->
 					<dict>

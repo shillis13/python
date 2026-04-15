@@ -85,27 +85,33 @@ def parse_args(argv: list[str]) -> tuple[str, str | None, int]:
 
 def read_clipboard_text() -> str:
     """Read clipboard text robustly across Terminal and Keyboard Maestro contexts."""
-    clipboard_commands = [
-        ['/usr/bin/pbpaste'],
-        ['/usr/bin/osascript', '-e', 'return the clipboard as text'],
-    ]
-
-    for command in clipboard_commands:
-        try:
-            result = subprocess.run(
-                command,
-                capture_output=True,
-                text=True,
-                timeout=3,
-                check=False,
-            )
-        except (OSError, subprocess.SubprocessError):
-            continue
-
-        if result.returncode != 0:
-            continue
-        if result.stdout:
+    # Using explicit path for pbpaste as a primary attempt
+    try:
+        result = subprocess.run(
+            ['/usr/bin/pbpaste'],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        if result.returncode == 0 and result.stdout:
             return result.stdout
+    except Exception as e:
+        pass
+
+    # Fallback to osascript
+    try:
+        result = subprocess.run(
+            ['/usr/bin/osascript', '-e', 'get the clipboard as text'],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        if result.returncode == 0 and result.stdout:
+            return result.stdout
+    except Exception as e:
+        pass
 
     return ''
 
@@ -664,12 +670,23 @@ def render_table(headers: list[str], data_rows: list[list[str]],
 
 
 def main():
+    # If KM provides width, it comes as env var TABLE_MAX_WIDTH, or as arg
+    import os
+    km_width = os.environ.get('TABLE_MAX_WIDTH')
+    
     source, filepath, max_width = parse_args(sys.argv)
+    
+    if km_width:
+        try:
+            max_width = int(km_width)
+        except ValueError:
+            pass
     
     text = get_input_text(source, filepath)
     if not text.strip():
         sys.exit(0)
 
+    # ... (rest of main)
     canonical_text = lookup_cached_source(text)
     if canonical_text is None:
         canonical_text = text
