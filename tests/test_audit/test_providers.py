@@ -1,6 +1,48 @@
 """Tests for audit forensics providers."""
+import os
 from pathlib import Path
 import json as json_mod
+
+
+def test_stat_provider_existing_file(tmp_path):
+    import sys; sys.path.insert(0, str(Path.home() / "bin" / "ai"))
+    from audit.providers.stat_provider import provide
+    f = tmp_path / "test.txt"
+    f.write_text("hello")
+    events = provide(str(f), since=None, until=None)
+    assert len(events) == 1
+    assert events[0]["source"] == "stat"
+    assert events[0]["action"] == "current_state"
+    assert events[0]["details"]["exists"] is True
+    assert events[0]["details"]["size"] > 0
+
+
+def test_stat_provider_missing_file():
+    import sys; sys.path.insert(0, str(Path.home() / "bin" / "ai"))
+    from audit.providers.stat_provider import provide
+    events = provide("/nonexistent/file/path.txt", since=None, until=None)
+    assert len(events) == 0
+
+
+def test_git_provider_tracked_file():
+    import sys; sys.path.insert(0, str(Path.home() / "bin" / "ai"))
+    from audit.providers.git_provider import provide
+    f = str(Path.home() / "bin" / "ai" / "audit" / "lib_audit.py")
+    events = provide(f, since=None, until=None)
+    assert len(events) > 0
+    assert all(e["source"] == "git" for e in events)
+    assert any(e["action"] in ("created", "modified") for e in events)
+    assert all("commit" in e["details"] for e in events)
+
+
+def test_git_provider_untracked_file(tmp_path):
+    import sys; sys.path.insert(0, str(Path.home() / "bin" / "ai"))
+    from audit.providers.git_provider import provide
+    f = tmp_path / "not_in_git.txt"
+    f.write_text("hello")
+    events = provide(str(f), since=None, until=None)
+    if events:
+        assert events[0]["action"] == "provider_error" or len(events) == 0
 
 
 def test_tools_audit_provider_finds_by_file(tmp_path):
@@ -51,3 +93,15 @@ def test_access_log_provider(tmp_path):
     assert events[0]["source"] == "access_log"
     assert events[0]["action"] == "write"
     assert events[0]["ts"] == "2026-04-12T05:06:45Z"
+
+
+def test_timemachine_provider_returns_events_or_error():
+    """TM provider should return events or a provider_error, never crash."""
+    import sys; sys.path.insert(0, str(Path.home() / "bin" / "ai"))
+    from audit.providers.timemachine_provider import provide
+    events = provide(str(Path.home() / ".zshrc"), since=None, until=None)
+    assert isinstance(events, list)
+    assert len(events) > 0
+    for e in events:
+        assert e["source"] == "timemachine"
+        assert e["action"] in ("present", "size_changed", "deletion_detected", "provider_error")
