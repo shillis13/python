@@ -376,6 +376,20 @@ def cell_natural_width(text: str) -> int:
     lines = expand_cell_newlines(text)
     return max(len(line) for line in lines) if lines else 0
 
+def compute_natural_widths(all_rows: list[list[str]], num_cols: int) -> list[int]:
+    natural = []
+    for col_idx in range(num_cols):
+        max_w = 0
+        for row_idx, row in enumerate(all_rows):
+            if col_idx < len(row):
+                text_len = cell_natural_width(row[col_idx])
+                # Add 4 chars for bolding if it's the header row (index 0)
+                if row_idx == 0:
+                    text_len += 4
+                max_w = max(max_w, text_len)
+        natural.append(max(max_w, 1))
+    return natural
+
 
 def wrap_cell(text: str, width: int) -> list[str]:
     """Wrap cell text to fit within width, respecting embedded newlines."""
@@ -704,14 +718,14 @@ def render_table(headers: list[str], data_rows: list[list[str]],
                 w = wrapped[col_idx]
                 text = w[line_idx] if line_idx < len(w) else ''
                 
-                # Apply padding first to maintain structure
-                cell_text = f' {text:<{col_widths[col_idx]}} '
                 if bold:
                     # Apply Markdown bolding to the text
-                    # We want the resulting cell_text to look like " **bolded_text** " 
-                    # padded to col_widths[col_idx]
+                    # Header cell text length is calculated WITH bold markers
                     bolded = f'**{text}**'
-                    cell_text = f' {bolded:<{col_widths[col_idx] + 4}} '
+                    cell_text = f' {bolded:<{col_widths[col_idx]}} '
+                else:
+                    cell_text = f' {text:<{col_widths[col_idx]}} '
+                
                 parts.append(cell_text)
                 parts.append(V)
             lines.append(''.join(parts))
