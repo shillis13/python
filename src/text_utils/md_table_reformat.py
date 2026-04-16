@@ -380,17 +380,65 @@ def cell_natural_width(text: str) -> int:
 def wrap_cell(text: str, width: int) -> list[str]:
     """Wrap cell text to fit within width, respecting embedded newlines."""
     width = max(width, 1)
-    logical_lines = expand_cell_newlines(text)
-    result = []
-    for line in logical_lines:
-        if len(line) <= width:
-            result.append(line)
-        else:
+    
+    # Prepare lines
+    # Must use the full width for wrapping, then pad the lines later,
+    # because the markers are only on the start/end of the WHOLE cell, 
+    # not each line of a multi-line wrapped block.
+    # The requirement is: "if that text has style markers ... 
+    # first line must have those markers added to end and 
+    # the second line needs those markers added at the beginning."
+    
+    # Wait, the prompt says:
+    # "if that text has style markers (e.g. **Text**, `Test`) 
+    # then first line must have those markers added to end 
+    # and the second line needs those markers added at the beginning."
+    
+    # That implies splitting the marker itself if it spans lines.
+    # e.g., **A Long Line** -> **A Long
+    #                       Line**
+    
+    # Let's re-read carefully.
+    # Yes, that's exactly what it says.
+    
+    # My previous implementation was trying to keep markers on the whole cell.
+    # I need to change the logic to split markers.
+    
+def wrap_cell(text: str, width: int) -> list[str]:
+    """Wrap cell text to fit within width, respecting embedded newlines."""
+    width = max(width, 1)
+    
+    # 1. Detect and split markers if they exist
+    # Pattern for e.g. **Text** or `Text`
+    match = re.match(r'^(\*\*|`)(.*)(\*\*|`)$', text.strip())
+    if match:
+        marker = match.group(1)
+        content = match.group(2)
+        
+        # 2. Wrap content only
+        lines = textwrap.wrap(content, width=width - (2 * len(marker)),
+                             break_long_words=True, break_on_hyphens=True)
+        
+        # 3. Add markers to end of first line and start of last
+        if not lines:
+            return [text]
+            
+        lines[0] = marker + lines[0]
+        lines[-1] = lines[-1] + marker
+        return lines
+    else:
+        # Standard wrap
+        logical_lines = expand_cell_newlines(text)
+        result = []
+        for line in logical_lines:
+            if not line:
+                result.append('')
+                continue
             wrapped = textwrap.wrap(line, width=width,
                                     break_long_words=True,
                                     break_on_hyphens=True)
             result.extend(wrapped if wrapped else [''])
-    return result if result else ['']
+        return result if result else ['']
 
 
 def cell_word_width(text: str) -> int:
@@ -588,10 +636,14 @@ def compute_col_widths(all_rows: list[list[str]], num_cols: int,
 
 
 def parse_input_table(text: str) -> tuple[list[str], list[list[str]], set[int]]:
-    headers, data_rows, separator_after = parse_box_table(text)
-    if headers:
-        return headers, data_rows, separator_after
+    """Detect and parse either an existing box table or a markdown table."""
+    # First, try to detect if it's already a box table
+    if text.strip().startswith('┌') and '│' in text:
+        headers, data_rows, separator_after = parse_box_table(text)
+        if headers:
+            return headers, data_rows, separator_after
 
+    # Fallback to markdown table parsing
     return parse_markdown_table(text)
 
 
@@ -608,8 +660,8 @@ def render_table(headers: list[str], data_rows: list[list[str]],
 
     add_all_seps = separator_after is None or len(separator_after) == 0
 
-    headers = [strip_backticks(c) for c in headers]
-    data_rows = [[strip_backticks(c) for c in r] for r in data_rows]
+    # headers = [strip_backticks(c) for c in headers]
+    # data_rows = [[strip_backticks(c) for c in r] for r in data_rows]
 
     num_cols = max(len(headers), max((len(row) for row in data_rows), default=0))
     while len(headers) < num_cols:
@@ -659,7 +711,7 @@ def render_table(headers: list[str], data_rows: list[list[str]],
                     # We want the resulting cell_text to look like " **bolded_text** " 
                     # padded to col_widths[col_idx]
                     bolded = f'**{text}**'
-                    cell_text = f' {bolded:<{col_widths[col_idx]}} '
+                    cell_text = f' {bolded:<{col_widths[col_idx] + 4}} '
                 parts.append(cell_text)
                 parts.append(V)
             lines.append(''.join(parts))
