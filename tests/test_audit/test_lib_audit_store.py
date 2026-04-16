@@ -70,6 +70,26 @@ def test_append_event_creates_file_and_writes_jsonl(tmp_path):
     assert json.loads(lines[0])["action"] == "session_write"
 
 
+def test_query_by_target_file(tmp_path):
+    from audit.lib_audit_store import AuditStore
+    store = AuditStore(base_dir=tmp_path / "tools")
+    store.append({
+        "ts": "2026-04-15T01:00:00Z", "category": "tools", "action": "Edit",
+        "actor": {}, "caller": {"pid": 1, "ppid": 0, "process": "p"},
+        "target": {"tool": "Edit", "file": "/path/to/a.py", "session": "s1"},
+        "details": {"input_length": 10, "success": True}, "v": 1
+    })
+    store.append({
+        "ts": "2026-04-15T01:01:00Z", "category": "tools", "action": "Edit",
+        "actor": {}, "caller": {"pid": 2, "ppid": 0, "process": "p"},
+        "target": {"tool": "Edit", "file": "/path/to/b.py", "session": "s1"},
+        "details": {"input_length": 20, "success": True}, "v": 1
+    })
+    results = store.query(target_file="/path/to/a.py")
+    assert len(results) == 1
+    assert results[0]["target"]["file"] == "/path/to/a.py"
+
+
 def test_read_line_roundtrip(tmp_path):
     from audit.lib_audit_store import AuditStore
     store = AuditStore(base_dir=tmp_path / "comms")
