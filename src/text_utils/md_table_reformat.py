@@ -555,9 +555,13 @@ def compute_natural_widths(all_rows: list[list[str]], num_cols: int) -> list[int
     natural = []
     for col_idx in range(num_cols):
         max_w = 0
-        for row in all_rows:
+        for row_idx, row in enumerate(all_rows):
             if col_idx < len(row):
-                max_w = max(max_w, cell_natural_width(row[col_idx]))
+                text_len = cell_natural_width(row[col_idx])
+                # Add 4 chars for bolding if it's the header row (index 0)
+                if row_idx == 0:
+                    text_len += 4
+                max_w = max(max_w, text_len)
         natural.append(max(max_w, 1))
     return natural
 
@@ -720,7 +724,7 @@ def render_table(headers: list[str], data_rows: list[list[str]],
                 
                 if bold:
                     # Apply Markdown bolding to the text
-                    # Header cell text length is calculated WITH bold markers
+                    # cell_text padding now uses col_widths[col_idx] directly because the 4 chars are already in the natural width
                     bolded = f'**{text}**'
                     cell_text = f' {bolded:<{col_widths[col_idx]}} '
                 else:
