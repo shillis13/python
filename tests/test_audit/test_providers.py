@@ -105,3 +105,16 @@ def test_timemachine_provider_returns_events_or_error():
     for e in events:
         assert e["source"] == "timemachine"
         assert e["action"] in ("present", "size_changed", "deletion_detected", "provider_error")
+
+
+def test_git_provide_trace_tracked_file():
+    import sys; sys.path.insert(0, str(Path.home() / "bin" / "ai"))
+    from audit.providers.git_provider import provide_trace
+    f = str(Path.home() / "bin" / "ai" / "audit" / "lib_audit.py")
+    events = provide_trace(f, since=None, until=None)
+    assert len(events) > 0
+    assert all(e["source"] == "git" for e in events)
+    # Should have valid actions
+    valid_actions = {"created", "modified", "renamed", "deleted"}
+    for e in events:
+        assert e["action"] in valid_actions
