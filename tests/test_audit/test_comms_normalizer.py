@@ -5,7 +5,7 @@ sys.path.insert(0, str(Path.home() / "bin" / "ai"))
 
 
 def test_matched_dispatch_and_write():
-    from audit.comms_normalizer import normalize_comms
+    from audit.lib_comms_normalizer import normalize_comms
     events = [
         {"ts": "2026-04-12T18:40:00.000Z", "action": "prompt_dispatch",
          "actor": {"tracking_id": "sender", "label": "prompting:send_prompt"},
@@ -23,7 +23,7 @@ def test_matched_dispatch_and_write():
 
 
 def test_unmatched_write():
-    from audit.comms_normalizer import normalize_comms
+    from audit.lib_comms_normalizer import normalize_comms
     events = [
         {"ts": "2026-04-12T18:41:36.000Z", "action": "session_write",
          "actor": {"tracking_id": None}, "caller": {"pid": 999, "ppid": 998},
@@ -36,7 +36,7 @@ def test_unmatched_write():
 
 
 def test_zero_length_excluded():
-    from audit.comms_normalizer import normalize_comms
+    from audit.lib_comms_normalizer import normalize_comms
     events = [
         {"ts": "2026-04-12T18:40:01.000Z", "action": "session_write",
          "actor": {}, "caller": {"pid": 100, "ppid": 50},
@@ -48,7 +48,7 @@ def test_zero_length_excluded():
 
 
 def test_multiple_writes_per_dispatch():
-    from audit.comms_normalizer import normalize_comms
+    from audit.lib_comms_normalizer import normalize_comms
     events = [
         {"ts": "2026-04-12T18:40:00.000Z", "action": "prompt_dispatch",
          "actor": {"tracking_id": "sender", "label": "prompting:send_prompt"},
@@ -68,7 +68,7 @@ def test_multiple_writes_per_dispatch():
 
 
 def test_ppid_matching():
-    from audit.comms_normalizer import normalize_comms
+    from audit.lib_comms_normalizer import normalize_comms
     events = [
         {"ts": "2026-04-12T18:40:00.000Z", "action": "prompt_dispatch",
          "actor": {"tracking_id": "sender", "label": "prompting:send_prompt"},
@@ -84,7 +84,7 @@ def test_ppid_matching():
 
 
 def test_perspective_sets_direction():
-    from audit.comms_normalizer import normalize_comms
+    from audit.lib_comms_normalizer import normalize_comms
     perspective = {"tracking_id": "sender", "terminal_session": "sender", "cli_session_id": "uuid"}
     events = [
         {"ts": "2026-04-12T18:40:00.000Z", "action": "prompt_dispatch",
@@ -102,14 +102,14 @@ def test_perspective_sets_direction():
 
 
 def test_classify_sender_uci():
-    from audit.comms_normalizer import classify_sender
+    from audit.lib_comms_normalizer import classify_sender
     event = {"actor": {"tracking_id": None, "label": None},
              "caller": {"pid": 123, "process": "session_ops.py"}}
     assert classify_sender(event) == "UCI PromptBox"
 
 
 def test_classify_sender_unknown():
-    from audit.comms_normalizer import classify_sender
+    from audit.lib_comms_normalizer import classify_sender
     event = {"actor": {"tracking_id": None, "label": None},
              "caller": {"pid": 123, "process": "unknown"}}
     assert classify_sender(event) == "unknown"
