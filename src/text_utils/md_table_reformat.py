@@ -29,7 +29,6 @@ import json
 import hashlib
 import tempfile
 import subprocess
-import textwrap
 from pathlib import Path
 
 
@@ -376,6 +375,36 @@ def cell_natural_width(text: str) -> int:
     lines = expand_cell_newlines(text)
     return max(len(line) for line in lines) if lines else 0
 
+
+BOLD_MARKER_WIDTH = 4
+LONG_WORD_SPLIT_THRESHOLD = 15
+
+
+def is_bold_cell(text: str) -> bool:
+    stripped = text.strip()
+    return (
+        len(stripped) >= BOLD_MARKER_WIDTH
+        and stripped.startswith('**')
+        and stripped.endswith('**')
+    )
+
+
+def bold_cell_width(text: str) -> int:
+    if is_bold_cell(text):
+        return cell_natural_width(text)
+    return cell_natural_width(text) + BOLD_MARKER_WIDTH
+
+
+def bold_content_width(width: int) -> int:
+    return max(width - BOLD_MARKER_WIDTH, 1)
+
+
+def header_content_width(text: str, width: int) -> int:
+    if is_bold_cell(text):
+        return width
+    return bold_content_width(width)
+
+
 def compute_natural_widths(all_rows: list[list[str]], num_cols: int) -> list[int]:
     natural = []
     for col_idx in range(num_cols):
@@ -383,76 +412,108 @@ def compute_natural_widths(all_rows: list[list[str]], num_cols: int) -> list[int
         for row_idx, row in enumerate(all_rows):
             if col_idx < len(row):
                 text_len = cell_natural_width(row[col_idx])
-                # Add 4 chars for bolding if it's the header row (index 0)
                 if row_idx == 0:
-                    text_len += 4
+                    text_len = bold_cell_width(row[col_idx])
                 max_w = max(max_w, text_len)
         natural.append(max(max_w, 1))
     return natural
 
 
+def preferred_token_split(token: str, width: int) -> int:
+    """Choose a split point, preferring punctuation/symbol boundaries."""
+    split_limit = min(max(width, 1), len(token) - 1)
+
+    for idx in range(split_limit, 0, -1):
+        if not token[idx - 1].isalpha():
+            return idx
+
+    for idx in range(split_limit, 0, -1):
+        if idx < len(token) and not token[idx].isalpha():
+            return idx
+
+    return split_limit
+
+
+def split_long_token(token: str, width: int) -> list[str]:
+    """Split only long tokens, preferring non-alpha breakpoints."""
+    parts = []
+    remaining = token
+    width = max(width, 1)
+
+    while len(remaining) > width:
+        split_at = preferred_token_split(remaining, width)
+        parts.append(remaining[:split_at])
+        remaining = remaining[split_at:]
+
+    if remaining:
+        parts.append(remaining)
+
+    return parts if parts else ['']
+
+
+def wrap_plain_line(line: str, width: int) -> list[str]:
+    """Wrap without splitting short words."""
+    width = max(width, 1)
+    tokens = re.findall(r'\S+', line)
+    if not tokens:
+        return ['']
+
+    wrapped = []
+    current = ''
+
+    for token in tokens:
+        should_split = (
+            len(token) > LONG_WORD_SPLIT_THRESHOLD
+            and len(token) > width
+        )
+
+        if should_split:
+            if current:
+                wrapped.append(current)
+                current = ''
+            pieces = split_long_token(token, width)
+            wrapped.extend(pieces[:-1])
+            current = pieces[-1]
+            continue
+
+        if not current:
+            current = token
+        elif len(current) + 1 + len(token) <= width:
+            current = f'{current} {token}'
+        else:
+            wrapped.append(current)
+            current = token
+
+    if current:
+        wrapped.append(current)
+
+    return wrapped if wrapped else ['']
+
+
 def wrap_cell(text: str, width: int) -> list[str]:
     """Wrap cell text to fit within width, respecting embedded newlines."""
     width = max(width, 1)
     
-    # Prepare lines
-    # Must use the full width for wrapping, then pad the lines later,
-    # because the markers are only on the start/end of the WHOLE cell, 
-    # not each line of a multi-line wrapped block.
-    # The requirement is: "if that text has style markers ... 
-    # first line must have those markers added to end and 
-    # the second line needs those markers added at the beginning."
-    
-    # Wait, the prompt says:
-    # "if that text has style markers (e.g. **Text**, `Test`) 
-    # then first line must have those markers added to end 
-    # and the second line needs those markers added at the beginning."
-    
-    # That implies splitting the marker itself if it spans lines.
-    # e.g., **A Long Line** -> **A Long
-    #                       Line**
-    
-    # Let's re-read carefully.
-    # Yes, that's exactly what it says.
-    
-    # My previous implementation was trying to keep markers on the whole cell.
-    # I need to change the logic to split markers.
-    
-def wrap_cell(text: str, width: int) -> list[str]:
-    """Wrap cell text to fit within width, respecting embedded newlines."""
-    width = max(width, 1)
-    
-    # 1. Detect and split markers if they exist
-    # Pattern for e.g. **Text** or `Text`
     match = re.match(r'^(\*\*|`)(.*)(\*\*|`)$', text.strip())
     if match:
         marker = match.group(1)
         content = match.group(2)
-        
-        # 2. Wrap content only
-        lines = textwrap.wrap(content, width=width - (2 * len(marker)),
-                             break_long_words=True, break_on_hyphens=True)
-        
-        # 3. Add markers to end of first line and start of last
+        content_width = max(width - (2 * len(marker)), 1)
+        lines = []
+        for line in expand_cell_newlines(content):
+            lines.extend(wrap_plain_line(line, content_width))
+
         if not lines:
             return [text]
-            
+
         lines[0] = marker + lines[0]
         lines[-1] = lines[-1] + marker
         return lines
-    else:
-        # Standard wrap
-        logical_lines = expand_cell_newlines(text)
-        result = []
-        for line in logical_lines:
-            if not line:
-                result.append('')
-                continue
-            wrapped = textwrap.wrap(line, width=width,
-                                    break_long_words=True,
-                                    break_on_hyphens=True)
-            result.extend(wrapped if wrapped else [''])
-        return result if result else ['']
+
+    result = []
+    for line in expand_cell_newlines(text):
+        result.extend(wrap_plain_line(line, width))
+    return result if result else ['']
 
 
 def cell_word_width(text: str) -> int:
@@ -466,7 +527,7 @@ def cell_word_width(text: str) -> int:
         if not tokens:
             continue
         max_token = max(max_token, max(len(token) for token in tokens))
-    return min(max_token, 12)
+    return min(max_token, LONG_WORD_SPLIT_THRESHOLD)
 
 
 def percentile_width(values: list[int], percentile: float) -> int:
@@ -501,11 +562,12 @@ def compute_column_preferences(all_rows: list[list[str]], num_cols: int,
         data_cells = cells[1:] if len(cells) > 1 else []
         non_empty_data = [cell for cell in data_cells if cell.strip()]
 
-        header_width = cell_natural_width(header)
+        header_content_width = cell_natural_width(header)
+        header_width = bold_cell_width(header)
         data_widths = [cell_natural_width(cell) for cell in non_empty_data]
         avg_width = (
             sum(data_widths) / len(data_widths)
-            if data_widths else header_width
+            if data_widths else header_content_width
         )
         max_word = max((cell_word_width(cell) for cell in cells), default=1)
         p80_width = percentile_width(data_widths, 0.80) if data_widths else header_width
@@ -524,25 +586,25 @@ def compute_column_preferences(all_rows: list[list[str]], num_cols: int,
         )
 
         protected_identifier_col = (
-            header_width <= 24
+            header_content_width <= 24
             and avg_width <= 20
             and single_token_ratio >= 0.60
         )
         compact_categorical_col = (
-            header_width <= 18
+            header_content_width <= 18
             and avg_width <= 16
             and p80_width <= 16
             and natural[col_idx] <= 20
         )
 
         if protected_identifier_col:
-            floor = max(header_width, p80_width, min(max_word, 12))
+            floor = max(header_width, p80_width, max_word)
             priority = 2
         elif compact_categorical_col:
-            floor = max(header_width, p80_width, min(max_word, 8))
+            floor = max(header_width, p80_width, max_word)
             priority = 1
         else:
-            floor = max(header_width, min(max_word, 8))
+            floor = max(header_width, max_word)
             priority = 0
 
         preferred_floors.append(min(max(floor, 1), natural[col_idx]))
@@ -558,9 +620,8 @@ def compute_natural_widths(all_rows: list[list[str]], num_cols: int) -> list[int
         for row_idx, row in enumerate(all_rows):
             if col_idx < len(row):
                 text_len = cell_natural_width(row[col_idx])
-                # Add 4 chars for bolding if it's the header row (index 0)
                 if row_idx == 0:
-                    text_len += 4
+                    text_len = bold_cell_width(row[col_idx])
                 max_w = max(max_w, text_len)
         natural.append(max(max_w, 1))
     return natural
@@ -568,10 +629,13 @@ def compute_natural_widths(all_rows: list[list[str]], num_cols: int) -> list[int
 
 def estimate_table_height(all_rows: list[list[str]], widths: list[int]) -> int:
     total = 0
-    for row in all_rows:
+    for row_idx, row in enumerate(all_rows):
         row_height = 1
         for col_idx, cell in enumerate(row):
-            row_height = max(row_height, len(wrap_cell(cell, widths[col_idx])))
+            wrap_width = widths[col_idx]
+            if row_idx == 0:
+                wrap_width = header_content_width(cell, wrap_width)
+            row_height = max(row_height, len(wrap_cell(cell, wrap_width)))
         total += row_height
     return total
 
@@ -713,7 +777,11 @@ def render_table(headers: list[str], data_rows: list[list[str]],
     def render_row_cells(cells: list[str], *, bold: bool = False) -> list[str]:
         wrapped = []
         for i, cell in enumerate(cells):
-            wrapped.append(wrap_cell(cell, col_widths[i]))
+            wrap_width = (
+                header_content_width(cell, col_widths[i])
+                if bold else col_widths[i]
+            )
+            wrapped.append(wrap_cell(cell, wrap_width))
         max_lines = max(len(w) for w in wrapped)
         lines = []
         for line_idx in range(max_lines):
@@ -723,9 +791,10 @@ def render_table(headers: list[str], data_rows: list[list[str]],
                 text = w[line_idx] if line_idx < len(w) else ''
                 
                 if bold:
-                    # Apply Markdown bolding to the text
-                    # cell_text padding now uses col_widths[col_idx] directly because the 4 chars are already in the natural width
-                    bolded = f'**{text}**'
+                    if is_bold_cell(cells[col_idx]):
+                        bolded = text
+                    else:
+                        bolded = f'**{text}**'
                     cell_text = f' {bolded:<{col_widths[col_idx]}} '
                 else:
                     cell_text = f' {text:<{col_widths[col_idx]}} '
