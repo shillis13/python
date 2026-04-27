@@ -1,0 +1,3 @@
+# gdir Variant
+
+This implementation stores all state in a single JSON file under `~/.config/gdir/state.json`. The CLI follows a subcommand layout (`gdir add`, `gdir go`, etc.) so each action maps cleanly to one code path. History is persisted alongside the saved entries and the cursor survives across processes, enabling `back`/`fwd` to behave like a browser. Navigation commands emit only absolute paths, while `env` reports minimal `export PREV=...` and `export NEXT=...` lines for shell integration. `clear` defaults to an interactive safeguard but also accepts `--yes` for scripts. The `hist` view centers on the current cursor with configurable before/after windows.
