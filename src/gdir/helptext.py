@@ -71,6 +71,12 @@ def get_help_text() -> str:
 
 {section("HISTORY COMMANDS")}
 
+  {cmd("record")} {dim("[dir]")}
+      Record a directory visit in gdir history without navigating. If {dim("dir")}
+      is omitted, records the current working directory. Used by the shell
+      wrapper after zoxide resolves a fuzzy match, so all cd destinations
+      appear in gdir history regardless of how they were resolved.
+
   {cmd("hist")} {dim("[start] [num]")}
       Show navigation history. Without arguments, shows ±5 entries around the
       current position. The current position is marked with {b(">>")}.
@@ -143,9 +149,12 @@ def get_help_text() -> str:
       directories).
 
 {section("SHORTCUTS")}
-  gdir {cmd("-")}                     Alias for {cmd("gdir back")}
-  gdir {cmd("+")}                     Alias for {cmd("gdir fwd")}
+  gdir {cmd("-")}                     Go back one step (alias for {cmd("gdir back")})
+  gdir {cmd("+")}                     Go forward one step (alias for {cmd("gdir fwd")})
+  gdir {cmd("-N")}                    Go back N steps (e.g. {cmd("gdir -3")})
+  gdir {cmd("+N")}                    Go forward N steps (e.g. {cmd("gdir +2")})
   gdir {cmd("#N")}                    Navigate to history entry N
+  gdir                       Go home (~)
   gdir {arg("<name>")}                Implicit {cmd("gdir go")} {arg("<name>")} (any non-command argument)
 
 {section("SELECTORS")}

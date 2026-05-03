@@ -59,7 +59,10 @@ def test_history_roundtrip(tmp_path: Path) -> None:
     loaded = History.load(tmp_path)
     assert loaded.current() is not None
     assert loaded.back(1) is None
-    loaded.visit(target)
+    # Visit a different path, then back should return to target
+    other = tmp_path / "other"
+    other.mkdir()
+    loaded.visit(other)
     entry = loaded.back()
     assert entry is not None
     assert loaded.forward() is not None

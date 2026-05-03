@@ -921,7 +921,12 @@ def add_args(parser: argparse.ArgumentParser) -> None:
 
     # Git ignore support
     parser.add_argument(
-        "--git-ignore", "-g", action="store_true", help="Use .gitignore files"
+        "--git-ignore", "-g", action="store_true", default=True,
+        help="Use .gitignore files (default: on)",
+    )
+    parser.add_argument(
+        "--no-git-ignore", "-ng", dest="git_ignore", action="store_false",
+        help="Disable .gitignore filtering",
     )
     parser.add_argument("--ignore-file", help="Custom ignore file to use")
 

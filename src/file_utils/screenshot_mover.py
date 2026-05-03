@@ -164,50 +164,51 @@ def copy_to_clipboard(text: str) -> None:
     subprocess.run(["pbcopy"], input=text.encode(), check=True)
 
 
-def send_notification(original: str, new_path: Path) -> None:
-    """Send alerter notification; handle button clicks."""
-    if not ALERTER.exists():
-        subprocess.run([
-            "osascript", "-e",
-            f'display notification "{Path(original).name} -> {new_path.name}" '
-            f'with title "File Moved"',
-        ])
-        return
+TERMINAL_NOTIFIER = "/opt/homebrew/bin/terminal-notifier"
 
-    # Run alerter in a detached subprocess so the main script exits
-    # immediately — KM won't block waiting for notification interaction.
+
+def send_notification(original: str, new_path: Path) -> None:
+    """Send notification for moved file. Click reveals in Finder."""
     orig_name = Path(original).name
     new_name = new_path.name
-    msg = orig_name + "\n-> " + new_name
+    msg = f"{orig_name}\n-> {new_name}"
     dest_path = str(new_path)
 
-    subprocess.Popen(
-        [
-            sys.executable, "-c",
-            "import json,subprocess,sys;"
-            "r=subprocess.run(sys.argv[1:10],capture_output=True,text=True);"
-            "s=r.stdout.strip();"
-            "d=json.loads(s) if s else {};"
-            "a=d.get('activationValue','');"
-            "subprocess.run(['open','-R',sys.argv[10]]) if a=='Reveal in Finder' else None;"
-            "subprocess.run(['open',sys.argv[10]]) if a=='Open File' else None",
-            # argv[1:10] = alerter command
-            str(ALERTER),
-            "-title", "File Moved",
-            "-message", msg,
-            "-actions", "Reveal in Finder,Open File",
-            "-dropdownLabel", "Actions",
-            "-closeLabel", "Dismiss",
-            "-timeout", "10",
-            "-group", "file_mover",
-            "-json",
-            # argv[10] = destination path
-            dest_path,
-        ],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
+    if Path(TERMINAL_NOTIFIER).exists():
+        # terminal-notifier: fires, shows banner, exits cleanly. No memory leak.
+        # Click reveals the file in Finder.
+        subprocess.Popen(
+            [
+                TERMINAL_NOTIFIER,
+                "-title", "File Moved",
+                "-message", msg,
+                "-execute", f'open -R "{dest_path}"',
+                "-group", "file_mover",
+                "-timeout", "10",
+                "-ignoreDnD",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    elif ALERTER.exists():
+        # Fallback: alerter with a hard kill timer to prevent memory leaks.
+        subprocess.Popen(
+            [
+                "bash", "-c",
+                f'timeout 15 "{ALERTER}" -title "File Moved" -message "{msg}" '
+                f'-closeLabel Dismiss -timeout 10 -group file_mover >/dev/null 2>&1',
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    else:
+        subprocess.run([
+            "osascript", "-e",
+            f'display notification "{orig_name} -> {new_name}" '
+            f'with title "File Moved"',
+        ])
 
 
 def parse_args():

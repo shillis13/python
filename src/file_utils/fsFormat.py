@@ -789,9 +789,15 @@ class FileSystemFormatter:
             return []
 
     def collect_all_items(
-        self, paths: List[str], fs_filter: FileSystemFilter = None
+        self, paths: List[str], fs_filter: FileSystemFilter = None,
+        piped: bool = False,
     ) -> List[FileInfo]:
-        """Collect all file items for non-tree formats."""
+        """Collect all file items for non-tree formats.
+
+        When *piped* is True the caller has already curated the path list
+        (e.g. via ``fsFind``).  Directories are **not** re-expanded so that
+        upstream filtering is respected.
+        """
         all_items = []
 
         for path_str in paths:
@@ -799,7 +805,10 @@ class FileSystemFormatter:
             if not path.exists():
                 continue
 
-            if path.is_file():
+            if piped:
+                # Trust the upstream filter — emit every path as-is
+                all_items.append(FileInfo(path))
+            elif path.is_file():
                 # When fsFormat is used in pipelines the incoming paths are
                 # frequently individual files.  Previously these were ignored unless
                 # ``--files`` was provided, yielding empty tables.  Non-tree formats
@@ -839,8 +848,12 @@ class FileSystemFormatter:
             else:
                 items.append(child_info)
 
-    def format_tree(self, paths: List[str], fs_filter: FileSystemFilter = None) -> str:
+    def format_tree(self, paths: List[str], fs_filter: FileSystemFilter = None,
+                    piped: bool = False) -> str:
         """Format as tree structure."""
+        if piped:
+            return self._format_tree_from_paths(paths)
+
         output = []
 
         for i, path_str in enumerate(paths):
@@ -863,6 +876,110 @@ class FileSystemFormatter:
                 self._format_tree_recursive(path, "", 0, fs_filter, output)
 
         return "\n".join(output)
+
+    def _format_tree_from_paths(self, paths: List[str]) -> str:
+        """Build a tree structure from an explicit list of paths (piped input).
+
+        Directories are NOT re-expanded; only the given paths appear in the
+        tree.  This preserves upstream filtering.
+        """
+        from collections import defaultdict
+
+        resolved = []
+        for p in paths:
+            path = Path(p)
+            if path.exists():
+                resolved.append(path.resolve())
+
+        if not resolved:
+            return ""
+
+        # Find common root
+        try:
+            common = Path(os.path.commonpath([str(p) for p in resolved]))
+        except ValueError:
+            common = resolved[0].parent
+
+        # If common root is one of the paths and is a directory, use it as root
+        # Otherwise use the common path's parent
+        if common in resolved and common.is_dir():
+            root = common
+        elif common.is_dir():
+            root = common
+        else:
+            root = common.parent
+
+        # Build nested dict: {relative_part: {child: ...}}
+        path_set = set(resolved)
+
+        def _build_tree(node_path: Path) -> dict:
+            children = defaultdict(dict)
+            for p in path_set:
+                try:
+                    rel = p.relative_to(node_path)
+                except ValueError:
+                    continue
+                parts = rel.parts
+                if len(parts) >= 1:
+                    children[parts[0]]  # ensure key exists
+            # For each direct child name, check if it's in path_set or has descendants
+            result = {}
+            for child_name in sorted(children.keys()):
+                child_path = node_path / child_name
+                child_descendants = [
+                    p for p in path_set
+                    if p != child_path and str(p).startswith(str(child_path) + os.sep)
+                ]
+                if child_descendants:
+                    result[child_name] = _build_tree(child_path)
+                else:
+                    result[child_name] = {}
+            return result
+
+        tree = _build_tree(root)
+
+        # Render
+        output = []
+        root_info = FileInfo(root)
+        display_name = self.colorize_item(root.name or str(root), root_info)
+        info = self.get_item_info(root_info)
+        output.append(f"{display_name}{info}")
+
+        self._render_tree_dict(root, tree, "", output)
+        return "\n".join(output)
+
+    def _render_tree_dict(self, base: Path, tree: dict, prefix: str,
+                          output: List[str]) -> None:
+        """Render a nested dict tree structure with tree-drawing characters."""
+        items = list(tree.items())
+        for i, (name, subtree) in enumerate(items):
+            is_last = i == len(items) - 1
+            if is_last:
+                current_prefix = prefix + self.chars["last"]
+                next_prefix = prefix + self.chars["space"]
+            else:
+                current_prefix = prefix + self.chars["branch"]
+                next_prefix = prefix + self.chars["vertical"]
+
+            child_path = base / name
+            file_info = FileInfo(child_path)
+            display_name = self.colorize_item(name, file_info)
+            info = self.get_item_info(file_info)
+
+            symlink_target = ""
+            if file_info.is_symlink and file_info.symlink_target:
+                symlink_target = f" -> {file_info.symlink_target}"
+
+            output.append(f"{current_prefix}{display_name}{info}{symlink_target}")
+
+            if file_info.is_dir:
+                self.stats["dirs"] += 1
+            elif file_info.is_file:
+                self.stats["files"] += 1
+                self.stats["total_size"] += file_info.size
+
+            if subtree:
+                self._render_tree_dict(child_path, subtree, next_prefix, output)
 
     def _format_tree_recursive(
         self,
@@ -1023,13 +1140,14 @@ class FileSystemFormatter:
 
         return "\n".join(output)
 
-    def format_items(self, paths: List[str], fs_filter: FileSystemFilter = None) -> str:
+    def format_items(self, paths: List[str], fs_filter: FileSystemFilter = None,
+                     piped: bool = False) -> str:
         """Format items according to specified format type."""
         if self.format_type == "tree":
-            return self.format_tree(paths, fs_filter)
+            return self.format_tree(paths, fs_filter, piped=piped)
         else:
             # For other formats, collect all items first
-            items = self.collect_all_items(paths, fs_filter)
+            items = self.collect_all_items(paths, fs_filter, piped=piped)
             items = self._sort_file_infos(items)
 
             if self.format_type == "list":
@@ -1266,7 +1384,12 @@ def add_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--modified-after", help="Modified after date")
     parser.add_argument("--modified-before", help="Modified before date")
     parser.add_argument(
-        "--git-ignore", "-g", action="store_true", help="Use .gitignore files"
+        "--git-ignore", "-g", action="store_true", default=True,
+        help="Use .gitignore files (default: on)",
+    )
+    parser.add_argument(
+        "--no-git-ignore", "-ng", dest="git_ignore", action="store_false",
+        help="Disable .gitignore filtering",
     )
 
     # Execution options
@@ -1697,7 +1820,8 @@ def process_format_pipeline(args):
 
     # Format and output
     try:
-        output = formatter.format_items(input_paths, fs_filter if has_filters else None)
+        output = formatter.format_items(input_paths, fs_filter if has_filters else None,
+                                        piped=piped_input)
         if args.quiet:
             if output:
                 print(output)

@@ -7,6 +7,7 @@ import json
 import re
 import sys
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 from shutil import which
 from typing import Iterable, List, Optional
@@ -36,33 +37,37 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="store_true", help="Show version")
     subparsers = parser.add_subparsers(dest="command")
 
-    subparsers.add_parser("list")
+    subparsers.add_parser("list", help="Show all keyword-to-directory bookmarks")
 
-    add_parser = subparsers.add_parser("add")
-    add_parser.add_argument("key")
-    add_parser.add_argument("directory", nargs="?", default=".")
+    add_parser = subparsers.add_parser("add", help="Create or update a bookmark")
+    add_parser.add_argument("key", help="Bookmark keyword (letters, digits, dot, underscore, hyphen)")
+    add_parser.add_argument("directory", nargs="?", default=".", help="Directory to bookmark (default: current dir)")
     add_parser.add_argument("--force", action="store_true", help="Allow missing directories")
 
-    rm_parser = subparsers.add_parser("rm")
-    rm_parser.add_argument("selector")
+    rm_parser = subparsers.add_parser("rm", help="Remove a bookmark by keyword or index")
+    rm_parser.add_argument("selector", help="Bookmark keyword or 1-based index")
 
-    clear_parser = subparsers.add_parser("clear")
-    clear_parser.add_argument("--yes", action="store_true")
+    clear_parser = subparsers.add_parser("clear", help="Remove all bookmarks")
+    clear_parser.add_argument("--yes", action="store_true", help="Skip confirmation prompt")
 
-    go_parser = subparsers.add_parser("go")
-    go_parser.add_argument("selector")
+    go_parser = subparsers.add_parser("go", help="Navigate to a bookmark, path, or history entry")
+    go_parser.add_argument("selector", help="Keyword, index, directory path, or #N for history entry N")
 
-    back_parser = subparsers.add_parser("back")
-    back_parser.add_argument("steps", nargs="?", type=int, default=1)
+    back_parser = subparsers.add_parser("back", help="Go back N steps in navigation history")
+    back_parser.add_argument("steps", nargs="?", type=int, default=1, help="Number of steps (default: 1)")
 
-    fwd_parser = subparsers.add_parser("fwd")
-    fwd_parser.add_argument("steps", nargs="?", type=int, default=1)
+    fwd_parser = subparsers.add_parser("fwd", help="Go forward N steps in navigation history")
+    fwd_parser.add_argument("steps", nargs="?", type=int, default=1, help="Number of steps (default: 1)")
 
-    hist_parser = subparsers.add_parser("hist")
-    hist_parser.add_argument("start", type=int, nargs="?", default=None)
-    hist_parser.add_argument("num", type=int, nargs="?", default=None)
-    hist_parser.add_argument("--before", type=int, default=5)
-    hist_parser.add_argument("--after", type=int, default=5)
+    hist_parser = subparsers.add_parser("hist", help="Show navigation history")
+    hist_parser.add_argument("start", type=int, nargs="?", default=None,
+                             help="Starting index; negative counts from end (e.g. -10 = 10th from last)")
+    hist_parser.add_argument("num", type=int, nargs="?", default=None,
+                             help="Number of entries to show; negative shows backward from start")
+    hist_parser.add_argument("--before", type=int, default=5,
+                             help="Entries to show before current position (default: 5)")
+    hist_parser.add_argument("--after", type=int, default=5,
+                             help="Entries to show after current position (default: 5)")
 
     env_parser = subparsers.add_parser("env")
     env_parser.add_argument("--format", choices=["sh", "fish", "pwsh"], default="sh")
@@ -79,10 +84,14 @@ def build_parser() -> argparse.ArgumentParser:
     import_parser = subparsers.add_parser("import")
     import_parser.add_argument("source", choices=["cdargs", "bashmarks"])
 
-    subparsers.add_parser("pick")
-    subparsers.add_parser("doctor")
-    subparsers.add_parser("init")
-    subparsers.add_parser("help")
+    subparsers.add_parser("pick", help="Fuzzy-select a bookmark via fzf")
+
+    record_parser = subparsers.add_parser("record", help="Record a directory visit in gdir history (used by shell wrapper)")
+    record_parser.add_argument("directory", nargs="?", default=".", help="Directory to record (default: current dir)")
+
+    subparsers.add_parser("doctor", help="Check configuration health")
+    subparsers.add_parser("init", help="Install shell wrapper function")
+    subparsers.add_parser("help", help="Show detailed help")
 
     return parser
 
@@ -94,19 +103,30 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     else:
         argv_list = sys.argv[1:]
     
-    # Handle "-" and "+" shortcuts
+    # No-args: go home
+    if not argv_list:
+        argv_list = ["go", str(Path.home())]
+
+    # Handle shortcuts
     if len(argv_list) == 1:
-        if argv_list[0] == "-":
+        arg = argv_list[0]
+        if arg == "-":
             argv_list = ["back"]
-        elif argv_list[0] == "+":
+        elif arg == "+":
             argv_list = ["fwd"]
-        elif argv_list[0].startswith("#"):
+        elif arg.startswith("#"):
             # #N -> navigate to history entry N
-            argv_list = ["go", argv_list[0]]
+            argv_list = ["go", arg]
+        elif re.match(r"^-\d+$", arg):
+            # -N -> back N steps
+            argv_list = ["back", arg[1:]]
+        elif re.match(r"^\+\d+$", arg):
+            # +N -> forward N steps
+            argv_list = ["fwd", arg[1:]]
 
     # Check if first argument is not a recognized command and not a flag
     valid_commands = {"list", "add", "rm", "clear", "go", "back", "fwd", "hist",
-                      "env", "save", "load", "import", "pick", "doctor", "init", "help"}
+                      "env", "save", "load", "import", "pick", "record", "doctor", "init", "help"}
 
     if argv_list and not argv_list[0].startswith("-") and argv_list[0] not in valid_commands:
         # Treat as "gdir go {param}"
@@ -153,6 +173,8 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             return cmd_import(store, args.source)
         if args.command == "pick":
             return cmd_pick(store, history)
+        if args.command == "record":
+            return cmd_record(history, args.directory)
         if args.command == "init":
             return cmd_init()
         if args.command == "doctor":
@@ -256,18 +278,35 @@ def cmd_go(store: MappingStore, history: History, selector: str) -> int:
     entry = store.get(selector)
     if entry is not None:
         path = Path(entry.path)
-    else:
-        # Try as a direct directory path
-        path = resolve_path(selector)
-        if not path.is_dir():
-            print("Mapping not found and not a valid directory.", file=sys.stderr)
+        if not path.exists():
+            print("Target directory does not exist.", file=sys.stderr)
             return EXIT_INVALID
-    if not path.exists():
-        print("Target directory does not exist.", file=sys.stderr)
-        return EXIT_INVALID
+        history.visit(path)
+        history.save()
+        print(str(resolve_path(path)))
+        return 0
+
+    # Not a mapping — try as a direct path, record if it exists
+    path = resolve_path(selector)
+    if path.is_dir():
+        history.visit(path)
+        history.save()
+        print(str(path))
+        return 0
+
+    # Not a directory either — emit the selector for the shell wrapper to resolve
+    # (e.g. zoxide fuzzy matching via cd)
+    print(selector)
+    return 0
+
+
+def cmd_record(history: History, directory: str) -> int:
+    """Record a directory visit without navigating. Called by shell wrapper after zoxide resolves."""
+    path = resolve_path(directory)
+    if not path.is_dir():
+        return 0  # silently ignore non-directories
     history.visit(path)
     history.save()
-    print(str(resolve_path(path)))
     return 0
 
 
@@ -349,7 +388,7 @@ def cmd_hist(history: History, start: Optional[int], num: Optional[int], before:
     for idx, entry, is_current in rows:
         marker = "➤" if is_current else " "
         index = str(idx + 1).rjust(index_width)
-        print(f"{marker}{index}  {entry.visited_at:<24} {entry.path}")
+        print(f"{marker}{index}  {_to_local(entry.visited_at):<24} {entry.path}")
     return 0
 
 
@@ -580,6 +619,15 @@ def cmd_doctor(config_dir: Path, store: MappingStore, history: History) -> int:
     return 0
 
 
+def _to_local(utc_str: str) -> str:
+    """Convert a UTC timestamp string to local time for display."""
+    try:
+        dt = datetime.strptime(utc_str, "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=timezone.utc)
+        return dt.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+    except (ValueError, TypeError):
+        return utc_str
+
+
 _BASH_WRAPPER = '''\
 # --- gdir wrapper (BEGIN MANAGED BLOCK) ---
 _GDIR_PREFERRED="${HOME}/myenv/bin/gdir"
@@ -599,17 +647,27 @@ gdir() {
     local target
 
     case "$1" in
-        go|back|fwd|pick|-|+) _gdir_nav=true ;;
-        list|add|rm|clear|hist|env|save|load|import|doctor|init|help|"") ;;
-        -*) ;;
+        go|back|fwd|pick) _gdir_nav=true ;;
+        list|add|rm|clear|hist|env|save|load|import|record|doctor|init|help) ;;
+        "") _gdir_nav=true ;;
         \\#*) _gdir_nav=true ;;
+        [-+][0-9]*) _gdir_nav=true ;;
+        [-+]) _gdir_nav=true ;;
+        -*) ;;
         *)  _gdir_nav=true ;;
     esac
 
     if $_gdir_nav; then
         target="$("$_GDIR_BIN" "$@")" || return $?
         [[ -n "$target" ]] || return 2
-        cd "$target" || return $?
+        # Use zoxide (records visit) with builtin fallback. Not cd — avoids recursion.
+        if declare -f __zoxide_z &>/dev/null; then
+            __zoxide_z "$target" || return $?
+        else
+            \\builtin cd -- "$target" || return $?
+        fi
+        # Record final CWD in gdir history (covers zoxide-only resolutions)
+        "$_GDIR_BIN" record "$(pwd)" 2>/dev/null
         eval "$("$_GDIR_BIN" env --format sh --all)"
     else
         "$_GDIR_BIN" "$@"

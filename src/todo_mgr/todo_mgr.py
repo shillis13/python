@@ -219,7 +219,7 @@ def load_todos(include_completed: bool = False, include_trash: bool = False) -> 
     """
     todos: dict[Path, Todo] = {}
     template_names = {tpl.name for tpl in get_template_dirs() if tpl.exists()}
-    excluded_dirs = {"incoming", "groups", "scripts", "__pycache__"}
+    excluded_dirs = {"incoming", "groups", "__pycache__"}
     if not include_completed:
         excluded_dirs.add("completed")
     if not include_trash:
@@ -803,31 +803,69 @@ def resolve_target(token: str, todos: dict[Path, Todo], refs: dict[str, Path]) -
 
 
 def run_script(script_name: str, *args: str, quiet: bool = False) -> str:
-    """Run a helper script from the scripts directory.
-    
-    Args:
-        script_name: Name of the script to run
-        *args: Arguments to pass to the script
-        quiet: If True, capture and return output instead of printing
-        
-    Returns:
-        Output if quiet=True, empty string otherwise
+    """Inline implementation of todo marker-file operations.
+
+    Replaces the former shell-script helpers (set_status, add_flag,
+    remove_flag, add_tag, remove_tag) with pure Python equivalents.
     """
-    script_path = CURRENT_ROOT / "scripts" / script_name
-    if not script_path.exists():
-        script_path = SCRIPTS_DIR / script_name
-    if not script_path.exists():
-        raise FileNotFoundError(f"Script not found: {script_name}")
-    
-    cmd = [str(script_path), *args]
-    
-    if quiet:
-        result = subprocess.run(cmd, check=True, cwd=CURRENT_ROOT,
-                                capture_output=True, text=True)
-        return result.stdout
+    if script_name == "set_status":
+        _inline_set_status(*args)
+    elif script_name == "add_flag":
+        _inline_add_marker(*args, suffix=".flag")
+    elif script_name == "remove_flag":
+        _inline_remove_marker(*args, suffix=".flag")
+    elif script_name == "add_tag":
+        _inline_add_marker(*args, suffix=".tag")
+    elif script_name == "remove_tag":
+        _inline_remove_marker(*args, suffix=".tag")
     else:
-        subprocess.run(cmd, check=True, cwd=CURRENT_ROOT)
-        return ""
+        raise FileNotFoundError(f"Unknown script: {script_name}")
+    return ""
+
+
+_STATUS_ALIASES: dict[str, str] = {
+    "incoming": "Triaging", "triaging": "Triaging", "triage": "Triaging",
+    "needs_research": "Needs_Research", "needsresearch": "Needs_Research", "research": "Needs_Research",
+    "needs_derivation": "Needs_Derivation", "needsderivation": "Needs_Derivation", "needs-derivation": "Needs_Derivation",
+    "pending": "Ready", "ready": "Ready",
+    "in_progress": "In_Progress", "inprogress": "In_Progress", "in-progress": "In_Progress",
+    "blocked": "Blocked",
+    "reviewing": "Reviewing", "review": "Reviewing",
+    "accepting": "Accepting", "acceptance": "Accepting",
+    "done": "Done", "completed": "Done",
+    "cancelled": "Cancelled", "canceled": "Cancelled",
+}
+
+
+def _inline_set_status(status: str, todo_dir: str = ".") -> None:
+    """Set todo status by replacing the .status marker file."""
+    normalized = _STATUS_ALIASES.get(status.lower().replace(" ", "_"))
+    if not normalized:
+        raise ValueError(f"Invalid status: {status}")
+    d = Path(todo_dir)
+    if not d.is_dir():
+        raise FileNotFoundError(f"Todo directory not found: {todo_dir}")
+    for f in d.glob("*.status"):
+        f.unlink()
+    (d / f"{normalized}.status").touch()
+
+
+def _inline_add_marker(name: str, todo_dir: str = ".", *, suffix: str) -> None:
+    """Create a marker file (.flag or .tag) in a todo directory."""
+    d = Path(todo_dir)
+    if not d.is_dir():
+        raise FileNotFoundError(f"Todo directory not found: {todo_dir}")
+    (d / f"{name}{suffix}").touch()
+
+
+def _inline_remove_marker(name: str, todo_dir: str = ".", *, suffix: str) -> None:
+    """Remove a marker file (.flag or .tag) from a todo directory."""
+    d = Path(todo_dir)
+    if not d.is_dir():
+        raise FileNotFoundError(f"Todo directory not found: {todo_dir}")
+    target = d / f"{name}{suffix}"
+    if target.exists():
+        target.unlink()
 
 
 # === Operations Layer ===
@@ -1277,6 +1315,77 @@ def ops_kanban(include_done: bool = False, include_cancelled: bool = False) -> d
     return {"columns": columns, "summary": summary, "total_active": sum(summary.values())}
 
 
+def ops_validate() -> dict:
+    """Validate the todo tree. Returns issues found.
+
+    Checks:
+    - Duplicate todo IDs (same directory name under different parents)
+    - Missing .status files
+    - Multiple .status files
+    - Completed todos still in the active directory tree
+    - Orphaned children (parent dir doesn't exist or isn't a todo)
+    """
+    todos = load_todos(include_completed=True, include_trash=True)
+    issues: list[dict] = []
+
+    # Build name -> paths map for duplicate detection
+    name_to_paths: dict[str, list[Path]] = {}
+    for path in todos:
+        name = path.name
+        name_to_paths.setdefault(name, []).append(path)
+
+    # Check duplicates
+    for name, paths in name_to_paths.items():
+        if len(paths) > 1:
+            locations = [str(p.relative_to(CURRENT_ROOT)) for p in paths]
+            issues.append({
+                "type": "duplicate_id",
+                "id": name,
+                "locations": locations,
+                "message": f"Duplicate todo ID '{name}' found in {len(paths)} locations",
+            })
+
+    # Per-todo checks
+    for path, todo in todos.items():
+        rel = str(path.relative_to(CURRENT_ROOT))
+
+        # Missing status
+        status_files = list(path.glob("*.status"))
+        if not status_files:
+            issues.append({
+                "type": "missing_status",
+                "id": todo.name,
+                "path": rel,
+                "message": f"No .status file in {rel}",
+            })
+        elif len(status_files) > 1:
+            issues.append({
+                "type": "multiple_status",
+                "id": todo.name,
+                "path": rel,
+                "statuses": [f.stem for f in status_files],
+                "message": f"Multiple .status files in {rel}: {[f.stem for f in status_files]}",
+            })
+
+        # Completed todo in active tree (not under completed/ or trash/)
+        if todo.status in ("Done", "Cancelled"):
+            parts = path.relative_to(CURRENT_ROOT).parts
+            if "completed" not in parts and "trash" not in parts:
+                issues.append({
+                    "type": "completed_in_active",
+                    "id": todo.name,
+                    "path": rel,
+                    "status": todo.status,
+                    "message": f"{todo.status} todo '{todo.name}' is still in the active tree at {rel}",
+                })
+
+    return {
+        "valid": len(issues) == 0,
+        "issue_count": len(issues),
+        "issues": issues,
+    }
+
+
 def ops_move(identifier: str, new_parent: str) -> dict:
     """Move todo to new parent."""
     todos = load_todos()
@@ -1375,7 +1484,7 @@ def cmd_list(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) ->
         Formatted table string.
     """
     status_filter = None
-    sort_key = "status"
+    sort_key = "name"
     flat = False
     show_dates = False
     show_all = False
@@ -1408,7 +1517,9 @@ def cmd_list(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) ->
         i += 1
 
     # Validate sort key
-    valid_sorts = ("name", "status", "created", "updated", "ref", "flags")
+    valid_sorts = ("name", "id", "status", "created", "updated", "ref", "flags")
+    if sort_key == "id":
+        sort_key = "name"  # "id" and "name" both sort by todo directory name
     if sort_key not in valid_sorts:
         return c(f"Unknown sort key: {sort_key}. Valid: {', '.join(valid_sorts)}", Colors.RED)
 
@@ -1458,29 +1569,69 @@ def cmd_list(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) ->
                         show_dates=show_dates)
 
 
+def _find_all_matches(token: str, todos: dict[Path, Todo], refs: dict[str, Path]) -> list[Path]:
+    """Find ALL todos matching a token, not just the first.
+
+    Used by cmd_view to surface duplicate IDs.
+    """
+    matches = []
+    # Reference code — unique by definition
+    upper = token.upper()
+    if upper in refs:
+        return [refs[upper]]
+
+    # Name / number matching — collect all
+    for path in todos:
+        name = path.name
+        if name == token:
+            matches.append(path)
+        elif name == f"todo_{token}" or name == f"task_{token}":
+            matches.append(path)
+        elif token.isdigit():
+            num_str = token.zfill(4)
+            if name.startswith(f"todo_{num_str}_") or name.startswith(f"task_{num_str}_"):
+                matches.append(path)
+
+    if matches:
+        return matches
+
+    # Partial / substring match
+    lower = token.lower()
+    for path in todos:
+        if lower in path.name.lower():
+            matches.append(path)
+    return matches
+
+
 def cmd_view(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> str:
     """View detailed info about a todo. Searches completed/trash if not found in active."""
     if not args:
         return c("Usage: view <ref|path>", Colors.RED)
 
-    try:
-        path = resolve_target(args[0], todos, refs)
-        todo = todos.get(path)
+    # Check for duplicates by finding all matches
+    all_todos = load_todos(include_completed=True, include_trash=True)
+    all_refs = build_reference_map(all_todos)
+    matches = _find_all_matches(args[0], all_todos, all_refs)
+
+    if not matches:
+        return c(f"Todo not found: {args[0]}", Colors.RED)
+
+    if len(matches) == 1:
+        todo = all_todos.get(matches[0])
         if not todo:
             return c(f"Todo not in cache: {args[0]}", Colors.RED)
-        return view_todo_detail(todo, refs, todos)
-    except ValueError:
-        # Not found in active todos — retry with completed and trash
-        try:
-            all_todos = load_todos(include_completed=True, include_trash=True)
-            all_refs = build_reference_map(all_todos)
-            path = resolve_target(args[0], all_todos, all_refs)
-            todo = all_todos.get(path)
-            if not todo:
-                return c(f"Todo not found: {args[0]}", Colors.RED)
-            return view_todo_detail(todo, all_refs, all_todos)
-        except ValueError as e:
-            return c(str(e), Colors.RED)
+        return view_todo_detail(todo, all_refs, all_todos)
+
+    # Multiple matches — show all with duplicate warning
+    parts = [c(f"Found {len(matches)} todos matching '{args[0]}':", Colors.YELLOW), ""]
+    for i, path in enumerate(matches, 1):
+        todo = all_todos.get(path)
+        if todo:
+            rel = str(path.relative_to(CURRENT_ROOT))
+            parts.append(c(f"--- Match {i}: {rel} ---", Colors.CYAN))
+            parts.append(view_todo_detail(todo, all_refs, all_todos))
+            parts.append("")
+    return "\n".join(parts)
 
 
 def cmd_status(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> str:
@@ -1630,15 +1781,12 @@ def create_todo_from_template(name: str, parent_dir: Path) -> Path:
     else:
         # Copy from template
         shutil.copytree(template_dir, target_dir, symlinks=True)
-        
-        # Fix scripts symlink
+
+        # Remove stale scripts symlink if copied from template
         scripts_link = target_dir / "scripts"
         if scripts_link.is_symlink() or scripts_link.exists():
             scripts_link.unlink()
-        
-        rel_scripts = os.path.relpath(CURRENT_ROOT / "scripts", target_dir)
-        scripts_link.symlink_to(rel_scripts)
-        
+
         # Update notes.md
         notes_path = target_dir / "notes.md"
         if notes_path.exists():
@@ -2195,6 +2343,20 @@ def update_notes_section(notes_path: Path, section: str, new_content: str) -> No
         new_lines.append("")
 
     notes_path.write_text("\n".join(new_lines))
+
+
+def cmd_validate(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> str:
+    """Validate the todo tree and report issues."""
+    result = ops_validate()
+    if result["valid"]:
+        return c("No issues found.", Colors.GREEN)
+    lines = [c(f"Found {result['issue_count']} issue(s):", Colors.YELLOW), ""]
+    for issue in result["issues"]:
+        icon = {"duplicate_id": "DUP", "missing_status": "NO_STATUS",
+                "multiple_status": "MULTI_STATUS", "completed_in_active": "MISPLACED"
+                }.get(issue["type"], issue["type"])
+        lines.append(f"  [{c(icon, Colors.RED)}] {issue['message']}")
+    return "\n".join(lines)
 
 
 def cmd_complete(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> str:
@@ -2822,6 +2984,7 @@ def run_command(line: str, interactive: bool = True) -> str | None:
         "complete": lambda: cmd_complete(args, todos, refs),
         "duplicate": lambda: cmd_duplicate(args, todos, refs, interactive),
         "json": lambda: cmd_json(args, todos, refs),
+        "validate": lambda: cmd_validate(args, todos, refs),
         "help": lambda: cmd_help(args),
     }
 
@@ -2901,11 +3064,131 @@ def repl() -> None:
             print(result)
 
 
+def run_json_command(args: list[str]) -> None:
+    """Run a command in JSON mode — calls ops_* functions and prints JSON to stdout."""
+    if not args:
+        print(json.dumps({"error": "No command provided"}))
+        sys.exit(1)
+
+    cmd = args[0].lower()
+    cmd_args = args[1:]
+
+    try:
+        if cmd == "list":
+            result = ops_list(
+                status=_pop_flag(cmd_args, "--status"),
+                tag=_pop_flag(cmd_args, "--tag"),
+                flag=_pop_flag(cmd_args, "--flag"),
+            )
+        elif cmd == "get":
+            if not cmd_args:
+                result = {"error": "Usage: get <identifier>"}
+            else:
+                result = ops_get(cmd_args[0])
+        elif cmd == "create":
+            name = _pop_flag(cmd_args, "--name") or (cmd_args[0] if cmd_args else None)
+            if not name:
+                result = {"error": "Usage: create --name <name>"}
+            else:
+                result = ops_create(
+                    name=name,
+                    description=_pop_flag(cmd_args, "--description") or "",
+                    tags=_pop_flag_list(cmd_args, "--tags"),
+                )
+        elif cmd == "update":
+            identifier = _pop_flag(cmd_args, "--id") or (cmd_args[0] if cmd_args else None)
+            section = _pop_flag(cmd_args, "--section")
+            content = _pop_flag(cmd_args, "--content")
+            if not all([identifier, section, content]):
+                result = {"error": "Usage: update --id <id> --section <section> --content <content>"}
+            else:
+                result = ops_update(identifier=identifier, section=section, content=content)
+        elif cmd == "status":
+            identifier = _pop_flag(cmd_args, "--id") or (cmd_args[0] if len(cmd_args) >= 2 else None)
+            new_status = _pop_flag(cmd_args, "--status") or (cmd_args[1] if len(cmd_args) >= 2 else None)
+            if not identifier or not new_status:
+                result = {"error": "Usage: status --id <id> --status <status>"}
+            else:
+                result = ops_status([identifier], new_status)
+        elif cmd == "flag":
+            action = _pop_flag(cmd_args, "--action") or (cmd_args[0] if len(cmd_args) >= 3 else None)
+            identifier = _pop_flag(cmd_args, "--id") or (cmd_args[1] if len(cmd_args) >= 3 else None)
+            flag_name = _pop_flag(cmd_args, "--flag") or (cmd_args[2] if len(cmd_args) >= 3 else None)
+            if not all([action, identifier, flag_name]):
+                result = {"error": "Usage: flag --action add|remove --id <id> --flag <flag>"}
+            else:
+                result = ops_flag(action, identifier, flag_name)
+        elif cmd == "tag":
+            action = _pop_flag(cmd_args, "--action") or (cmd_args[0] if len(cmd_args) >= 3 else None)
+            identifier = _pop_flag(cmd_args, "--id") or (cmd_args[1] if len(cmd_args) >= 3 else None)
+            tag_name = _pop_flag(cmd_args, "--tag") or (cmd_args[2] if len(cmd_args) >= 3 else None)
+            if not all([action, identifier, tag_name]):
+                result = {"error": "Usage: tag --action add|remove --id <id> --tag <tag>"}
+            else:
+                result = ops_tag(action, identifier, tag_name)
+        elif cmd == "complete":
+            if not cmd_args:
+                result = {"error": "Usage: complete <identifier>"}
+            else:
+                result = ops_complete(cmd_args[0])
+        elif cmd == "trash":
+            if not cmd_args:
+                result = {"error": "Usage: trash <identifier>"}
+            else:
+                result = ops_trash(cmd_args[0])
+        elif cmd == "move":
+            identifier = _pop_flag(cmd_args, "--id") or (cmd_args[0] if len(cmd_args) >= 2 else None)
+            new_parent = _pop_flag(cmd_args, "--parent") or (cmd_args[1] if len(cmd_args) >= 2 else None)
+            if not identifier or not new_parent:
+                result = {"error": "Usage: move --id <id> --parent <parent>"}
+            else:
+                result = ops_move(identifier, new_parent)
+        elif cmd == "kanban":
+            result = ops_kanban()
+        elif cmd == "validate":
+            result = ops_validate()
+        elif cmd == "find":
+            pattern = _pop_flag(cmd_args, "--pattern") or (cmd_args[0] if cmd_args else None)
+            if not pattern:
+                result = {"error": "Usage: find --pattern <glob>"}
+            else:
+                result = ops_list(name_pattern=pattern, include_all=True)
+        else:
+            result = {"error": f"Unknown JSON command: {cmd}"}
+
+        print(json.dumps(result, indent=2, default=str))
+    except Exception as e:
+        print(json.dumps({"error": str(e)}))
+        sys.exit(1)
+
+
+def _pop_flag(args: list[str], flag: str) -> str | None:
+    """Extract a --flag value from args list, removing both flag and value."""
+    try:
+        idx = args.index(flag)
+        if idx + 1 < len(args):
+            value = args[idx + 1]
+            del args[idx:idx + 2]
+            return value
+    except ValueError:
+        pass
+    return None
+
+
+def _pop_flag_list(args: list[str], flag: str) -> list[str] | None:
+    """Extract a --flag value as comma-separated list."""
+    value = _pop_flag(args, flag)
+    if value:
+        return [t.strip() for t in value.split(",") if t.strip()]
+    return None
+
+
 def main() -> None:
     """Main entry point."""
     args = sys.argv[1:]
-    
+
     # Handle flags
+    json_mode = False
     i = 0
     while i < len(args):
         if args[i] in ("--root", "-r"):
@@ -2919,6 +3202,9 @@ def main() -> None:
             else:
                 print(c("Missing value for --root", Colors.RED), file=sys.stderr)
                 sys.exit(1)
+        elif args[i] == "--json":
+            json_mode = True
+            args = args[:i] + args[i+1:]
         elif args[i] == "--no-color":
             Colors.disable()
             args = args[:i] + args[i+1:]
@@ -2930,16 +3216,22 @@ def main() -> None:
             sys.exit(0)
         else:
             i += 1
-    
+
+    # JSON mode — structured output for MCP/scripts
+    if json_mode:
+        Colors.disable()
+        run_json_command(args)
+        return
+
     # If no command args, run REPL
     if not args:
         repl()
         return
-    
+
     # Otherwise, run single command (CLI mode)
     command_line = " ".join(shlex.quote(a) for a in args)
     result = run_command(command_line, interactive=False)
-    
+
     if result:
         print(result)
 

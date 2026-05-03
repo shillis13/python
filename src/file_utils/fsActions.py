@@ -433,7 +433,12 @@ def add_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--modified-before", help="Modified before date")
     parser.add_argument(
-        "--git-ignore", "-g", action="store_true", help="Use .gitignore files"
+        "--git-ignore", "-g", action="store_true", default=True,
+        help="Use .gitignore files (default: on)",
+    )
+    parser.add_argument(
+        "--no-git-ignore", "-ng", dest="git_ignore", action="store_false",
+        help="Disable .gitignore filtering",
     )
 
     # Execution options
@@ -755,7 +760,7 @@ def create_filter_from_args(args) -> FileSystemFilter | None:
             isinstance(getattr(args, "ignore_filter", None), str),
             getattr(args, "type_filter", []),
             getattr(args, "extension_filter", []),
-            getattr(args, "git_ignore_filter", False),
+            getattr(args, "git_ignore", False),
         ]
     )
     if not has_filters:

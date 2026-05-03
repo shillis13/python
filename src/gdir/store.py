@@ -175,6 +175,9 @@ class History:
 
     def visit(self, path: Path) -> HistoryEntry:
         resolved = str(resolve_path(path))
+        # Skip consecutive duplicate
+        if self.entries and self.entries[self.pointer].path == resolved:
+            return self.entries[self.pointer]
         # Trim forward history if pointer is not at end
         if self.pointer < len(self.entries) - 1:
             del self.entries[self.pointer + 1 :]

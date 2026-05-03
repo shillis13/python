@@ -519,7 +519,15 @@ Examples:
         "--dirs-only", "-d", action="store_true",
         help="Only include directories"
     )
-    
+    filter_group.add_argument(
+        "--git-ignore", "-g", action="store_true", default=True,
+        help="Use .gitignore files (default: on; only affects direct path args, not piped input)",
+    )
+    filter_group.add_argument(
+        "--no-git-ignore", "-ng", dest="git_ignore", action="store_false",
+        help="Disable .gitignore filtering",
+    )
+
     # Output format
     format_group = parser.add_argument_group("Output Format")
     format_group.add_argument(

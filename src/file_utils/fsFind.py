@@ -31,6 +31,7 @@ from typing import List, Set, Optional, Callable, Iterator
 
 from common_utils.lib_logging import setup_logging, log_debug, log_info
 from common_utils.lib_argparse_registry import register_arguments, parse_known_args
+from common_utils.lib_outputColors import Colors
 from file_utils.lib_extensions import get_extension_data
 from file_utils.fsFilters import FileSystemFilter, apply_config_to_filter
 
@@ -738,8 +739,14 @@ def add_args(parser: argparse.ArgumentParser) -> None:
             "supports . ^ $ * + ? [] () | {})"
         ),
     )
-    parser.add_argument("--ext", help="Comma-separated list of file extensions")
-    parser.add_argument("--type", help="Comma-separated list of file type categories")
+    parser.add_argument(
+        "--ext", action="append", default=[],
+        help="File extensions to include (repeatable, comma-separated). e.g. --ext py --ext js,ts",
+    )
+    parser.add_argument(
+        "--type", action="append", default=[],
+        help="File type categories to include (repeatable, comma-separated). e.g. --type image --type video",
+    )
 
     # Enhanced filtering via fsFilters integration
     parser.add_argument("--filter-file", "-fc", help="YAML filter configuration file")
@@ -839,7 +846,15 @@ def add_args(parser: argparse.ArgumentParser) -> None:
         "-g",
         dest="git_ignore_filter",
         action="store_true",
-        help="Use .gitignore files for filtering",
+        default=True,
+        help="Use .gitignore files for filtering (default: on)",
+    )
+    parser.add_argument(
+        "--no-git-ignore",
+        "-ng",
+        dest="git_ignore_filter",
+        action="store_false",
+        help="Disable .gitignore filtering",
     )
 
     # Output options
@@ -885,178 +900,119 @@ def parse_arguments():
     return args
 
 
+def _c(text: str, *codes: str) -> str:
+    """Apply ANSI color codes if stdout is a TTY."""
+    if not sys.stdout.isatty():
+        return text
+    return "".join(codes) + text + Colors.RESET
+
+
 def show_examples():
-    """Display usage examples."""
-    examples = """
-Usage Examples for fsFind.py:
+    """Display colorized usage examples."""
+    h = lambda t: _c(t, Colors.MAGENTA, Colors.BOLD)  # section headers
+    cmd = lambda t: _c(t, Colors.CYAN)                 # commands
+    cmt = lambda t: _c(t, Colors.DIM)                  # comments
+    arg = lambda t: _c(t, Colors.YELLOW)               # arguments/values
 
-Basic File Finding:
-  fsFind.py                                 # Find all items in current directory
-  fsFind.py . --recursive                  # Recursive search
-  fsFind.py . --max-depth 2                # Include depth-2 entries, skip deeper levels
-  fsFind.py . --min-depth 1                # Depth 0 = immediate children of the start dirs
-  fsFind.py /project --no-files             # Show only directories
-  fsFind.py . "*.py" --recursive           # Find Python files recursively
+    print(f"""
+{h("Usage Examples for fsFind.py:")}
 
-Legacy Pattern Matching:
-  fsFind.py . --substr test --recursive    # Files containing "test"
-  fsFind.py . --regex "^test.*\\.py$"      # Regex pattern matching
-  fsFind.py . --ext py,js --recursive      # Multiple extensions
-  fsFind.py . --type image,video           # File type categories
+{h("Basic File Finding:")}
+  {cmd("ff .")}                                    {cmt("# Find all items (recursive, git-ignore on)")}
+  {cmd("ff . --no-recurse")}                       {cmt("# Non-recursive search")}
+  {cmd("ff .")} {arg("--max-depth 2")}                       {cmt("# Include depth-2 entries, skip deeper")}
+  {cmd("ff .")} {arg("--min-depth 1")}                       {cmt("# Depth 0 = immediate children of start dirs")}
+  {cmd("ff /project --no-files")}                  {cmt("# Show only directories")}
+  {cmd("ff .")} {arg('"*.py"')}                              {cmt("# Find Python files")}
 
-Enhanced Filtering:
-  fsFind.py . --size-gt 1M --size-lt 100M --recursive         # Size range
-  fsFind.py . --modified-after 7d --recursive                 # Recent files
-  fsFind.py . --file-pattern "*.py" --dir-pattern "test*"     # Pattern combinations
-  fsFind.py . --git-ignore --type-filter image --recursive   # Git-aware image search
+{h("Pattern Matching:")}
+  {cmd("ff . --substr test")}                      {cmt("# Files containing 'test'")}
+  {cmd("ff .")} {arg('--regex "^test.*\\\\.py$"')}            {cmt("# Regex pattern matching")}
+  {cmd("ff .")} {arg("--ext py --ext js,ts")}                {cmt("# Multiple extensions (OR)")}
+  {cmd("ff .")} {arg("--type image,video")}                  {cmt("# File type categories")}
 
-Filter Configuration:
-  fsFind.py . --filter-file search.yml --recursive    # Complex search from config
-  
-  # search.yml example:
-  file_patterns:
-    - "*.py"
-    - "*.js"
-  size_gt: "10K"
-  modified_after: "30d"
-  git_ignore: true
+{h("Enhanced Filtering:")}
+  {cmd("ff .")} {arg("--size-gt 1M --size-lt 100M")}        {cmt("# Size range")}
+  {cmd("ff .")} {arg("--modified-after 7d")}                 {cmt("# Recent files")}
+  {cmd("ff .")} {arg('--file-pattern "*.py" --dir-pattern "test*"')}  {cmt("# Pattern combinations")}
+  {cmd("ff .")} {arg("--no-git-ignore --type-filter image")} {cmt("# Include gitignored files")}
 
-Advanced Examples:
-  # Find large Python files modified recently, excluding tests
-  fsFind.py . --file-pattern "*.py" --size-gt 50K --modified-after 7d --dir-ignore "*test*" -r
+{h("Advanced Examples:")}
+  {cmt("# Find large Python files modified recently, excluding tests")}
+  {cmd("ff .")} {arg('--file-pattern "*.py" --size-gt 50K --modified-after 7d --dir-ignore "*test*"')}
 
-  # Find all tracked image files in a project
-  fsFind.py /project --type-filter image --git-ignore --recursive
+  {cmt("# Search for config files with complex criteria")}
+  {cmd("ff .")} {arg('--file-pattern "*.conf" --file-pattern "*.cfg" --file-pattern "*.ini"')}
 
-  # Search for config files with complex criteria
-  fsFind.py . --file-pattern "*.conf" --file-pattern "*.cfg" --file-pattern "*.ini" -r
+  {cmt("# Find empty or very small files")}
+  {cmd("ff .")} {arg("--size-lt 1K --show-stats")}
 
-  # Find empty or very small files
-  fsFind.py . --size-lt 1K --recursive --show-stats
-
-Pipeline Usage:
-  fsFind.py . --type image -r | fsFormat.py --format table --size
-  fsFind.py . --size-gt 100M -r | fsActions.py --move /large-files --execute
-
-Performance Tips:
-  fsFind.py . --git-ignore --recursive     # Skip ignored files for faster search
-  fsFind.py . --size-gt 1M -r --dry-run   # Preview search scope
-  fsFind.py . --pattern-filter "*.log" --modified-before 30d -r  # Target specific patterns
-"""
-    print(examples)
+{h("Pipeline Usage:")}
+  {cmd("ff . --type image")} | {cmd("fsFormat --table --size")}
+  {cmd("ff . --size-gt 100M")} | {cmd("fsActions --move /large-files --execute")}
+""".rstrip())
 
 
 def show_verbose_help():
     """Display comprehensive help documentation."""
-    help_text = """
-fsFind.py - Enhanced File Finding with Comprehensive Filtering
+    h = lambda t: _c(t, Colors.MAGENTA, Colors.BOLD)
+    opt = lambda t: _c(t, Colors.CYAN)
+    arg = lambda t: _c(t, Colors.YELLOW)
+    cmt = lambda t: _c(t, Colors.DIM)
 
-OVERVIEW:
-    Powerful file finding utility with advanced filtering capabilities via fsFilters.py
-    integration. Supports both legacy simple patterns and modern complex filtering.
+    print(f"""
+{h("fsFind.py")} - Enhanced File Finding with Comprehensive Filtering
 
-BASIC SEARCH OPTIONS:
-    directories           Directories to search (default: current directory)
-    -r, --recursive       Search subdirectories recursively
-    --include-dirs        Include directories in results (default behaviour)
-    --no-dirs, -nd        Exclude directories from the printed results
-    --no-files, -nf       Exclude files from the printed results
-    --follow-symlinks     Follow symbolic links during traversal
-    --max-depth N         Limit search to N levels below the starting points (depth N is included)
-    --min-depth N         Only return results at depth N or deeper (depth 0 = children of the start dirs)
+{h("OVERVIEW:")}
+    Powerful file finding utility with advanced filtering capabilities.
+    Recursive and .gitignore-aware by default.
 
-    Depth semantics: the starting directories themselves are not emitted; depth 0 refers to their
-    immediate children.
+{h("DEFAULTS:")}
+    Recursive search is {opt("on")} by default. Use {opt("--no-recurse")} to disable.
+    .gitignore filtering is {opt("on")} by default. Use {opt("--no-git-ignore")} to disable.
 
-LEGACY PATTERN MATCHING:
-    pattern               Glob pattern (e.g., "*.py", "*test*")
-    --substr TEXT         Case-sensitive substring match on names (repeatable)
-    --regex PATTERN       Python regular expression (supports . ^ $ * + ? [] () | {} and anchors)
-    --ext EXTENSIONS      Comma-separated extensions (py,js,txt)
-    --type TYPES          Comma-separated type categories (image,video,audio)
+{h("BASIC SEARCH OPTIONS:")}
+    {arg("directories")}           Directories to search (default: current directory)
+    {opt("--no-recurse, -nr")}     Disable recursive search
+    {opt("--include-dirs")}        Include directories in results (default)
+    {opt("--no-dirs, -nd")}        Exclude directories from results
+    {opt("--no-files, -nf")}       Exclude files from results
+    {opt("--follow-symlinks")}     Follow symbolic links during traversal
+    {opt("--max-depth")} {arg("N")}         Limit search to N levels below starting points
+    {opt("--min-depth")} {arg("N")}         Only return results at depth N or deeper
 
-ENHANCED FILTERING (via fsFilters.py):
-    --filter-file FILE    Load comprehensive filters from YAML configuration
-    
-    Size Filtering:
-    --size-gt SIZE        Size greater than (100K, 1M, 2G)
-    --size-lt SIZE        Size less than
-    --size-eq SIZE        Size equal to
-    
-    Date Filtering:
-    --modified-after DATE Modified after date (YYYY-MM-DD, 7d, 1w, 1m)
-    --modified-before DATE Modified before date
-    --created-after DATE  Created after date
-    --created-before DATE Created before date
-    
-    Pattern Filtering:
-    --file-pattern PATTERN    File name patterns (repeatable)
-    --dir-pattern PATTERN     Directory name patterns (repeatable)
-    --pattern-filter PATTERN  Pattern for both files and directories
-    --file-ignore PATTERN     File patterns to ignore (repeatable)
-    --dir-ignore PATTERN      Directory patterns to ignore (repeatable)
-    --ignore-filter PATTERN   Ignore pattern for both files and directories
-    
-    Type and Extension Filtering:
-    --type-filter TYPE        File type categories (repeatable)
-    --extension-filter EXT    File extensions (repeatable)
-    
-    Git Integration:
-    --git-ignore             Use .gitignore files for filtering
+{h("PATTERN MATCHING:")}
+    {arg("pattern")}               Glob pattern (e.g., "*.py", "*test*")
+    {opt("--substr")} {arg("TEXT")}         Substring match on names (repeatable)
+    {opt("--regex")} {arg("PATTERN")}       Python regular expression
+    {opt("--ext")} {arg("EXT")}             File extensions (repeatable, comma-separated)
+    {opt("--type")} {arg("TYPE")}            File type categories (repeatable, comma-separated)
+    {opt("--ignore-case, -i")}     Case-insensitive matching
 
-FILTER CONFIGURATION FILE FORMAT:
-    # search.yml
-    file_patterns:
-      - "*.py"
-      - "*.js"
-    dir_patterns:
-      - "src*"
-      - "lib*"
-    size_gt: "10K"
-    size_lt: "10M"
-    modified_after: "30d"
-    type_filters:
-      - "image"
-      - "video"
-    git_ignore: true
-    
-    Load with: fsFind.py . --filter-file search.yml --recursive
+{h("ENHANCED FILTERING:")}
+    {opt("--filter-file")} {arg("FILE")}    Load filters from YAML config
 
-INFORMATION AND HELP OPTIONS:
-    --list-types          List all available file type categories
-    --show-stats          Display search statistics after completion
-    --dry-run            Show what directories would be searched
-    --quiet, -q          Suppress commentary; emit only matched paths
-    --help-examples      Show usage examples
-    --help-verbose       Show this detailed help
+    {cmt("Size:")}     {opt("--size-gt")} {arg("SIZE")}   {opt("--size-lt")} {arg("SIZE")}   {opt("--size-eq")} {arg("SIZE")}
+    {cmt("Date:")}     {opt("--modified-after")} {arg("DATE")}   {opt("--modified-before")} {arg("DATE")}
+               {opt("--created-after")} {arg("DATE")}    {opt("--created-before")} {arg("DATE")}
+    {cmt("Patterns:")} {opt("--file-pattern")} {arg("PAT")}   {opt("--dir-pattern")} {arg("PAT")}   {opt("--pattern-filter")} {arg("PAT")}
+    {cmt("Ignore:")}   {opt("--file-ignore")} {arg("PAT")}    {opt("--dir-ignore")} {arg("PAT")}    {opt("--ignore-filter")} {arg("PAT")}
+    {cmt("Types:")}    {opt("--type-filter")} {arg("TYPE")}   {opt("--extension-filter")} {arg("EXT")}
+    {cmt("Git:")}      {opt("--no-git-ignore")}       {cmt("(gitignore is on by default)")}
 
-PERFORMANCE CONSIDERATIONS:
-    - Use --git-ignore to skip irrelevant files in version-controlled projects
-    - Combine size and date filters to narrow search scope
-    - Use --dry-run to preview search scope for large directories
-    - Pattern filters are applied early for better performance
+{h("OUTPUT OPTIONS:")}
+    {opt("--list-types")}          List available file type categories
+    {opt("--show-stats")}          Display search statistics
+    {opt("--dry-run")}             Show what would be searched
+    {opt("--quiet, -q")}           Emit only matched paths
 
-INTEGRATION WITH OTHER TOOLS:
-    fsFind.py works well in pipelines with:
-    - fsFormat.py for formatted output
-    - fsActions.py for bulk operations
-    - fsFilters.py for additional filtering
-    
-    Examples:
-    fsFind.py . --type image -r | fsFormat.py --format json
-    fsFind.py . --size-gt 100M -r | fsActions.py --move /large --execute
+{h("PIPELINE INTEGRATION:")}
+    {opt("ff . --type image")} | {opt("fsFormat --table --size")}
+    {opt("ff . --size-gt 100M")} | {opt("fsActions --move /large --execute")}
 
-BACKWARD COMPATIBILITY:
-    All legacy options are preserved for existing scripts:
-    fsFind.py . "*.py" --recursive --ext py --type image
-    
-    Enhanced options provide more power and precision:
-    fsFind.py . --file-pattern "*.py" --size-gt 1K --git-ignore -r
-
-For examples: fsFind.py --help-examples
-For file types: fsFind.py --list-types
-"""
-    print(help_text)
+For examples: {opt("ff --help-examples")}
+For file types: {opt("ff --list-types")}
+""".rstrip())
 
 
 def _get_display_root(directory: Path) -> str:
@@ -1147,8 +1103,8 @@ def process_find_pipeline(args):
 
     # Parse legacy arguments
     substrings = args.substr if args.substr else []
-    extensions = args.ext.split(",") if args.ext else []
-    file_types = args.type.split(",") if args.type else []
+    extensions = [e.strip() for val in args.ext for e in val.split(",") if e.strip()]
+    file_types = [t.strip() for val in args.type for t in val.split(",") if t.strip()]
 
     # Perform search
     try:
