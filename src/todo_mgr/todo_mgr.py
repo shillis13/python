@@ -3018,22 +3018,8 @@ def run_command(line: str, interactive: bool = True) -> str | None:
 
 def repl() -> None:
     """Interactive REPL mode."""
-    # Load command history
-    try:
-        readline.read_history_file(HISTORY_FILE)
-    except FileNotFoundError:
-        pass
-    readline.set_history_length(500)
-    atexit.register(readline.write_history_file, str(HISTORY_FILE))
-
-    # Bind ESC-ESC (double escape) to clear the current input line.
-    # Single ESC can't be used — it's the prefix for arrow key sequences.
-    # Ctrl+U also clears the line (built-in, no binding needed).
-    esc = chr(27)
-    if "libedit" in (readline.__doc__ or ""):
-        readline.parse_and_bind(f'bind "{esc}{esc}" em-kill-line')
-    else:
-        readline.parse_and_bind(f'"{esc}{esc}": kill-whole-line')
+    from common_utils.lib_readline import setup_readline
+    setup_readline(history_file=HISTORY_FILE, history_length=500)
 
     print(c(f"todo_mgr v{VERSION}", Colors.BOLD), f"- TODO_ROOT={CURRENT_ROOT}")
     print(run_command("kanban"))

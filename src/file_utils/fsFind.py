@@ -7,14 +7,15 @@ filtering capabilities via fsFilters.py integration.
 
 Usage:
     fsFind.py [directories...] [options]
+    fsFind.py . -p "*.py"
+    fsFind.py /logs -p "*.log" --modified-after 7d
     fsFind.py . --ext py --size-gt 1K
-    fsFind.py /project --filter-file search.yml
 
 Examples:
-    fsFind.py . --recursive --ext py --size-gt 10K       # Large Python files
-    fsFind.py /logs --pattern "*.log" --modified-after 7d  # Recent logs
-    fsFind.py . --type image --git-ignore --recursive   # Tracked image files
-    fsFind.py --filter-file complex_search.yml          # Complex search from config
+    fsFind.py . -p "*.py" --size-gt 10K                  # Large Python files
+    fsFind.py /logs -p "*.log" --modified-after 7d        # Recent logs
+    fsFind.py . --type image                              # Image files by type
+    fsFind.py . --ext py --ext js                         # Multiple extensions
 """
 
 import argparse
@@ -648,13 +649,23 @@ class _DepthAction(argparse.Action):
 
 def add_args(parser: argparse.ArgumentParser) -> None:
     """Register command line arguments for this module."""
-    # Basic search parameters
+    # Directories (positional, defaults to cwd)
     parser.add_argument(
         "directories",
         nargs="*",
         default=["."],
         help="Directories to search (default: current directory)",
     )
+
+    # Pattern (named option, like find's -name)
+    parser.add_argument(
+        "--name", "-p",
+        dest="pattern",
+        default=None,
+        help='Glob pattern for filenames (e.g., "*.py", "*lib*", "*test*")',
+    )
+
+    # Search behavior
     parser.add_argument(
         "--no-recurse",
         "-nr",
@@ -711,26 +722,11 @@ def add_args(parser: argparse.ArgumentParser) -> None:
         action="store_false",
         help="Exclude files from search results",
     )
-
-    # Legacy search parameters (for backward compatibility)
-    parser.add_argument(
-        "pattern",
-        nargs="?",
-        default=None,
-        help='Glob pattern to search for (e.g., "*lib*")',
-    )
-    parser.add_argument(
-        "--substr",
-        "-s",
-        action="append",
-        default=[],
-        help="Substrings that must appear in names (repeatable; case-sensitive by default)",
-    )
     parser.add_argument(
         "--ignore-case",
         "-i",
         action="store_true",
-        help="Case-insensitive matching for --substr, --regex, and glob patterns",
+        help="Case-insensitive matching for --name, --regex, and glob patterns",
     )
     parser.add_argument(
         "--regex",
@@ -923,10 +919,10 @@ def show_examples():
   {cmd("ff .")} {arg("--max-depth 2")}                       {cmt("# Include depth-2 entries, skip deeper")}
   {cmd("ff .")} {arg("--min-depth 1")}                       {cmt("# Depth 0 = immediate children of start dirs")}
   {cmd("ff /project --no-files")}                  {cmt("# Show only directories")}
-  {cmd("ff .")} {arg('"*.py"')}                              {cmt("# Find Python files")}
+  {cmd("ff .")} {arg('-p "*.py"')}                            {cmt("# Find Python files in cwd")}
 
 {h("Pattern Matching:")}
-  {cmd("ff . --substr test")}                      {cmt("# Files containing 'test'")}
+  {cmd('ff . --name "*test*"')}                     {cmt("# Files containing 'test'")}
   {cmd("ff .")} {arg('--regex "^test.*\\\\.py$"')}            {cmt("# Regex pattern matching")}
   {cmd("ff .")} {arg("--ext py --ext js,ts")}                {cmt("# Multiple extensions (OR)")}
   {cmd("ff .")} {arg("--type image,video")}                  {cmt("# File type categories")}
@@ -982,8 +978,7 @@ def show_verbose_help():
     {opt("--min-depth")} {arg("N")}         Only return results at depth N or deeper
 
 {h("PATTERN MATCHING:")}
-    {arg("pattern")}               Glob pattern (e.g., "*.py", "*test*")
-    {opt("--substr")} {arg("TEXT")}         Substring match on names (repeatable)
+    {opt("--name, -p")} {arg("PAT")}      Glob pattern (e.g., "*.py", "*test*")
     {opt("--regex")} {arg("PATTERN")}       Python regular expression
     {opt("--ext")} {arg("EXT")}             File extensions (repeatable, comma-separated)
     {opt("--type")} {arg("TYPE")}            File type categories (repeatable, comma-separated)
@@ -1101,8 +1096,8 @@ def process_find_pipeline(args):
         base_paths = [Path(d) for d in search_dirs]
         fs_filter.enable_gitignore(base_paths)
 
-    # Parse legacy arguments
-    substrings = args.substr if args.substr else []
+    # Parse filter arguments
+    substrings = []
     extensions = [e.strip() for val in args.ext for e in val.split(",") if e.strip()]
     file_types = [t.strip() for val in args.type for t in val.split(",") if t.strip()]
 
@@ -1171,10 +1166,10 @@ def main():
         print("fsFind.py - Enhanced File Finding Utility")
         print("Usage: fsFind.py [directories...] [options]")
         print("\nBasic Examples:")
-        print("  fsFind.py                      # Find all files in current directory")
-        print("  fsFind.py . --recursive        # Recursive search")
-        print("  fsFind.py . '*.py' -r          # Find Python files recursively")
-        print("  fsFind.py . --type image -r    # Find image files recursively")
+        print("  fsFind.py .                    # Find all files in current directory")
+        print("  fsFind.py . -p '*.py'          # Find Python files")
+        print("  fsFind.py . /src -p '*.py'     # Search multiple directories")
+        print("  fsFind.py . --type image       # Find image files by type")
         print("  fsFind.py . --max-depth 2      # Limit how deep to search")
         print("\nFor help:")
         print("  fsFind.py --help               # Standard help")
