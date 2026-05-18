@@ -1,0 +1,3 @@
+# Variant A
+
+Variant A implements `gdir` with subcommands and a single JSON file for persistence. Subcommands keep the interface explicit (`gdir add`, `gdir go`, etc.) and make help/usage straightforward. All state, including bookmarks and history, lives in one structured file, simplifying atomic saves. Listing output adapts column widths and shortens long paths with mid-ellipsis to keep the view compact yet informative. History is trimmed when jumping after a backtrack so navigation feels natural. The CLI returns absolute paths only for navigation commands, enabling shell wrappers like `cd "$(gdir go proj)"`.
