@@ -83,10 +83,20 @@ def should_exclude(filepath, base_dir, patterns):
     rel_path = os.path.relpath(filepath, base_dir)
     return any(fnmatch.fnmatch(rel_path, pat) for pat in patterns)
 
-"""Infers the tar file mode from the file extension."""
+def _safe_arcname(file_path, base_dir):
+    """Compute an archive member name that never contains '..' components.
+
+    If the file is under base_dir, returns the relative path.
+    Otherwise falls back to just the filename to avoid ../../ chains.
+    """
+    rel = os.path.relpath(file_path, base_dir)
+    if rel.startswith(".."):
+        return os.path.basename(file_path)
+    return rel
 
 
 def _get_tar_mode(archive_path):
+    """Infer the tar file mode from the file extension."""
     if archive_path.endswith(".tar.gz") or archive_path.endswith(".tgz"):
         return "w:gz"
     elif archive_path.endswith(".tar.bz2") or archive_path.endswith(".tbz2"):
@@ -158,10 +168,8 @@ def create_archive(
     return archive_path
 
 
-"""Creates a zip archive, with optional AES encryption."""
-
-
 def _create_zip(archive_path, file_list, base_dir, password, verbose):
+    """Create a zip archive, with optional AES encryption."""
     encryption = pyzipper.WZ_AES if password else None
     with pyzipper.AESZipFile(
         archive_path, "w", compression=pyzipper.ZIP_DEFLATED, encryption=encryption
@@ -175,15 +183,12 @@ def _create_zip(archive_path, file_list, base_dir, password, verbose):
         for file_path in iterable:
             if not os.path.isfile(file_path):
                 continue  # Skip directories
-            arcname = os.path.relpath(file_path, base_dir)
-            print(f"Adding to zip: {file_path} as {arcname}")
+            arcname = _safe_arcname(file_path, base_dir)
             zipf.write(file_path, arcname)
 
 
-"""Creates a tar archive."""
-
-
 def _create_tar(archive_path, file_list, base_dir, verbose):
+    """Create a tar archive."""
     mode = _get_tar_mode(archive_path)
     with tarfile.open(archive_path, mode) as tarf:
         iterable = tqdm(
@@ -192,23 +197,19 @@ def _create_tar(archive_path, file_list, base_dir, verbose):
         for file_path in iterable:
             if not os.path.isfile(file_path):
                 continue  # Skip directories
-            arcname = os.path.relpath(file_path, base_dir)
-            print(f"Adding to tar: {file_path} as {arcname}")
+            arcname = _safe_arcname(file_path, base_dir)
             tarf.add(file_path, arcname)
 
 
-"""
-Factory function to extract an archive, auto-detecting the format.
-
-Args:
-    archive_path (str): Path to the archive to extract.
-    output_dir (str): Directory where contents will be extracted.
-    password (str, optional): Password for encrypted zip files.
-    verbose (bool): If True, prints progress.
-"""
-
-
 def extract_archive(archive_path, output_dir, password=None, verbose=False):
+    """Extract an archive, auto-detecting the format.
+
+    Args:
+        archive_path: Path to the archive to extract.
+        output_dir: Directory where contents will be extracted.
+        password: Password for encrypted zip files.
+        verbose: If True, prints progress.
+    """
     os.makedirs(output_dir, exist_ok=True)
 
     if pyzipper.is_zipfile(archive_path):
@@ -219,10 +220,8 @@ def extract_archive(archive_path, output_dir, password=None, verbose=False):
         raise ValueError(f"'{archive_path}' is not a recognized zip or tar file.")
 
 
-"""Extracts a zip archive."""
-
-
 def _extract_zip(archive_path, output_dir, password, verbose):
+    """Extract a zip archive."""
     with pyzipper.AESZipFile(archive_path, "r") as zipf:
         pwd_bytes = password.encode("utf-8") if password else None
         if pwd_bytes:
@@ -243,10 +242,8 @@ def _extract_zip(archive_path, output_dir, password, verbose):
                 raise e
 
 
-"""Extracts a tar archive."""
-
-
 def _extract_tar(archive_path, output_dir, verbose):
+    """Extract a tar archive."""
     with tarfile.open(archive_path, "r:*") as tarf:
         if verbose:
             print(f"Extracting tar archive '{os.path.basename(archive_path)}'...")
@@ -255,15 +252,12 @@ def _extract_tar(archive_path, output_dir, verbose):
             print("Extraction complete.")
 
 
-"""
-Factory function to list the contents of an archive.
-
-Returns:
-    A list of strings, where each string is a file path inside the archive.
-"""
-
-
 def list_archive_contents(archive_path, password=None):
+    """List the contents of an archive.
+
+    Returns:
+        A list of strings, where each string is a file path inside the archive.
+    """
     if pyzipper.is_zipfile(archive_path):
         with pyzipper.AESZipFile(archive_path, "r") as zipf:
             return zipf.namelist()

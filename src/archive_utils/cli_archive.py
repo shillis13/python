@@ -249,25 +249,28 @@ def handle_extract(args):
     lib_logging.log_info(f"Extracting: {args.archive_name} → {args.destination}")
 
     password = args.password
-    if not password and args.archive_name.lower().endswith(".zip"):
-        # Prompt for password for zip files (might be encrypted)
-        try:
-            password = getpass("Enter password (press Enter if none): ")
-            if not password:
-                password = None
-        except (EOFError, KeyboardInterrupt):
-            lib_logging.log_error("\nPassword entry cancelled. Aborting.")
-            sys.exit(1)
 
     try:
+        # Try extraction without password first (or with explicit --password)
         lib_archive.extract_archive(args.archive_name, args.destination, password)
         lib_logging.log_info(f"SUCCESS: Extracted to {args.destination}")
     except ValueError as e:
-        if "password" in str(e).lower():
-            lib_logging.log_error(f"Extraction failed: {e}")
+        if "password" in str(e).lower() and not password:
+            # Password needed but none provided — prompt interactively
+            try:
+                password = getpass("Archive is encrypted. Enter password: ")
+            except (EOFError, KeyboardInterrupt):
+                lib_logging.log_error("\nPassword entry cancelled. Aborting.")
+                sys.exit(1)
+            try:
+                lib_archive.extract_archive(args.archive_name, args.destination, password)
+                lib_logging.log_info(f"SUCCESS: Extracted to {args.destination}")
+            except (ValueError, Exception) as retry_e:
+                lib_logging.log_error(f"Extraction failed: {retry_e}")
+                sys.exit(1)
         else:
             lib_logging.log_error(f"Failed to extract: {e}")
-        sys.exit(1)
+            sys.exit(1)
     except Exception as e:
         lib_logging.log_error(f"Failed to extract archive: {e}", exc_info=True)
         sys.exit(1)
