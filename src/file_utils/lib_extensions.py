@@ -266,8 +266,8 @@ def get_extension_data() -> dict | None:
         print(f"Searched in: {[str(d) for d in search_dirs]}")
         return None
 
-    print(f"Loading data from: {config_path}")
-    print(f"Loading schema from: {schema_path}")
+    print(f"Loading data from: {config_path}", file=sys.stderr)
+    print(f"Loading schema from: {schema_path}", file=sys.stderr)
     load_yaml_file, validate_data, _ = _import_yaml_utils()
     schema = load_yaml_file(schema_path)
     data = load_yaml_file(config_path)
@@ -355,7 +355,7 @@ def print_full_hierarchy(data: dict, show_extensions: bool):
         data_to_print = _prune_extensions_recursive(data_to_print)
 
     print("File Type Hierarchy:")
-    print_tree(data_to_print)
+    print(print_tree(data_to_print))
 
 
 # ---
@@ -437,7 +437,7 @@ def print_type_query(
                     q.append((value["sub_types"], target))
 
         if sub_tree:
-            print_tree(sub_tree)
+            print(print_tree(sub_tree))
         else:
             print(f"Could not find '{type_name}' in source data to print tree.")
 
@@ -470,43 +470,70 @@ Returns:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Query file extension and type hierarchies."
+        prog="file_extensions",
+        description="Query file extension and type hierarchies.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""\
+commands:
+  tree                     Show the full type hierarchy
+  get-type <ext>           Look up which type an extension belongs to
+  query-type <type>        Show info about a type (tree, ancestors, extensions)
+
+examples:
+  file_extensions tree                        # Show all types in a tree
+  file_extensions tree -e                     # Include extensions in the tree
+  file_extensions get-type .py                # What type is .py?
+  file_extensions get-type .py -a             # Show .py's type + ancestors
+  file_extensions query-type image            # Show image type's subtree
+  file_extensions query-type image -a         # Show image's ancestors
+  file_extensions query-type image -f         # Flat list of all image extensions
+  file_extensions query-type source -t        # Source type descendant tree
+
+type names (top-level):
+  source, image, video, audio, document, archive, config,
+  executable, data, build, temporary
+""",
     )
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
     # 'tree' command
     parser_tree = subparsers.add_parser(
-        "tree", help="Display the full hierarchy of types."
+        "tree", help="Display the full hierarchy of types.",
+        description="Show the complete file type hierarchy as a tree.",
     )
     parser_tree.add_argument(
         "-e",
         "--show-extensions",
         action="store_true",
-        help="Include extensions in the tree view.",
+        help="Include individual extensions under each type node.",
     )
 
     # 'get-type' command
     parser_get_type = subparsers.add_parser(
-        "get-type", help="Find the type for a given extension."
+        "get-type", help="Find the type for a given extension.",
+        description="Look up which type category an extension belongs to.",
     )
     parser_get_type.add_argument(
-        "extension", type=str, help="The file extension to look up (e.g., .txt)."
+        "extension", type=str,
+        help="The file extension to look up (e.g., .py, .jpg, .txt).",
     )
     parser_get_type.add_argument(
         "-a",
         "--ancestors",
         action="store_true",
-        help="Show the full ancestor path for the type.",
+        help="Show the full ancestor chain from the type up to the root.",
     )
 
     # 'query-type' command
     parser_query_type = subparsers.add_parser(
-        "query-type", help="Query information about a specific type."
+        "query-type", help="Query information about a specific type.",
+        description="Show details about a type: its subtree, ancestors, or extensions.",
     )
     parser_query_type.add_argument(
-        "type_name", type=str, help="The type name to query."
+        "type_name", type=str,
+        help="The type name to query (e.g., image, source, document).",
     )
-    group = parser_query_type.add_mutually_exclusive_group(required=True)
+    group = parser_query_type.add_mutually_exclusive_group(required=False)
     group.add_argument(
         "-a",
         "--ancestors",
@@ -530,29 +557,43 @@ def main():
     data = get_extension_data()
 
     if not data:
-        result = 1
-        return result
+        return 1
 
     if args.command == "tree":
         print_full_hierarchy(data, args.show_extensions)
     elif args.command == "get-type":
         print_type_from_extension(args.extension, data, args.ancestors)
     elif args.command == "query-type":
+        # Default to descendants-tree if no flag given
+        show_ancestors = getattr(args, "ancestors", False)
+        show_tree = getattr(args, "descendants_tree", False)
+        show_flat = getattr(args, "descendants_flat", False)
+        if not show_ancestors and not show_tree and not show_flat:
+            show_tree = True
         print_type_query(
             args.type_name,
             data,
-            args.ancestors,
-            args.descendants_tree,
-            args.descendants_flat,
+            show_ancestors,
+            show_tree,
+            show_flat,
         )
     else:
         parser.print_help()
 
-    result = 0
-    return result
+    return 0
+
+
+def _is_cli_entry():
+    """Return True only when invoked as 'file_extensions', not as lib_extensions.py."""
+    invoked = Path(sys.argv[0]).stem if sys.argv else ""
+    return invoked == "file_extensions"
 
 
 if __name__ == "__main__":
-    main()
+    if _is_cli_entry():
+        sys.exit(main())
+    else:
+        # Imported or run directly as lib_extensions.py — don't execute CLI
+        pass
 # ========================================
 # endregion
