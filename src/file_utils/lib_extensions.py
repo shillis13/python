@@ -355,7 +355,7 @@ def print_full_hierarchy(data: dict, show_extensions: bool):
         data_to_print = _prune_extensions_recursive(data_to_print)
 
     print("File Type Hierarchy:")
-    print(print_tree(data_to_print))
+    print(print_tree(data_to_print, show_values=True))
 
 
 # ---
@@ -437,7 +437,7 @@ def print_type_query(
                     q.append((value["sub_types"], target))
 
         if sub_tree:
-            print(print_tree(sub_tree))
+            print(print_tree(sub_tree, show_values=True))
         else:
             print(f"Could not find '{type_name}' in source data to print tree.")
 
