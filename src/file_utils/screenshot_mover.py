@@ -136,9 +136,31 @@ def get_extensions_for_categories(categories: list[str]) -> set[str]:
     return exts
 
 
+def _convert_12h_to_24h(match: re.Match) -> str:
+    """Convert '10.15.32 AM' or '2.05.00 PM' to 24-hour 'HH.MM.SS'."""
+    h, m, s = int(match.group(1)), match.group(2), match.group(3)
+    period = match.group(4).upper()
+    if period == "AM" and h == 12:
+        h = 0
+    elif period == "PM" and h != 12:
+        h += 12
+    return f"{h:02d}.{m}.{s}"
+
+
 def clean_filename(name: str) -> str:
-    """Lowercase, replace spaces/special chars with underscores, collapse runs."""
+    """Lowercase, replace AM/PM time with 24h, replace spaces/special chars with underscores."""
+    # Convert 12h time to 24h before lowercasing (need to match AM/PM case-insensitive)
+    name = re.sub(
+        r'(\d{1,2})\.(\d{2})\.(\d{2})\s*([AaPp][Mm])',
+        _convert_12h_to_24h,
+        name,
+    )
+    # Also handle the Unicode non-breaking space macOS sometimes uses before AM/PM
+    name = unicodedata.normalize("NFKD", name)
+
     name = name.lower()
+    # Drop standalone "at" between date and time (e.g., "2026-05-30 at 10.15.32")
+    name = re.sub(r'(\d{4}-\d{2}-\d{2})[\s_]+at[\s_]+', r'\1_', name)
     name = re.sub(r"[^a-z0-9._-]", "_", name)
     name = re.sub(r"_+", "_", name)
     name = name.strip("_")
@@ -267,9 +289,8 @@ def main() -> int:
     if src.suffix.lower() not in allowed_exts:
         return 0
 
-    # Clean filename
-    timestamp = datetime.now().strftime("%H.%M.%S")
-    cleaned = f"{clean_filename(src.stem)}_{timestamp}{src.suffix}"
+    # Clean filename (converts AM/PM time to 24h, lowercases, underscores)
+    cleaned = f"{clean_filename(src.stem)}{src.suffix.lower()}"
 
     # Ensure destination exists
     dest_dir.mkdir(parents=True, exist_ok=True)
