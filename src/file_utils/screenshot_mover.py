@@ -24,6 +24,7 @@ import shutil
 import subprocess
 import sys
 import unicodedata
+from datetime import datetime
 from pathlib import Path
 
 # Ensure lib_extensions is importable regardless of working directory
@@ -267,7 +268,8 @@ def main() -> int:
         return 0
 
     # Clean filename
-    cleaned = clean_filename(src.name)
+    timestamp = datetime.now().strftime("%H.%M.%S")
+    cleaned = f"{clean_filename(src.stem)}_{timestamp}{src.suffix}"
 
     # Ensure destination exists
     dest_dir.mkdir(parents=True, exist_ok=True)
