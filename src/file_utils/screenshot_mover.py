@@ -137,14 +137,18 @@ def get_extensions_for_categories(categories: list[str]) -> set[str]:
 
 
 def _convert_12h_to_24h(match: re.Match) -> str:
-    """Convert '10.15.32 AM' or '2.05.00 PM' to 24-hour 'HH.MM.SS'."""
+    """Convert '10.15.32 AM' or '2.05.00 PM' to 24-hour 'HH_MM_SS'.
+
+    Uses underscores instead of dots so Finder doesn't confuse the time
+    digits with a file extension (e.g., '.32.png' interpreted as extension).
+    """
     h, m, s = int(match.group(1)), match.group(2), match.group(3)
     period = match.group(4).upper()
     if period == "AM" and h == 12:
         h = 0
     elif period == "PM" and h != 12:
         h += 12
-    return f"{h:02d}.{m}.{s}"
+    return f"{h:02d}_{m}_{s}"
 
 
 def clean_filename(name: str) -> str:
