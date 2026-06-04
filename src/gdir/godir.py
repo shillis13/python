@@ -315,28 +315,28 @@ def cmd_edit(
 
 def cmd_repath(
     store: MappingStore,
-    old_prefix: str,
-    new_prefix: str,
+    old_part: str,
+    new_part: str,
     dry_run: bool,
 ) -> int:
-    """Batch update paths — replace old prefix with new prefix in all matching bookmarks.
+    """Batch update paths — replace old substring with new substring in all matching bookmarks.
 
-    Matches against raw stored paths (not resolved), so symlinks don't interfere.
-    The old_prefix is expanded (~) but NOT resolved through symlinks.
+    Matches anywhere in the path, not just prefix. Tilde-expands both arguments
+    but does NOT resolve through symlinks.
     """
-    old_expanded = str(Path(old_prefix).expanduser())
-    new_expanded = str(Path(new_prefix).expanduser())
+    old_expanded = str(Path(old_part).expanduser())
+    new_expanded = str(Path(new_part).expanduser())
     changed = 0
     for entry in store.entries:
-        if entry.path.startswith(old_expanded):
-            new_path = new_expanded + entry.path[len(old_expanded):]
+        if old_expanded in entry.path:
+            new_path = entry.path.replace(old_expanded, new_expanded, 1)
             if dry_run:
                 print(f"  {_sc(entry.key, 'cyan')}: {_sc(entry.path, 'red')} -> {_sc(new_path, 'green')}")
             else:
                 entry.path = new_path
             changed += 1
     if changed == 0:
-        print(f"No bookmarks match path prefix: {old_prefix}")
+        print(f"No bookmarks match path substring: {old_part}")
         return 0
     if dry_run:
         print(f"\n{changed} bookmark(s) would be updated. Run without --dry-run to apply.")
