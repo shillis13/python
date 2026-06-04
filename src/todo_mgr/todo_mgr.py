@@ -170,6 +170,7 @@ class Todo:
     status: str
     flags: list[str] = field(default_factory=list)
     tags: list[str] = field(default_factory=list)
+    assigned: list[str] = field(default_factory=list)
     parent: Path | None = None
     children: list[Path] = field(default_factory=list)
     summary: str = ""
@@ -201,6 +202,7 @@ def todo_to_dict(todo: Todo, ref: str = "") -> dict:
         "status": todo.status,
         "flags": todo.flags,
         "tags": todo.tags,
+        "assigned": todo.assigned,
         "title": todo.title,
         "summary": todo.summary,
         "created": todo.created,
@@ -243,7 +245,15 @@ def load_todos(include_completed: bool = False, include_trash: bool = False) -> 
         status = status_file.stem
         flags = sorted(f.stem for f in todo_dir.glob("*.flag"))
         tags = sorted(t.stem for t in todo_dir.glob("*.tag"))
-        
+
+        # Load assigned URIs
+        assigned_file = todo_dir / "assigned.yml"
+        if assigned_file.exists():
+            import yaml
+            assigned = yaml.safe_load(assigned_file.read_text()) or []
+        else:
+            assigned = []
+
         # Determine parent
         parent = todo_dir.parent
         if parent == CURRENT_ROOT or parent.name in ("completed", "trash"):
@@ -258,6 +268,7 @@ def load_todos(include_completed: bool = False, include_trash: bool = False) -> 
             status=status,
             flags=flags,
             tags=tags,
+            assigned=assigned,
             parent=parent,
             summary=summary,
             title=title or todo_dir.name,
@@ -643,7 +654,12 @@ def view_todo_detail(todo: Todo, refs: dict[str, Path],
         lines.append(f"  {c('Tags:', Colors.DIM)}       {tags_colored}")
     else:
         lines.append(f"  {c('Tags:', Colors.DIM)}       {c('(none)', Colors.DIM)}")
-    
+
+    # Assigned
+    if todo.assigned:
+        assigned_colored = ", ".join(c(a, Colors.CYAN) for a in todo.assigned)
+        lines.append(f"  {c('Assigned:', Colors.DIM)}   {assigned_colored}")
+
     # Parent
     if todo.parent:
         parent_rel = todo.parent.relative_to(CURRENT_ROOT)
@@ -868,6 +884,38 @@ def _inline_remove_marker(name: str, todo_dir: str = ".", *, suffix: str) -> Non
         target.unlink()
 
 
+def _assign_todo(todo_dir: Path, uri: str) -> str:
+    """Assign a URI to a todo. Creates/updates assigned.yml."""
+    import yaml
+    assigned_file = todo_dir / "assigned.yml"
+    if assigned_file.exists():
+        assigned = yaml.safe_load(assigned_file.read_text()) or []
+    else:
+        assigned = []
+    if uri in assigned:
+        return "Already assigned to {}".format(uri)
+    assigned.append(uri)
+    assigned_file.write_text(yaml.dump(assigned, default_flow_style=False))
+    return "Assigned to {}".format(uri)
+
+
+def _unassign_todo(todo_dir: Path, uri: str) -> str:
+    """Remove a URI assignment from a todo."""
+    import yaml
+    assigned_file = todo_dir / "assigned.yml"
+    if not assigned_file.exists():
+        return "Not assigned to {}".format(uri)
+    assigned = yaml.safe_load(assigned_file.read_text()) or []
+    if uri not in assigned:
+        return "Not assigned to {}".format(uri)
+    assigned.remove(uri)
+    if assigned:
+        assigned_file.write_text(yaml.dump(assigned, default_flow_style=False))
+    else:
+        assigned_file.unlink()
+    return "Unassigned from {}".format(uri)
+
+
 # === Operations Layer ===
 # Pure operations returning structured dicts. Used by cmd_*() and MCP server.
 
@@ -876,6 +924,7 @@ def ops_list(
     status: str | None = None,
     tag: str | None = None,
     flag: str | None = None,
+    assigned: str | None = None,
     name_pattern: str | None = None,
     sort_key: str | None = None,
     include_all: bool = False,
@@ -917,6 +966,8 @@ def ops_list(
         if tag and tag not in todo.tags:
             continue
         if flag and flag not in todo.flags:
+            continue
+        if assigned and assigned not in todo.assigned:
             continue
         if name_pattern and not fnmatch.fnmatch(todo.name.lower(), name_pattern.lower()):
             continue
@@ -1056,6 +1107,52 @@ def ops_tag(action: str, identifier: str, tag_name: str) -> dict:
 
         return {"success": True, "todo_id": todo.name, "action": action, "tag": tag_slug}
     except (ValueError, subprocess.CalledProcessError) as e:
+        return {"success": False, "error": str(e)}
+
+
+def ops_assign(identifier: str, uri: str) -> dict:
+    """Assign a URI to a todo."""
+    todos = load_todos()
+    refs = build_reference_map(todos)
+    try:
+        path = resolve_target(identifier, todos, refs)
+        todo = todos.get(path)
+        if not todo:
+            return {"success": False, "error": f"Todo not found: {identifier}"}
+        msg = _assign_todo(path, uri)
+        already = "Already assigned" in msg
+        return {"success": True, "todo_id": todo.name, "uri": uri, "message": msg, "already_assigned": already}
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
+
+
+def ops_unassign(identifier: str, uri: str) -> dict:
+    """Remove a URI assignment from a todo."""
+    todos = load_todos()
+    refs = build_reference_map(todos)
+    try:
+        path = resolve_target(identifier, todos, refs)
+        todo = todos.get(path)
+        if not todo:
+            return {"success": False, "error": f"Todo not found: {identifier}"}
+        msg = _unassign_todo(path, uri)
+        not_assigned = "Not assigned" in msg
+        return {"success": True, "todo_id": todo.name, "uri": uri, "message": msg, "not_assigned": not_assigned}
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
+
+
+def ops_assigned(identifier: str) -> dict:
+    """List current assignments for a todo."""
+    todos = load_todos()
+    refs = build_reference_map(todos)
+    try:
+        path = resolve_target(identifier, todos, refs)
+        todo = todos.get(path)
+        if not todo:
+            return {"success": False, "error": f"Todo not found: {identifier}"}
+        return {"success": True, "todo_id": todo.name, "assigned": todo.assigned}
+    except ValueError as e:
         return {"success": False, "error": str(e)}
 
 
@@ -1491,6 +1588,7 @@ def cmd_list(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) ->
     show_done = False
     show_cancelled = False
     name_pattern = None
+    assigned_filter = None
 
     # Parse args
     positional_args = []
@@ -1512,6 +1610,9 @@ def cmd_list(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) ->
             show_done = True
         elif arg == "--cancelled":
             show_cancelled = True
+        elif arg == "--assigned" and i + 1 < len(args):
+            i += 1
+            assigned_filter = args[i]
         elif not arg.startswith("--"):
             positional_args.append(arg)
         i += 1
@@ -1564,6 +1665,10 @@ def cmd_list(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) ->
     if name_pattern:
         filtered = [t for t in filtered
                     if fnmatch.fnmatch(t.name.lower(), name_pattern.lower())]
+
+    # Apply assigned URI filter
+    if assigned_filter:
+        filtered = [t for t in filtered if assigned_filter in t.assigned]
 
     return format_table(filtered, sort_key=sort_key, indent_children=not flat,
                         show_dates=show_dates)
@@ -1698,6 +1803,46 @@ def cmd_tag(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> 
     if result.get("not_found"):
         return c(f"Tag not present: {result['tag']} on {result['todo_id']}", Colors.YELLOW)
     return c(f"Tag {action}ed: {result['tag']} on {result['todo_id']}", Colors.GREEN)
+
+
+def cmd_assign(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> str:
+    """Assign a URI to a todo. Usage: assign <ref> <uri>"""
+    if len(args) < 2:
+        return c("Usage: assign <ref> <uri>", Colors.RED)
+    result = ops_assign(args[0], args[1])
+    if not result["success"]:
+        return c(f"Error: {result['error']}", Colors.RED)
+    if result.get("already_assigned"):
+        return c(f"Already assigned: {result['uri']} on {result['todo_id']}", Colors.YELLOW)
+    return c(f"Assigned: {result['uri']} to {result['todo_id']}", Colors.GREEN)
+
+
+def cmd_unassign(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> str:
+    """Remove a URI assignment from a todo. Usage: unassign <ref> <uri>"""
+    if len(args) < 2:
+        return c("Usage: unassign <ref> <uri>", Colors.RED)
+    result = ops_unassign(args[0], args[1])
+    if not result["success"]:
+        return c(f"Error: {result['error']}", Colors.RED)
+    if result.get("not_assigned"):
+        return c(f"Not assigned: {result['uri']} on {result['todo_id']}", Colors.YELLOW)
+    return c(f"Unassigned: {result['uri']} from {result['todo_id']}", Colors.GREEN)
+
+
+def cmd_assigned(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> str:
+    """List current assignments for a todo. Usage: assigned <ref>"""
+    if not args:
+        return c("Usage: assigned <ref>", Colors.RED)
+    result = ops_assigned(args[0])
+    if not result["success"]:
+        return c(f"Error: {result['error']}", Colors.RED)
+    assigned = result["assigned"]
+    if not assigned:
+        return c(f"No assignments for {result['todo_id']}", Colors.DIM)
+    lines = [c(f"Assignments for {result['todo_id']}:", Colors.BOLD)]
+    for uri in assigned:
+        lines.append(f"  {c(uri, Colors.CYAN)}")
+    return "\n".join(lines)
 
 
 def get_next_todo_number() -> int:
@@ -2477,6 +2622,9 @@ HELP_OVERVIEW = """
     {cyan}status{reset} <r> <s>  Change todo status
     {cyan}edit{reset} <ref>      Interactive editor
     {cyan}move{reset} <target> <ref...>  Move todo(s) to target (or 'root')
+    {cyan}assign{reset} <ref> <uri>  Assign a URI to a todo
+    {cyan}unassign{reset} <ref> <uri>  Remove a URI assignment
+    {cyan}assigned{reset} <ref>  List current assignments
     {cyan}complete{reset} <ref>  Mark done and archive
     {cyan}delete{reset} <ref>    Move to trash (alias: rm)
     {cyan}purge{reset} <ref>     Permanently delete (no recovery)
@@ -2535,6 +2683,12 @@ HELP_EXAMPLES = """
     tag add IP2 api                # Add tag
     edit IP2                       # Interactive editor
     edit IP2 description           # Edit specific field
+
+{bold}Assigning:{reset}
+    assign IP2 uai://project/abc   # Assign URI to todo
+    assigned IP2                   # List assignments
+    unassign IP2 uai://project/abc # Remove assignment
+    list --assigned uai://project/abc  # Filter by assignment
 
 {bold}Organizing:{reset}
     move todo_0050_parent IP2      # Make IP2 a child of another todo
@@ -2610,6 +2764,26 @@ HELP_VERBOSE = """
       Fields: title, description, status, tags, flags, child, requirements, done_when, notes
       Without field arg, shows menu of all editable fields.
       Child: move existing todo as child, or create new child.
+
+{bold}ASSIGNMENT COMMANDS{reset}
+
+  {cyan}assign{reset} <ref> <uri>
+      Assign a URI to a todo. Stored in assigned.yml.
+      Multiple URIs can be assigned to one todo.
+      Example: assign IP2 uai://project/abc
+
+  {cyan}unassign{reset} <ref> <uri>
+      Remove a URI assignment from a todo.
+      Removes assigned.yml when empty (no leftover files).
+      Example: unassign IP2 uai://project/abc
+
+  {cyan}assigned{reset} <ref>
+      List all current URI assignments for a todo.
+      Example: assigned IP2
+
+  {cyan}list{reset} --assigned <uri>
+      Filter the list command to show only todos assigned to a URI.
+      Example: list --assigned uai://project/abc
 
 {bold}ORGANIZATION COMMANDS{reset}
 
@@ -2875,6 +3049,34 @@ Add or remove a tag from a todo.
     tag add IP2 api
     tag remove IP2 legacy
 """,
+    "assign": """
+{bold}assign{reset} <ref> <uri>
+
+Assign a URI to a todo. Stored in assigned.yml in the todo directory.
+Multiple URIs can be assigned to the same todo.
+
+{bold}Examples:{reset}
+    assign IP2 uai://project/abc
+    assign 0038 uai://session/20260521_043029_6784ebe3_cla
+""",
+    "unassign": """
+{bold}unassign{reset} <ref> <uri>
+
+Remove a URI assignment from a todo.
+When the last assignment is removed, the assigned.yml file is deleted.
+
+{bold}Examples:{reset}
+    unassign IP2 uai://project/abc
+""",
+    "assigned": """
+{bold}assigned{reset} <ref>
+
+List all current URI assignments for a todo.
+
+{bold}Examples:{reset}
+    assigned IP2
+    assigned 0038
+""",
     "create": """
 {bold}create{reset} <name> [--parent <ref>] [--status <s>] [--tags t1,t2] [--flags f1,f2]
 
@@ -2985,6 +3187,9 @@ def run_command(line: str, interactive: bool = True) -> str | None:
         "duplicate": lambda: cmd_duplicate(args, todos, refs, interactive),
         "json": lambda: cmd_json(args, todos, refs),
         "validate": lambda: cmd_validate(args, todos, refs),
+        "assign": lambda: cmd_assign(args, todos, refs),
+        "unassign": lambda: cmd_unassign(args, todos, refs),
+        "assigned": lambda: cmd_assigned(args, todos, refs),
         "help": lambda: cmd_help(args),
     }
 
@@ -3065,6 +3270,7 @@ def run_json_command(args: list[str]) -> None:
                 status=_pop_flag(cmd_args, "--status"),
                 tag=_pop_flag(cmd_args, "--tag"),
                 flag=_pop_flag(cmd_args, "--flag"),
+                assigned=_pop_flag(cmd_args, "--assigned"),
             )
         elif cmd == "get":
             if not cmd_args:
@@ -3133,6 +3339,26 @@ def run_json_command(args: list[str]) -> None:
             result = ops_kanban()
         elif cmd == "validate":
             result = ops_validate()
+        elif cmd == "assign":
+            identifier = _pop_flag(cmd_args, "--id") or (cmd_args[0] if len(cmd_args) >= 2 else None)
+            uri = _pop_flag(cmd_args, "--uri") or (cmd_args[1] if len(cmd_args) >= 2 else None)
+            if not identifier or not uri:
+                result = {"error": "Usage: assign --id <id> --uri <uri>"}
+            else:
+                result = ops_assign(identifier, uri)
+        elif cmd == "unassign":
+            identifier = _pop_flag(cmd_args, "--id") or (cmd_args[0] if len(cmd_args) >= 2 else None)
+            uri = _pop_flag(cmd_args, "--uri") or (cmd_args[1] if len(cmd_args) >= 2 else None)
+            if not identifier or not uri:
+                result = {"error": "Usage: unassign --id <id> --uri <uri>"}
+            else:
+                result = ops_unassign(identifier, uri)
+        elif cmd == "assigned":
+            identifier = _pop_flag(cmd_args, "--id") or (cmd_args[0] if cmd_args else None)
+            if not identifier:
+                result = {"error": "Usage: assigned <identifier>"}
+            else:
+                result = ops_assigned(identifier)
         elif cmd == "find":
             pattern = _pop_flag(cmd_args, "--pattern") or (cmd_args[0] if cmd_args else None)
             if not pattern:
