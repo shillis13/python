@@ -45,7 +45,7 @@ SCRIPT_PATH = Path(__file__).resolve()
 SCRIPTS_DIR = SCRIPT_PATH.parent
 APPLE_SCRIPT_DIR = SCRIPTS_DIR / "applescripts"
 DEFAULT_APPLESCRIPT = APPLE_SCRIPT_DIR / "todo_mgr_demo.applescript"
-_FALLBACK_ROOT = Path.home() / "Documents" / "AI" / "ai_root" / "ai_general" / "todos"
+_FALLBACK_ROOT = Path.home() / "Documents" / "AI" / "ai_root" / "ai_general" / "work" / "todos"
 DEFAULT_ROOT = Path(os.environ.get("TODO_ROOT", _FALLBACK_ROOT)).resolve()
 CURRENT_ROOT = DEFAULT_ROOT
 
