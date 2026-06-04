@@ -79,10 +79,15 @@ def get_help_text() -> str:
       Edit an existing bookmark's key or path. Without flags, prompts
       interactively. Use after moving directories to update stale paths.
 
+  {cmd("repath")} {arg("<old-prefix>")} {arg("<new-prefix>")} {dim("[--dry-run]")}
+      Batch update paths. Replaces {arg("old-prefix")} with {arg("new-prefix")} in
+      all matching bookmark paths. Use after directory restructuring
+      (e.g. moved ~/Documents/AI to ~/AI).
+      {dim("--dry-run")} shows what would change without modifying anything.
+
   {cmd("rename")} {arg("<old-prefix>")} {arg("<new-prefix>")} {dim("[--dry-run]")}
-      Batch rename all bookmarks whose path starts with {arg("old-prefix")},
-      replacing that prefix with {arg("new-prefix")}. Use after directory
-      restructuring (e.g. moved ~/Documents/AI to ~/AI).
+      Batch rename bookmark keys. Replaces {arg("old-prefix")} with
+      {arg("new-prefix")} in all matching key names.
       {dim("--dry-run")} shows what would change without modifying anything.
 
   {cmd("rm")} {arg("<key|index>")}
@@ -253,10 +258,15 @@ def get_examples_text() -> str:
   {cmd("gdir edit")} work {arg("--key workspace")}           {dim_t("# Rename the key")}
   {cmd("gdir edit")} 3 {arg("--path ~/moved/here")}          {dim_t("# Edit by index")}
 
-{section("Batch Rename (Directory Restructuring)")}
-  {dim_t("# You moved ~/Documents/AI/ to ~/AI/ — update all bookmarks at once:")}
-  {cmd("gdir rename")} {path("~/Documents/AI")} {path("~/AI")} {arg("--dry-run")}   {dim_t("# Preview changes")}
-  {cmd("gdir rename")} {path("~/Documents/AI")} {path("~/AI")}            {dim_t("# Apply changes")}
+{section("Batch Path Update (Directory Restructuring)")}
+  {dim_t("# You moved ~/Documents/AI/ to ~/AI/ — update all bookmark paths at once:")}
+  {cmd("gdir repath")} {path("~/Documents/AI")} {path("~/AI")} {arg("--dry-run")}   {dim_t("# Preview changes")}
+  {cmd("gdir repath")} {path("~/Documents/AI")} {path("~/AI")}            {dim_t("# Apply changes")}
+
+{section("Batch Key Rename")}
+  {dim_t("# Rename all keys starting with 'old_' to start with 'new_':")}
+  {cmd("gdir rename")} old_ new_ {arg("--dry-run")}                       {dim_t("# Preview")}
+  {cmd("gdir rename")} old_ new_                                {dim_t("# Apply")}
 
 {section("Navigation History")}
   {cmd("gdir -")}                                 {dim_t("# Go back (like browser back)")}

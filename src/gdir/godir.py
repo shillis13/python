@@ -61,9 +61,14 @@ def build_parser() -> argparse.ArgumentParser:
     edit_parser.add_argument("--path", help="New directory path")
     edit_parser.add_argument("--force", action="store_true", help="Allow missing directories")
 
-    rename_parser = subparsers.add_parser("rename", help="Batch rename paths (e.g. after dir restructure)")
-    rename_parser.add_argument("old", help="Old path prefix to match")
-    rename_parser.add_argument("new", help="New path prefix to replace with")
+    repath_parser = subparsers.add_parser("repath", help="Batch update paths (e.g. after dir restructure)")
+    repath_parser.add_argument("old", help="Old path prefix to match")
+    repath_parser.add_argument("new", help="New path prefix to replace with")
+    repath_parser.add_argument("--dry-run", action="store_true", help="Show what would change")
+
+    rename_parser = subparsers.add_parser("rename", help="Batch rename bookmark keys")
+    rename_parser.add_argument("old", help="Old key prefix/pattern to match")
+    rename_parser.add_argument("new", help="New key prefix to replace with")
     rename_parser.add_argument("--dry-run", action="store_true", help="Show what would change")
 
     rm_parser = subparsers.add_parser("rm", help="Remove a bookmark by keyword or index")
@@ -147,7 +152,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             argv_list = ["fwd", arg[1:]]
 
     # Check if first argument is not a recognized command and not a flag
-    valid_commands = {"list", "add", "edit", "rename", "rm", "clear", "go", "back", "fwd", "hist",
+    valid_commands = {"list", "add", "edit", "repath", "rename", "rm", "clear", "go", "back", "fwd", "hist",
                       "env", "save", "load", "import", "pick", "record", "doctor", "init", "help"}
 
     if argv_list and not argv_list[0].startswith("-") and argv_list[0] not in valid_commands:
@@ -181,6 +186,8 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             return cmd_add(store, args.key, args.directory, args.force)
         if args.command == "edit":
             return cmd_edit(store, args.selector, args.key, args.path, args.force)
+        if args.command == "repath":
+            return cmd_repath(store, args.old, args.new, getattr(args, "dry_run", False))
         if args.command == "rename":
             return cmd_rename(store, args.old, args.new, getattr(args, "dry_run", False))
         if args.command == "rm":
@@ -306,13 +313,13 @@ def cmd_edit(
     return 0
 
 
-def cmd_rename(
+def cmd_repath(
     store: MappingStore,
     old_prefix: str,
     new_prefix: str,
     dry_run: bool,
 ) -> int:
-    """Batch rename paths — replace old prefix with new prefix in all matching bookmarks.
+    """Batch update paths — replace old prefix with new prefix in all matching bookmarks.
 
     Matches against raw stored paths (not resolved), so symlinks don't interfere.
     The old_prefix is expanded (~) but NOT resolved through symlinks.
@@ -329,13 +336,43 @@ def cmd_rename(
                 entry.path = new_path
             changed += 1
     if changed == 0:
-        print(f"No bookmarks match prefix: {old_prefix}")
+        print(f"No bookmarks match path prefix: {old_prefix}")
         return 0
     if dry_run:
         print(f"\n{changed} bookmark(s) would be updated. Run without --dry-run to apply.")
     else:
         store.save()
-        print(f"Updated {changed} bookmark(s).")
+        print(f"Updated {changed} bookmark path(s).")
+    return 0
+
+
+def cmd_rename(
+    store: MappingStore,
+    old_prefix: str,
+    new_prefix: str,
+    dry_run: bool,
+) -> int:
+    """Batch rename bookmark keys — replace old key prefix with new prefix."""
+    changed = 0
+    for entry in store.entries:
+        if entry.key.startswith(old_prefix):
+            new_key = new_prefix + entry.key[len(old_prefix):]
+            if not re.match(r"^[A-Za-z0-9._-]+$", new_key):
+                print(f"  {_sc('skip', 'yellow')}: {entry.key} -> {new_key} (invalid key format)", file=sys.stderr)
+                continue
+            if dry_run:
+                print(f"  {_sc(entry.key, 'cyan')} -> {_sc(new_key, 'green')}")
+            else:
+                entry.key = new_key
+            changed += 1
+    if changed == 0:
+        print(f"No bookmarks match key prefix: {old_prefix}")
+        return 0
+    if dry_run:
+        print(f"\n{changed} key(s) would be renamed. Run without --dry-run to apply.")
+    else:
+        store.save()
+        print(f"Renamed {changed} key(s).")
     return 0
 
 
@@ -749,7 +786,7 @@ gdir() {
 
     case "$1" in
         go|back|fwd|pick) _gdir_nav=true ;;
-        list|add|edit|rename|rm|clear|hist|env|save|load|import|record|doctor|init|help) ;;
+        list|add|edit|repath|rename|rm|clear|hist|env|save|load|import|record|doctor|init|help) ;;
         "") _gdir_nav=true ;;
         \\#*) _gdir_nav=true ;;
         [-+][0-9]*) _gdir_nav=true ;;
