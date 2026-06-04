@@ -12,7 +12,16 @@ from pathlib import Path
 from shutil import which
 from typing import Iterable, List, Optional
 
-from common_utils.lib_outputColors import Colors
+import os as _os
+_sc_path = _os.path.join(_os.path.expanduser("~"), "bin", "ai")
+if _sc_path not in sys.path:
+    sys.path.insert(0, _sc_path)
+try:
+    from utils.standard_colors import c as _sc, colors_enabled, bold, dim, heading
+    _USE_SC = True
+except ImportError:
+    from common_utils.lib_outputColors import Colors
+    _USE_SC = False
 
 from . import __version__
 from .helptext import get_help_text
@@ -35,6 +44,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="gdir", add_help=False)
     parser.add_argument("--config", type=Path, default=None, help="Override config directory")
     parser.add_argument("--version", action="store_true", help="Show version")
+    parser.add_argument("-h", "--help", action="store_true", dest="show_help", help="Show help")
+    parser.add_argument("--help-examples", action="store_true", help="Show usage examples")
     subparsers = parser.add_subparsers(dest="command")
 
     subparsers.add_parser("list", help="Show all keyword-to-directory bookmarks")
@@ -43,6 +54,17 @@ def build_parser() -> argparse.ArgumentParser:
     add_parser.add_argument("key", help="Bookmark keyword (letters, digits, dot, underscore, hyphen)")
     add_parser.add_argument("directory", nargs="?", default=".", help="Directory to bookmark (default: current dir)")
     add_parser.add_argument("--force", action="store_true", help="Allow missing directories")
+
+    edit_parser = subparsers.add_parser("edit", help="Edit an existing bookmark's path or key")
+    edit_parser.add_argument("selector", help="Bookmark keyword or 1-based index")
+    edit_parser.add_argument("--key", help="New keyword")
+    edit_parser.add_argument("--path", help="New directory path")
+    edit_parser.add_argument("--force", action="store_true", help="Allow missing directories")
+
+    rename_parser = subparsers.add_parser("rename", help="Batch rename paths (e.g. after dir restructure)")
+    rename_parser.add_argument("old", help="Old path prefix to match")
+    rename_parser.add_argument("new", help="New path prefix to replace with")
+    rename_parser.add_argument("--dry-run", action="store_true", help="Show what would change")
 
     rm_parser = subparsers.add_parser("rm", help="Remove a bookmark by keyword or index")
     rm_parser.add_argument("selector", help="Bookmark keyword or 1-based index")
@@ -125,7 +147,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             argv_list = ["fwd", arg[1:]]
 
     # Check if first argument is not a recognized command and not a flag
-    valid_commands = {"list", "add", "rm", "clear", "go", "back", "fwd", "hist",
+    valid_commands = {"list", "add", "edit", "rename", "rm", "clear", "go", "back", "fwd", "hist",
                       "env", "save", "load", "import", "pick", "record", "doctor", "init", "help"}
 
     if argv_list and not argv_list[0].startswith("-") and argv_list[0] not in valid_commands:
@@ -137,8 +159,15 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     if args.version and not args.command:
         print(__version__)
         return 0
+    if getattr(args, "show_help", False) and not args.command:
+        print(get_help_text())
+        return 0
+    if getattr(args, "help_examples", False):
+        from .helptext import get_examples_text
+        print(get_examples_text())
+        return 0
     if not args.command:
-        parser.print_help()
+        print(get_help_text())
         return 0
 
     config_dir = ensure_config_dir(args.config)
@@ -150,6 +179,10 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             return cmd_list(store)
         if args.command == "add":
             return cmd_add(store, args.key, args.directory, args.force)
+        if args.command == "edit":
+            return cmd_edit(store, args.selector, args.key, args.path, args.force)
+        if args.command == "rename":
+            return cmd_rename(store, args.old, args.new, getattr(args, "dry_run", False))
         if args.command == "rm":
             return cmd_rm(store, args.selector)
         if args.command == "clear":
@@ -202,27 +235,17 @@ def cmd_list(store: MappingStore) -> int:
     index_width = len(str(len(entries)))
     key_width = max(len("keyword"), *(len(entry.key) for entry in entries))
 
-    if Colors.enabled():
-        header = (
-            f"{Colors.DIM}{'index'.rjust(index_width)}  "
-            f"{'keyword'.ljust(key_width)}  directory{Colors.RESET}"
+    header = f"{dim('index'.rjust(index_width))}  {dim('keyword'.ljust(key_width))}  {dim('directory')}"
+    print(header)
+    print(dim("-" * (index_width + key_width + 14)))
+    for idx, entry in enumerate(entries, start=1):
+        exists = Path(entry.path).exists()
+        path_str = _sc(entry.path, "green") if exists else _sc(entry.path, "red")
+        print(
+            f"{_sc(str(idx).rjust(index_width), 'yellow')}  "
+            f"{_sc(entry.key.ljust(key_width), 'cyan', 'bold')}  "
+            f"{path_str}"
         )
-        print(header)
-        print(f"{Colors.DIM}{'-' * (index_width + key_width + 14)}{Colors.RESET}")
-        for idx, entry in enumerate(entries, start=1):
-            print(
-                f"{Colors.YELLOW}{str(idx).rjust(index_width)}{Colors.RESET}  "
-                f"{Colors.CYAN}{Colors.BOLD}{entry.key.ljust(key_width)}{Colors.RESET}  "
-                f"{Colors.GREEN}{entry.path}{Colors.RESET}"
-            )
-    else:
-        header = f"{'index'.rjust(index_width)}  {'keyword'.ljust(key_width)}  directory"
-        print(header)
-        print("-" * len(header))
-        for idx, entry in enumerate(entries, start=1):
-            print(
-                f"{str(idx).rjust(index_width)}  {entry.key.ljust(key_width)}  {entry.path}"
-            )
     return 0
 
 
@@ -235,6 +258,84 @@ def cmd_add(
     entry = store.add(key, directory, allow_missing=force)
     store.save()
     print(f"Saved {entry.key} -> {entry.path}")
+    return 0
+
+
+def cmd_edit(
+    store: MappingStore,
+    selector: str,
+    new_key: Optional[str],
+    new_path: Optional[str],
+    force: bool,
+) -> int:
+    """Edit an existing bookmark's key or path."""
+    index = store._resolve_selector(selector)
+    if index is None:
+        print(f"No mapping found for '{selector}'.", file=sys.stderr)
+        return EXIT_INVALID
+    entry = store.entries[index]
+
+    if new_key is None and new_path is None:
+        # Interactive: show current and prompt
+        print(f"Editing bookmark {_sc(entry.key, 'cyan', 'bold')}:")
+        print(f"  Current path: {_sc(entry.path, 'green')}")
+        new_path_input = input(f"  New path [{entry.path}]: ").strip()
+        if new_path_input:
+            new_path = new_path_input
+        new_key_input = input(f"  New key [{entry.key}]: ").strip()
+        if new_key_input:
+            new_key = new_key_input
+
+    if new_key and not re.match(r"^[A-Za-z0-9._-]+$", new_key):
+        print("Invalid key format.", file=sys.stderr)
+        return EXIT_INVALID
+
+    if new_path:
+        resolved = resolve_path(new_path)
+        if not force and not resolved.exists():
+            print(f"Directory does not exist: {resolved} (use --force to override)", file=sys.stderr)
+            return EXIT_INVALID
+        entry.path = str(resolved)
+
+    if new_key:
+        entry.key = new_key
+
+    entry.added_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    store.save()
+    print(f"Updated: {_sc(entry.key, 'cyan', 'bold')} -> {_sc(entry.path, 'green')}")
+    return 0
+
+
+def cmd_rename(
+    store: MappingStore,
+    old_prefix: str,
+    new_prefix: str,
+    dry_run: bool,
+) -> int:
+    """Batch rename paths — replace old prefix with new prefix in all matching bookmarks.
+
+    Matches against raw stored paths (not resolved), so symlinks don't interfere.
+    The old_prefix is expanded (~) but NOT resolved through symlinks.
+    """
+    old_expanded = str(Path(old_prefix).expanduser())
+    new_expanded = str(Path(new_prefix).expanduser())
+    changed = 0
+    for entry in store.entries:
+        if entry.path.startswith(old_expanded):
+            new_path = new_expanded + entry.path[len(old_expanded):]
+            if dry_run:
+                print(f"  {_sc(entry.key, 'cyan')}: {_sc(entry.path, 'red')} -> {_sc(new_path, 'green')}")
+            else:
+                entry.path = new_path
+            changed += 1
+    if changed == 0:
+        print(f"No bookmarks match prefix: {old_prefix}")
+        return 0
+    if dry_run:
+        print(f"\n{changed} bookmark(s) would be updated. Run without --dry-run to apply.")
+    else:
+        store.save()
+        print(f"Updated {changed} bookmark(s).")
     return 0
 
 
@@ -648,7 +749,7 @@ gdir() {
 
     case "$1" in
         go|back|fwd|pick) _gdir_nav=true ;;
-        list|add|rm|clear|hist|env|save|load|import|record|doctor|init|help) ;;
+        list|add|edit|rename|rm|clear|hist|env|save|load|import|record|doctor|init|help) ;;
         "") _gdir_nav=true ;;
         \\#*) _gdir_nav=true ;;
         [-+][0-9]*) _gdir_nav=true ;;

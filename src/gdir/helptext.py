@@ -2,26 +2,38 @@
 
 from __future__ import annotations
 
+import os
 import sys
 
-from common_utils.lib_outputColors import Colors
-
-
-def _c(text: str, *codes: str) -> str:
-    """Apply color codes if stdout is a TTY."""
-    if not sys.stdout.isatty():
-        return text
-    return "".join(codes) + text + Colors.RESET
+# Use standard_colors if available, fall back to common_utils
+try:
+    _sc_path = os.path.join(os.path.expanduser("~"), "bin", "ai")
+    if _sc_path not in sys.path:
+        sys.path.insert(0, _sc_path)
+    from utils.standard_colors import c as _sc, bold as _bold, dim as _dim, heading as _heading, colors_enabled
+except ImportError:
+    from common_utils.lib_outputColors import Colors
+    def _sc(text, *styles):
+        if not sys.stdout.isatty():
+            return text
+        code_map = {"cyan": Colors.CYAN, "yellow": Colors.YELLOW, "green": Colors.GREEN,
+                    "magenta": Colors.MAGENTA, "bold": Colors.BOLD, "dim": Colors.DIM}
+        codes = "".join(code_map.get(s, "") for s in styles)
+        return codes + text + Colors.RESET
+    _bold = lambda t: _sc(t, "bold")
+    _dim = lambda t: _sc(t, "dim")
+    _heading = lambda t: _sc(t, "magenta", "bold")
+    colors_enabled = lambda: sys.stdout.isatty()
 
 
 def get_help_text() -> str:
     """Generate help text with colors when appropriate."""
-    cmd = lambda t: _c(t, Colors.CYAN, Colors.BOLD)
-    arg = lambda t: _c(t, Colors.YELLOW)
-    path = lambda t: _c(t, Colors.GREEN)
-    section = lambda t: _c(t, Colors.MAGENTA, Colors.BOLD)
-    dim = lambda t: _c(t, Colors.DIM)
-    b = lambda t: _c(t, Colors.BOLD)
+    cmd = lambda t: _sc(t, "cyan", "bold")
+    arg = lambda t: _sc(t, "yellow")
+    path = lambda t: _sc(t, "green")
+    section = lambda t: _sc(t, "magenta", "bold")
+    dim = lambda t: _dim(t)
+    b = lambda t: _bold(t)
 
     return f"""
 {section("gdir")} — keyword-driven directory jumper
@@ -62,6 +74,16 @@ def get_help_text() -> str:
 
       {dim("Options:")}
         {dim("--force")}    Allow bookmarking directories that don't exist yet.
+
+  {cmd("edit")} {arg("<key|index>")} {dim("[--key K] [--path P] [--force]")}
+      Edit an existing bookmark's key or path. Without flags, prompts
+      interactively. Use after moving directories to update stale paths.
+
+  {cmd("rename")} {arg("<old-prefix>")} {arg("<new-prefix>")} {dim("[--dry-run]")}
+      Batch rename all bookmarks whose path starts with {arg("old-prefix")},
+      replacing that prefix with {arg("new-prefix")}. Use after directory
+      restructuring (e.g. moved ~/Documents/AI to ~/AI).
+      {dim("--dry-run")} shows what would change without modifying anything.
 
   {cmd("rm")} {arg("<key|index>")}
       Remove a bookmark by keyword or 1-based index.
@@ -197,6 +219,67 @@ def get_help_text() -> str:
   gdir {cmd("save")} backup.json        {dim("# Export state to a file")}
   gdir {cmd("load")} backup.json        {dim("# Merge bookmarks from a file")}
   gdir {cmd("import")} cdargs           {dim("# Import cdargs bookmarks")}
+""".strip()
+
+
+def get_examples_text() -> str:
+    """Detailed usage examples with colors."""
+    cmd = lambda t: _sc(t, "cyan", "bold")
+    arg = lambda t: _sc(t, "yellow")
+    path = lambda t: _sc(t, "green")
+    section = lambda t: _sc(t, "magenta", "bold")
+    dim_t = lambda t: _dim(t)
+
+    return f"""
+{section("gdir — Usage Examples")}
+
+{section("Quick Start")}
+  {cmd("gdir init")}                              {dim_t("# Install shell wrapper")}
+  {cmd("source ~/.bash_functions")}               {dim_t("# Activate (one time)")}
+  {cmd("gdir add")} work                           {dim_t("# Bookmark current dir as 'work'")}
+  {cmd("gdir")} work                               {dim_t("# Jump to 'work' from anywhere")}
+
+{section("Bookmarks")}
+  {cmd("gdir add")} proj {path("~/projects/myapp")}          {dim_t("# Bookmark a specific path")}
+  {cmd("gdir add")} tmp {path("/tmp")}                       {dim_t("# Bookmark system paths too")}
+  {cmd("gdir list")}                               {dim_t("# See all bookmarks with indexes")}
+  {cmd("gdir")} 3                                  {dim_t("# Jump to 3rd bookmark by index")}
+  {cmd("gdir rm")} proj                            {dim_t("# Remove the 'proj' bookmark")}
+  {cmd("gdir rm")} 2                               {dim_t("# Remove by index")}
+
+{section("Editing Bookmarks")}
+  {cmd("gdir edit")} work                          {dim_t("# Interactive: prompts for new path/key")}
+  {cmd("gdir edit")} work {arg("--path ~/new/work")}         {dim_t("# Change path directly")}
+  {cmd("gdir edit")} work {arg("--key workspace")}           {dim_t("# Rename the key")}
+  {cmd("gdir edit")} 3 {arg("--path ~/moved/here")}          {dim_t("# Edit by index")}
+
+{section("Batch Rename (Directory Restructuring)")}
+  {dim_t("# You moved ~/Documents/AI/ to ~/AI/ — update all bookmarks at once:")}
+  {cmd("gdir rename")} {path("~/Documents/AI")} {path("~/AI")} {arg("--dry-run")}   {dim_t("# Preview changes")}
+  {cmd("gdir rename")} {path("~/Documents/AI")} {path("~/AI")}            {dim_t("# Apply changes")}
+
+{section("Navigation History")}
+  {cmd("gdir -")}                                 {dim_t("# Go back (like browser back)")}
+  {cmd("gdir +")}                                 {dim_t("# Go forward")}
+  {cmd("gdir -3")}                                {dim_t("# Go back 3 steps")}
+  {cmd("gdir hist")}                              {dim_t("# Show recent history")}
+  {cmd("gdir #5")}                                {dim_t("# Jump to history entry #5")}
+
+{section("Fuzzy Selection")}
+  {cmd("gdir pick")}                              {dim_t("# fzf-powered bookmark picker")}
+
+{section("State Management")}
+  {cmd("gdir save")} backup.json                   {dim_t("# Export all bookmarks + history")}
+  {cmd("gdir load")} backup.json                   {dim_t("# Restore from backup")}
+  {cmd("gdir import")} cdargs                      {dim_t("# Import from cdargs")}
+  {cmd("gdir import")} bashmarks                   {dim_t("# Import from bashmarks")}
+
+{section("Environment Integration")}
+  {cmd("gdir env")} {arg("--all")}                          {dim_t("# Export GDIR_WORK, GDIR_PROJ, etc.")}
+  {cmd("gdir env")} {arg("--indices 1,3")}                  {dim_t("# Export only specific bookmarks")}
+  {dim_t("# Use in scripts:")}
+  {dim_t('eval "$(gdir env --all)"')}
+  {dim_t("cd $GDIR_WORK")}
 """.strip()
 
 
