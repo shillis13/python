@@ -54,6 +54,34 @@ def preferred_token_split(token: str, width: int) -> int:
             return idx
     return split_limit
 
+def min_rendered_cell_width(text: str, bold: bool = False) -> int:
+    """Return the narrowest width that will not overflow rendered cell text.
+
+    This is intentionally token-based rather than natural-line based because the
+    renderer is allowed to wrap on whitespace.  When a header is rendered bold,
+    every wrapped header line receives leading/trailing ``**`` markers, so the
+    unsplittable width for each token must include those four marker characters.
+    """
+    stripped = text.strip()
+    rendered_bold = bold and bool(stripped)
+    inner = stripped
+    marker_width = 0
+
+    if rendered_bold:
+        marker_width = BOLD_MARKER_WIDTH
+        if is_bold_cell(inner):
+            inner = inner[2:-2]
+
+    min_width = 1
+    for line in expand_cell_newlines(inner):
+        tokens = re.findall(r'`[^`]+`|\S+', line)
+        if not tokens:
+            continue
+        for token in tokens:
+            token_width = len(token) + marker_width
+            min_width = max(min_width, token_width)
+    return min_width
+
 def split_long_token(token: str, width: int) -> list[str]:
     parts = []
     remaining = token

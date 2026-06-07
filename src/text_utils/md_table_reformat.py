@@ -8,21 +8,132 @@ import re
 import math
 import json
 import hashlib
+import os
 import tempfile
 import subprocess
+import textwrap
 from pathlib import Path
+
+AI_UTILS = Path.home() / "bin" / "ai" / "utils"
+if str(AI_UTILS) not in sys.path:
+    sys.path.insert(0, str(AI_UTILS))
+
+from standard_colors import c, command_style, error, format_help, value
+
 from md_table_reformat_shared import (
-    cell_natural_width, is_bold_cell, bold_cell_width, header_content_width, wrap_cell
+    cell_natural_width, is_bold_cell, bold_cell_width, header_content_width,
+    min_rendered_cell_width, wrap_cell
 )
 
 def print_help() -> None:
-    """Print command help."""
-    print(__doc__)
+    """Print comprehensive, colorized command help."""
+    default_width = _default_width()
+    help_text = textwrap.dedent(f"""
+    {command_style("md_table_reformat.py")} — reflow one markdown/box-drawing table
+
+    Usage:
+        md_table_reformat.py [options] [-w <cols>]
+        md_table_reformat.py --stdin [-w <cols>]
+        md_table_reformat.py --file <table.md> [-w <cols>]
+        pbpaste | md_table_reformat.py --stdin --width 100 | pbcopy
+
+    Description:
+        Reformats a single markdown pipe table or existing box-drawing table into
+        a Unicode box-drawing table. Headers are rendered bold, cells are wrapped
+        to fit the target width where possible, and code/backtick tokens are kept
+        atomic.
+
+        This command processes one table block. To reformat every table in a
+        mixed prose markdown file, use:
+            md_file_table_reformat.py <file>
+
+    Input source:
+        Default source is the macOS clipboard via /usr/bin/pbpaste.
+
+    Options:
+        -h, --help              Show this help and exit.
+        --stdin, -              Read table text from stdin instead of clipboard.
+        --file <path>           Read table text from a file instead of clipboard.
+        -w, --width <cols>      Target maximum table width in columns.
+        --no-color              Disable ANSI colors in help/errors.
+
+    Arguments:
+        WIDTH                   Deprecated compatibility syntax for target width.
+                                Prefer -w/--width. Equivalent to --width WIDTH
+                                when used.
+
+    Width behavior:
+        CLI width wins:
+            --width 100
+            100
+
+        If no CLI width is provided, TABLE_MAX_WIDTH is used when set.
+        Otherwise the default is 100.
+
+        Current effective default: {value(str(default_width))}
+
+        Minimum atomic widths are respected. If headers/backtick tokens cannot
+        fit inside the target, output may exceed the requested width rather than
+        corrupting alignment.
+
+    Examples:
+        # Reformat table currently on clipboard, write to stdout
+        md_table_reformat.py
+
+        # Clipboard input, explicit width
+        md_table_reformat.py --width 120
+        md_table_reformat.py -w 120
+
+        # Deprecated compatibility syntax
+        md_table_reformat.py 120
+
+        # Stdin input
+        cat table.md | md_table_reformat.py --stdin --width 100
+
+        # File input
+        md_table_reformat.py --file table.md --width 100
+
+        # Keyboard Maestro / clipboard pipeline
+        /usr/bin/pbpaste | md_table_reformat.py --stdin "$TABLE_MAX_WIDTH" | /usr/bin/pbcopy
+
+    Supported input:
+        Markdown pipe table:
+            | Name | Role |
+            |------|------|
+            | Ada  | Dev  |
+
+        Existing box-drawing table:
+            ┌──────┬──────┐
+            │ Name │ Role │
+            └──────┴──────┘
+
+    Related:
+        md_file_table_reformat.py    Reformat all tables in a mixed markdown file.
+        Reformat MD Table.kmmacros   Keyboard Maestro clipboard macro.
+    """).strip()
+    print(format_help(help_text))
+
+def _default_width() -> int:
+    env_width = os.environ.get("TABLE_MAX_WIDTH")
+    if env_width:
+        try:
+            return int(env_width)
+        except ValueError:
+            return 100
+    return 100
+
+def _die(message: str, code: int = 2) -> None:
+    error(message)
+    print(
+        f"  {c('Hint:', 'label')} run {command_style('md_table_reformat.py --help')}",
+        file=sys.stderr,
+    )
+    sys.exit(code)
 
 def parse_args(argv: list[str]) -> tuple[str, str | None, int]:
     source = 'clipboard'
     filepath = None
-    max_width = 100
+    max_width = _default_width()
     args = argv[1:]
     i = 0
     while i < len(args):
@@ -32,14 +143,27 @@ def parse_args(argv: list[str]) -> tuple[str, str | None, int]:
         elif arg == '--file':
             source = 'file'
             i += 1
-            if i >= len(args): sys.exit(1)
+            if i >= len(args):
+                _die("--file requires a path argument.")
             filepath = args[i]
+        elif arg in ('--width', '-w'):
+            i += 1
+            if i >= len(args):
+                _die(f"{arg} requires an integer width.")
+            try:
+                max_width = int(args[i])
+            except ValueError:
+                _die(f"Invalid width for {arg}: {args[i]!r}")
+        elif arg == '--no-color':
+            pass
         elif arg in ('--help', '-h'):
             print_help()
             sys.exit(0)
         else:
-            try: max_width = int(arg)
-            except ValueError: sys.exit(1)
+            try:
+                max_width = int(arg)
+            except ValueError:
+                _die(f"Unknown option or invalid width: {arg!r}")
         i += 1
     return source, filepath, max_width
 
@@ -130,19 +254,16 @@ def render_table(headers, data_rows, max_width, separator_after):
         header_w = bold_cell_width(header_text)  # accounts for ** markers if not already bold
         col_widths.append(max(data_max, header_w, 3))
 
-    # Calculate minimum column widths (widest atomic/unsplittable token per column)
+    # Calculate minimum column widths (widest rendered atomic/unsplittable token
+    # per column).  Headers are rendered with **bold markers**, so their minimum
+    # widths must include those markers too; otherwise shrink-to-max-width can make
+    # columns narrower than the actual header text and the box borders drift.
     min_widths = []
     for c in range(num_cols):
         min_w = 3
         for r in range(len(all_rows)):
             cell = all_rows[r][c]
-            # Backtick tokens are atomic
-            for tok in re.findall(r'`[^`]+`', cell):
-                min_w = max(min_w, len(tok))
-            # Individual words are also atomic
-            for tok in cell.split():
-                if not (tok.startswith('`') and tok.endswith('`')):
-                    min_w = max(min_w, len(tok))
+            min_w = max(min_w, min_rendered_cell_width(cell, bold=(r == 0)))
         min_widths.append(min_w)
 
     # Shrink columns if total exceeds max_width

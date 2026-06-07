@@ -76,6 +76,9 @@ _PYTHON = _find_python()
 # ---------------------------------------------------------------------------
 
 PIPE_LINE_RE = re.compile(r"^\s*\|")
+PIPE_SEPARATOR_RE = re.compile(
+    r"^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$"
+)
 FENCE_RE = re.compile(r"^\s*(```|~~~)")
 BOX_TOP_RE = re.compile(r"[┌╔]")
 BOX_BOTTOM_RE = re.compile(r"[┘╝]")
@@ -85,6 +88,32 @@ BOX_INTERIOR_RE = re.compile(r"^[│┃║├┤┼┬┴─═┌┐└┘╔�
 def _is_pipe_table_line(line: str) -> bool:
     """Return True if a line looks like part of a pipe-style markdown table."""
     result = bool(PIPE_LINE_RE.match(line))
+    return result
+
+
+def _is_pipe_separator_line(line: str) -> bool:
+    """Return True if a line is a markdown pipe-table separator row."""
+    result = bool(PIPE_SEPARATOR_RE.match(line))
+    return result
+
+
+def _looks_like_pipe_table_row(line: str) -> bool:
+    """Return True if a line can be a pipe-table row without edge pipes."""
+    stripped = line.strip()
+    result = bool(stripped) and "|" in stripped
+    return result
+
+
+def _starts_pipe_table(line: str, next_line: str) -> bool:
+    """Return True if a line starts a pipe table.
+
+    Leading-pipe tables keep the historical permissive behavior.  Tables without
+    leading/trailing pipes are only recognized when followed by a separator row,
+    so prose containing an incidental pipe is not treated as a table.
+    """
+    if _is_pipe_table_line(line):
+        return True
+    result = _looks_like_pipe_table_row(line) and _is_pipe_separator_line(next_line)
     return result
 
 
@@ -142,7 +171,9 @@ def _extract_blocks(text: str) -> List[Tuple[str, str]]:
             blocks.append(("table", "\n".join(table_lines)))
             table_lines.clear()
 
-    for line in lines:
+    for idx, line in enumerate(lines):
+        next_line = lines[idx + 1] if idx + 1 < len(lines) else ""
+
         # -- fenced code block tracking --
         if FENCE_RE.match(line):
             if in_fence:
@@ -177,9 +208,20 @@ def _extract_blocks(text: str) -> List[Tuple[str, str]]:
             continue
 
         # -- pipe-style table --
-        if _is_pipe_table_line(line):
+        if _starts_pipe_table(line, next_line):
             if not table_lines:
                 flush_prose()
+            table_lines.append(line)
+            continue
+
+        # Continuation rows for an already-started pipe table.  This supports
+        # GitHub-style tables without leading/trailing pipes while avoiding prose
+        # after a blank line (trailing blanks are trimmed/flushed below).
+        if (
+            table_lines
+            and table_lines[-1].strip() != ""
+            and _looks_like_pipe_table_row(line)
+        ):
             table_lines.append(line)
             continue
 

@@ -146,3 +146,12 @@ Here is text between two tables. It contains a | pipe character that is NOT a ta
 | a | b | c |
 
 And here is trailing text after the last table. This paragraph should survive intact, including its **bold**, `code`, and *italic* formatting.
+
+## 14. Header wrapping with bold marker width regression
+
+| Entity | Unique | Persists | Stateful | Takes action | Comms target | Notes |
+|--------|--------|----------|----------|-------------|-------------|-------|
+| Session | Yes | Yes | Yes | Yes | Yes | Primary actor. Identity in session_store (SQLite). |
+| Project | Yes | Yes | Yes | No | Yes (via roles) | Unified entity — IS a team. Roles, sessions, optional sub-teams. |
+| Game | Yes | Yes | Yes | Yes | Yes | Extends Project. Game engine, board state, turns. |
+| Terminal | Yes | TBD | Yes | Maybe | Maybe | Addressable infrastructure. Entity status TBD — depends on whether Terminals gain comms. |
