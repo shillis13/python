@@ -13,6 +13,7 @@ CLI usage:
     md_file_table_reformat.py notes.md                # file arg, stdout
     md_file_table_reformat.py notes.md -w 80          # custom width
     md_file_table_reformat.py notes.md -i             # modify file in place
+    md_file_table_reformat.py -f file1.md file2.md -i # batch in-place
     cat notes.md | md_file_table_reformat.py           # stdin, stdout
     md_file_table_reformat.py --stdin                  # explicit stdin
     md_file_table_reformat.py -f notes.md              # --file flag
@@ -21,6 +22,7 @@ CLI usage:
 from __future__ import annotations
 
 import argparse
+import glob
 import re
 import subprocess
 import sys
@@ -31,7 +33,7 @@ SRC_ROOT = Path(__file__).resolve().parents[1]
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from file_utils.lib_fileInput import add_text_input_arguments, get_text_from_input
+from file_utils.lib_fileInput import get_text_from_input
 
 _REFORMAT_SCRIPT = Path(__file__).resolve().parent / "md_table_reformat.py"
 
@@ -329,6 +331,8 @@ def build_parser() -> argparse.ArgumentParser:
             "  md_file_table_reformat.py notes.md\n"
             "  md_file_table_reformat.py notes.md -w 80\n"
             "  md_file_table_reformat.py notes.md -i\n"
+            "  md_file_table_reformat.py -f file1.md -f file2.md -i\n"
+            "  md_file_table_reformat.py -f *.md -i\n"
             "  cat notes.md | md_file_table_reformat.py\n"
             "  md_file_table_reformat.py --stdin -w 100\n"
         ),
@@ -350,8 +354,62 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Modify the file in place instead of writing to stdout.",
     )
-    add_text_input_arguments(parser, file_flags=("-f", "--input-file"))
+    source_group = parser.add_mutually_exclusive_group()
+    source_group.add_argument(
+        "-f", "--input-file",
+        dest="input_files",
+        action="append",
+        nargs="+",
+        metavar="FILE",
+        help=(
+            "Read input from one or more files. Can be repeated. "
+            "Examples: -f file1.md -f file2.md, or -f *.md"
+        ),
+    )
+    source_group.add_argument(
+        "--stdin",
+        action="store_true",
+        help="Read input text from stdin.",
+    )
+    source_group.add_argument(
+        "-p",
+        "--paste",
+        action="store_true",
+        help="Read input text from the clipboard.",
+    )
+    source_group.add_argument(
+        "-v",
+        "--clipboard",
+        action="store_true",
+        help="Read input text from the clipboard (alias for --paste).",
+    )
     return parser
+
+
+def _expand_input_file_args(raw_groups: Optional[List[List[str]]]) -> List[Path]:
+    """Expand repeated/nargs input-file arguments into concrete paths.
+
+    Args:
+        raw_groups: argparse value for ``-f/--input-file``.
+
+    Returns:
+        Ordered list of resolved paths. Quoted glob patterns are expanded here;
+        shell-expanded globs already arrive as multiple paths.
+    """
+    if not raw_groups:
+        return []
+
+    paths: List[Path] = []
+    for group in raw_groups:
+        for raw_item in group:
+            expanded = Path(raw_item).expanduser()
+            matches = glob.glob(str(expanded))
+            if matches:
+                for match in sorted(matches):
+                    paths.append(Path(match).expanduser().resolve())
+            else:
+                paths.append(expanded.resolve())
+    return paths
 
 
 def _read_input(args: argparse.Namespace) -> Tuple[str, Optional[str]]:
@@ -370,14 +428,27 @@ def _read_input(args: argparse.Namespace) -> Tuple[str, Optional[str]]:
         text = filepath.read_text(encoding="utf-8")
         return text, str(filepath)
 
-    # Fall back to shared input helpers (--input-file, --stdin, --paste).
+    input_files = _expand_input_file_args(getattr(args, "input_files", None))
+    if input_files:
+        if len(input_files) > 1:
+            raise ValueError("_read_input only supports one file; use batch path")
+        filepath = input_files[0]
+        text = filepath.read_text(encoding="utf-8")
+        return text, str(filepath)
+
+    # Fall back to shared input helpers (--stdin, --paste).
     text = get_text_from_input(args, default_to_clipboard=False)
-    input_file = getattr(args, "input_file", None)
-    if input_file is not None:
-        resolved = str(Path(input_file).expanduser().resolve())
-        return text, resolved
 
     return text, None
+
+
+def _process_file(path: Path, width: int, in_place: bool) -> str:
+    """Reformat tables in one file and optionally write the result in place."""
+    text = path.read_text(encoding="utf-8")
+    output = reformat_file_tables(text, width=width)
+    if in_place:
+        path.write_text(output, encoding="utf-8")
+    return output
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -391,6 +462,33 @@ def main(argv: Optional[List[str]] = None) -> int:
     """
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    input_files = _expand_input_file_args(getattr(args, "input_files", None))
+    if args.file is not None and input_files:
+        print("Error: use either positional file or -f/--input-file, not both.", file=sys.stderr)
+        return 1
+
+    if input_files:
+        failed = False
+        for index, path in enumerate(input_files):
+            try:
+                output = _process_file(path, width=args.width, in_place=args.in_place)
+            except OSError as exc:
+                print(f"Error processing {path}: {exc}", file=sys.stderr)
+                failed = True
+                continue
+
+            if args.in_place:
+                print(f"Reformatted {path}", file=sys.stderr)
+                continue
+
+            if index > 0:
+                sys.stdout.write("\n")
+            sys.stdout.write(output)
+            if output and not output.endswith("\n"):
+                sys.stdout.write("\n")
+
+        return 1 if failed else 0
 
     text, filepath = _read_input(args)
     if not text:
