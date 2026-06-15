@@ -45,8 +45,13 @@ SCRIPT_PATH = Path(__file__).resolve()
 SCRIPTS_DIR = SCRIPT_PATH.parent
 APPLE_SCRIPT_DIR = SCRIPTS_DIR / "applescripts"
 DEFAULT_APPLESCRIPT = APPLE_SCRIPT_DIR / "todo_mgr_demo.applescript"
-_FALLBACK_ROOT = Path.home() / "Documents" / "AI" / "ai_root" / "ai_general" / "work" / "todos"
-DEFAULT_ROOT = Path(os.environ.get("TODO_ROOT", _FALLBACK_ROOT)).resolve()
+# Derive the todos root from the single canonical AI_ROOT (default ~/AI/ai_root),
+# NOT a hardcoded path. TODO_ROOT stays an optional override for non-standard
+# layouts; when it's unset (e.g. MCP servers don't inherit it) we fall back to
+# the AI_ROOT-derived location.
+_AI_ROOT = Path(os.environ.get("AI_ROOT") or (Path.home() / "AI" / "ai_root"))
+_FALLBACK_ROOT = _AI_ROOT / "ai_general" / "work" / "todos"
+DEFAULT_ROOT = Path(os.environ.get("TODO_ROOT") or _FALLBACK_ROOT).resolve()
 CURRENT_ROOT = DEFAULT_ROOT
 
 VERSION = "2.4.0"
