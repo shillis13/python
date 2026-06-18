@@ -16,7 +16,8 @@ from pathlib import Path
 
 # Setup: point todo_mgr at a temp root
 SCRIPT_DIR = Path(__file__).resolve().parent
-REAL_TODO_ROOT = Path.home() / "Documents/AI/ai_root/ai_general/todos"
+_AI_ROOT = Path(os.environ.get("AI_ROOT") or (Path.home() / "AI" / "ai_root"))
+REAL_TODO_ROOT = _AI_ROOT / "ai_general" / "work" / "todos"
 TEMPLATE_DIR = REAL_TODO_ROOT / "_todo_item_template"
 
 passed = 0
@@ -303,6 +304,13 @@ def test_cmd_layer():
         out = run_cli(test_root, "status", "IP", "RD1")
         test("cmd status with code", "In_Progress" in out)
 
+        # Regression (work-tracking, todo_0307): CLI status change must append
+        # to history.log. The CLI path (cmd_status) previously bypassed history,
+        # which is only added by the programmatic ops_status path. (Read-only check.)
+        cmd_dir = next(Path(test_root).glob("*cmd_test*"), None)
+        hist_text = (cmd_dir / "history.log").read_text() if cmd_dir and (cmd_dir / "history.log").exists() else ""
+        test("cmd status appends history.log", "In_Progress" in hist_text, hist_text.strip()[:120])
+
         out = run_cli(test_root, "flag", "add", "IP1", "urgent")
         test("cmd flag add", "urgent" in out)
 
@@ -353,8 +361,67 @@ def test_cmd_layer():
         out = run_cli(test_root, "status", "IP", "RD1", "RD2")
         test("cmd multi-ref status", "In_Progress" in out, out.strip())
 
+        # Regression (todo_0307): --note on a CLI status change is recorded in history.log
+        run_cli(test_root, "create", "note_test", "--status", "RD")
+        note_dir = next(Path(test_root).glob("*note_test*"), None)
+        note_id = note_dir.name if note_dir else "note_test"
+        run_cli(test_root, "status", "IP", note_id, "--note", "regression note here")
+        note_hist = (note_dir / "history.log").read_text() if note_dir and (note_dir / "history.log").exists() else ""
+        test("cmd status --note recorded in history", "regression note here" in note_hist, note_hist.strip()[:160])
+
     finally:
         teardown_test_root(test_root)
+
+
+# ============================================================
+# project / owner (origin.yml) TESTS — Unified Work Tracking
+# ============================================================
+
+def test_ops_project(tm):
+    print("\n--- ops_project (scope, distinct from owner) ---")
+    tm.ops_create(name="proj_target", status="RD")
+
+    # project is independent of owner: set project on an UNOWNED todo.
+    r = tm.ops_set_project("proj_target", "uai")
+    test("set project", r["success"] and r["project"] == "uai")
+
+    info = tm.ops_get("proj_target")
+    test("project surfaced in todo dict", info.get("project") == "uai")
+    test("project written to origin.yml", info.get("origin", {}).get("project") == "uai")
+    test("unowned todo can still have a project", not info.get("owner"))
+
+    # owner and project are separate axes — set owner, project must persist.
+    tm.ops_set_owner("proj_target", "session_abc")
+    info2 = tm.ops_get("proj_target")
+    test("owner and project coexist independently",
+         info2.get("owner") == "session_abc" and info2.get("project") == "uai")
+
+    # clear project; owner must remain.
+    rc = tm.ops_clear_project("proj_target")
+    test("clear project", rc["success"] and rc["previous_project"] == "uai")
+    info3 = tm.ops_get("proj_target")
+    test("project cleared, owner untouched",
+         not info3.get("project") and info3.get("owner") == "session_abc")
+
+    # origin.yml key order: created_by, created_at, source, owner, project
+    test("origin key order", tm._ORIGIN_KEY_ORDER ==
+         ["created_by", "created_at", "source", "owner", "project"])
+
+
+def test_parent_demoted(tm):
+    print("\n--- parent demoted to physical-nesting-only ---")
+    # The editable origin `parent` field/ops/command must be gone — physical
+    # directory nesting is now the single source of truth.
+    test("ops_set_parent removed", not hasattr(tm, "ops_set_parent"))
+    test("ops_clear_parent removed", not hasattr(tm, "ops_clear_parent"))
+    test("cmd_parent removed", not hasattr(tm, "cmd_parent"))
+    test("parent not an editable origin key", "parent" not in tm._ORIGIN_KEY_ORDER)
+
+    # The DERIVED physical parent still works (move-based nesting).
+    tm.ops_create(name="dad")
+    tm.ops_create(name="kid", parent="dad")
+    kid = tm.ops_get("kid")
+    test("physical (derived) parent still populated", kid.get("parent") is not None)
 
 
 # ============================================================
@@ -432,6 +499,8 @@ def main():
         test_ops_duplicate(tm)
         test_ops_complete(tm)
         test_ops_trash(tm)
+        test_ops_project(tm)
+        test_parent_demoted(tm)
     finally:
         teardown_test_root(test_root)
 
