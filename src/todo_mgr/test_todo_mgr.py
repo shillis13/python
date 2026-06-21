@@ -369,6 +369,23 @@ def test_cmd_layer():
         note_hist = (note_dir / "history.log").read_text() if note_dir and (note_dir / "history.log").exists() else ""
         test("cmd status --note recorded in history", "regression note here" in note_hist, note_hist.strip()[:160])
 
+        # Regression (todo_0323): `create` honors --owner/--project (previously
+        # silently dropped, with a false "Verified: all fields match"). They must
+        # persist to origin.yml AND be covered by verification.
+        out = run_cli(test_root, "create", "owned_test", "--owner", "Anvil", "--project", "hamilton")
+        test("cmd create --owner/--project succeeds", "Created" in out, out.strip())
+        test("cmd create owner/project verified (no mismatch)",
+             "Verified" in out and "mismatch" not in out.lower(), out.strip()[:200])
+        owned_dir = next(Path(test_root).glob("*owned_test*"), None)
+        origin_text = (owned_dir / "origin.yml").read_text() if owned_dir and (owned_dir / "origin.yml").exists() else ""
+        test("cmd create owner written to origin.yml", "owner: Anvil" in origin_text, origin_text.strip()[:160])
+        test("cmd create project written to origin.yml", "project: hamilton" in origin_text, origin_text.strip()[:160])
+
+        # Regression (todo_0323): unknown flags are surfaced, not silently swallowed.
+        out = run_cli(test_root, "create", "bogus_flag_test", "--no-such-flag")
+        test("cmd create warns on unknown flag",
+             "Ignored unknown flags" in out and "--no-such-flag" in out, out.strip()[:160])
+
     finally:
         teardown_test_root(test_root)
 

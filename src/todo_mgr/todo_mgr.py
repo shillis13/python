@@ -1513,6 +1513,18 @@ def verify_todo(todo_path: Path, expected: dict) -> dict:
         if actual_flags != expected_flags:
             mismatches.append(f"flags: expected {expected_flags}, got {actual_flags}")
 
+    # Check owner / project (origin.yml) — only when the caller specifies them
+    if "owner" in expected or "project" in expected:
+        origin = read_origin(todo_path)
+        if "owner" in expected:
+            actual_owner = str(origin.get("owner") or "")
+            if actual_owner != str(expected["owner"] or ""):
+                mismatches.append(f"owner: expected '{expected['owner']}', got '{actual_owner}'")
+        if "project" in expected:
+            actual_project = str(origin.get("project") or "")
+            if actual_project != str(expected["project"] or ""):
+                mismatches.append(f"project: expected '{expected['project']}', got '{actual_project}'")
+
     return {"verified": len(mismatches) == 0, "mismatches": mismatches}
 
 
@@ -1590,6 +1602,10 @@ def ops_create(
             for f in (flags or []) if re.sub(r'[^a-z0-9_]+', '_', f.lower()).strip('_')
         )
         expected = {"status": resolved_status, "tags": expected_tags, "flags": expected_flags}
+        if owner:
+            expected["owner"] = owner
+        if project:
+            expected["project"] = project
 
         verification = verify_todo(new_path, expected)
 
@@ -2384,10 +2400,10 @@ def create_todo_from_template(name: str, parent_dir: Path) -> Path:
 
 
 def cmd_create(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path], interactive: bool = True) -> str:
-    """Create a new todo. Usage: create <name> [--parent <ref>] [--status <status>] [--tags t1,t2]"""
+    """Create a new todo. Usage: create <name> [--parent <ref>] [--status <status>] [--tags t1,t2] [--flags f1,f2] [--owner <id>] [--project <scope>]"""
     if not args:
         if not interactive:
-            return c("Usage: create <name> [--parent <ref>] [--status <status>] [--tags t1,t2]", Colors.RED)
+            return c("Usage: create <name> [--parent <ref>] [--status <status>] [--tags t1,t2] [--flags f1,f2] [--owner <id>] [--project <scope>]", Colors.RED)
         return create_todo_interactive()
     
     name = args[0]
@@ -2396,6 +2412,9 @@ def cmd_create(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path], 
     tags = []
     flags = []
     description = ""
+    owner = ""
+    project = ""
+    unknown = []
 
     # Parse optional args
     i = 1
@@ -2415,13 +2434,25 @@ def cmd_create(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path], 
         elif args[i] in ("--description", "-d") and i + 1 < len(args):
             description = args[i + 1]
             i += 2
+        elif args[i] == "--owner" and i + 1 < len(args):
+            owner = args[i + 1]
+            i += 2
+        elif args[i] == "--project" and i + 1 < len(args):
+            project = args[i + 1]
+            i += 2
+        elif args[i].startswith("--"):
+            unknown.append(args[i])
+            i += 1
         else:
             i += 1
 
     result = ops_create(name=name, parent=parent, status=status,
-                        tags=tags, flags=flags, description=description)
+                        tags=tags, flags=flags, description=description,
+                        owner=owner, project=project)
     if result["success"]:
         lines = [c(f"✓ {result['message']}", Colors.GREEN)]
+        if unknown:
+            lines.append(c(f"  ⚠ Ignored unknown flags: {' '.join(unknown)}", Colors.YELLOW))
         v = result.get("verification", {})
         if v.get("verified"):
             lines.append(c("  ✓ Verified: all fields match", Colors.DIM))
@@ -3174,7 +3205,7 @@ HELP_VERBOSE = """
 
 {bold}MODIFICATION COMMANDS{reset}
 
-  {cyan}create{reset} <name> [--parent <ref>] [--status <s>] [--tags t1,t2] [--flags f1,f2]
+  {cyan}create{reset} <name> [--parent <ref>] [--status <s>] [--tags t1,t2] [--flags f1,f2] [--owner <id>] [--project <scope>]
       Create a new todo. In REPL mode without args, launches wizard.
       --parent     Create as child of another todo
       --status     Initial status (default: triaging)
@@ -3514,7 +3545,7 @@ List all current URI assignments for a todo.
     assigned 0038
 """,
     "create": """
-{bold}create{reset} <name> [--parent <ref>] [--status <s>] [--tags t1,t2] [--flags f1,f2]
+{bold}create{reset} <name> [--parent <ref>] [--status <s>] [--tags t1,t2] [--flags f1,f2] [--owner <id>] [--project <scope>]
 
 Create a new todo.
 
@@ -3525,11 +3556,14 @@ In REPL mode without arguments, launches an interactive wizard.
     --status <status>  Initial status (default: triaging)
     --tags t1,t2       Comma-separated tags to add
     --flags f1,f2      Comma-separated flags to add
+    --owner <id>       Owner — WHO executes (session/team/project id)
+    --project <scope>  Project — WHAT scope/context (independent of owner)
 
 {bold}Examples:{reset}
     create fix_login_bug
     create api_refactor --status ready --tags api,backend
     create subtask --parent IP2 --flags high_priority
+    create hamilton_infra --owner Anvil --project hamilton
 """,
 }
 
