@@ -274,6 +274,22 @@ def render_table(headers, data_rows, max_width, separator_after):
         # Proportional shrink, but never below minimum atomic width
         ratio = available / total_content
         col_widths = [max(int(w * ratio), min_widths[i]) for i, w in enumerate(col_widths)]
+        # Proportional shrink plus min-width clamping can overshoot the target
+        # when one or more columns have large atomic rendered tokens (notably
+        # markdown-bold data cells: each wrapped line gets ** markers).  Pull
+        # that excess back out of columns that are still above their minimums
+        # so the rendered table honors max_width whenever the atomic minima
+        # make that possible.
+        excess = sum(col_widths) - available
+        while excess > 0:
+            shrinkable = [i for i, w in enumerate(col_widths) if w > min_widths[i]]
+            if not shrinkable:
+                break
+            # Prefer shrinking the widest / most flexible column first.
+            i = max(shrinkable, key=lambda idx: (col_widths[idx] - min_widths[idx], col_widths[idx]))
+            col_widths[i] -= 1
+            excess -= 1
+
         # Distribute rounding remainder to widest columns
         diff = available - sum(col_widths)
         if diff > 0:

@@ -155,3 +155,11 @@ And here is trailing text after the last table. This paragraph should survive in
 | Project | Yes | Yes | Yes | No | Yes (via roles) | Unified entity — IS a team. Roles, sessions, optional sub-teams. |
 | Game | Yes | Yes | Yes | Yes | Yes | Extends Project. Game engine, board state, turns. |
 | Terminal | Yes | TBD | Yes | Maybe | Maybe | Addressable infrastructure. Entity status TBD — depends on whether Terminals gain comms. |
+
+## 15. Bold first-column sizing at 140 chars
+
+| Type | Lifecycle | Design impact |
+|---|---|---|
+| **knowledge / instructions** | Authored, edited, versioned. Relatively static. | Full CRUD + version history + convention lint. The "library" core. |
+| **briefs** | *Generated* (condense/auto-brief), superseded/refreshed, freshness-tracked, **referenceable** by roles/profiles, archived-when-stale. | Must show provenance (generated-by session, source, generated-at), support supersede/regenerate (delegating to the condense pipeline), and appear as link *targets* in the reference graph. |
+| **memories** | Continuously *appended* (slots), tiered load (AUTO/TOPIC/DEMAND), pruned/condensed, **shared** across sessions. | The Mgr edits slot *definitions* (manifest + tiers) and supports prune/condense of contents — not a plain file editor. |

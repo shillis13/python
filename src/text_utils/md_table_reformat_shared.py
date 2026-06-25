@@ -63,13 +63,19 @@ def min_rendered_cell_width(text: str, bold: bool = False) -> int:
     unsplittable width for each token must include those four marker characters.
     """
     stripped = text.strip()
-    rendered_bold = bold and bool(stripped)
+    # Headers are rendered bold by the caller, but data cells may already be
+    # markdown-bold.  wrap_cell() treats a whole-cell ``**...**`` value by
+    # wrapping the inner text and then re-applying ``**`` to every rendered
+    # line, so those cells need the same marker-aware minimum width even when
+    # they are not in the header row.
+    cell_is_bold = is_bold_cell(stripped)
+    rendered_bold = (bold or cell_is_bold) and bool(stripped)
     inner = stripped
     marker_width = 0
 
     if rendered_bold:
         marker_width = BOLD_MARKER_WIDTH
-        if is_bold_cell(inner):
+        if cell_is_bold:
             inner = inner[2:-2]
 
     min_width = 1
