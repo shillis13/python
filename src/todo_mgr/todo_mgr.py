@@ -3057,7 +3057,9 @@ def cmd_duplicate(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path
 def cmd_json(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> str:
     """Output todos as JSON."""
     result = ops_list(include_all="--all" in args)
-    return json.dumps(result["todos"], indent=2)
+    # default=str so datetime values (e.g. origin.created_at) serialize instead
+    # of raising TypeError — keeps the JSON contract crash-free for IPC callers.
+    return json.dumps(result["todos"], indent=2, default=str)
 
 
 # === Help System ===
