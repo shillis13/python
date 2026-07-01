@@ -122,8 +122,11 @@ class TestGetLogger:
     def test_empty_string_returns_root(self):
         assert L.get_logger("").name == "ai"
 
-    def test_main_returns_root(self):
-        assert L.get_logger("__main__").name == "ai"
+    def test_main_recovers_component_and_module_from_caller_file(self):
+        # A directly-run script has __name__ == "__main__"; get_logger must
+        # recover component+module from the entrypoint file. Called from this
+        # test file (.../tests/test_lib_logging.py) => ai.tests.test_lib_logging.
+        assert L.get_logger("__main__").name == "ai.tests.test_lib_logging"
 
     def test_bare_ai_returns_root(self):
         assert L.get_logger("ai").name == "ai"

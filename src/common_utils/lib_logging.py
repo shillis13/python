@@ -366,23 +366,24 @@ def remove_handler(handler: logging.Handler, logger_name: str = ROOT_LOGGER_NAME
         pass
 
 
-def _derive_component(depth: int = 2) -> Optional[str]:
-    """Best-effort component name = the directory the CALLER's file lives in.
+def _derive_from_caller(depth: int = 2):
+    """Best-effort (component, module) from the CALLER's file.
 
-    e.g. a module at ``.../scripts/prompting/send_prompt.py`` -> ``"prompting"``.
-    Walks up ``depth`` frames (get_logger's caller by default). Returns None if
-    it can't be determined (frozen/exec/REPL) — callers fall back gracefully.
+    component = the directory the file lives in; module = the file stem.
+    e.g. ``.../scripts/prompting/send_prompt.py`` -> ``("prompting", "send_prompt")``.
+    Walks up ``depth`` frames (get_logger's caller by default). Returns
+    ``(None, None)`` if it can't be determined (frozen/exec/REPL).
     """
     try:
         import sys as _sys
         frame = _sys._getframe(depth)
         f = frame.f_globals.get("__file__")
         if not f:
-            return None
-        parent = Path(f).resolve().parent.name
-        return parent or None
+            return None, None
+        p = Path(f).resolve()
+        return (p.parent.name or None), (p.stem or None)
     except Exception:
-        return None
+        return None, None
 
 
 def get_logger(name: Optional[str] = None, component: Optional[str] = None) -> logging.Logger:
@@ -399,7 +400,19 @@ def get_logger(name: Optional[str] = None, component: Optional[str] = None) -> l
     Component resolution order: explicit ``component=`` arg > the first segment
     of a dotted ``name`` > auto-derived from the caller's directory > none.
     """
-    if not name or name == ROOT_LOGGER_NAME or name == "__main__":
+    if name == "__main__":
+        # Script run directly: __name__ is "__main__". Recover component+module
+        # from the entrypoint file so `get_logger(__name__)` in a directly-run
+        # script STILL lands under ai.<component>.<module> (the common case).
+        comp, mod = _derive_from_caller(2)
+        comp = component or comp
+        if comp and mod:
+            return logging.getLogger(f"{ROOT_LOGGER_NAME}.{comp}.{mod}")
+        if mod:
+            return logging.getLogger(f"{ROOT_LOGGER_NAME}.{mod}")
+        return logging.getLogger(f"{ROOT_LOGGER_NAME}.{comp}" if comp else ROOT_LOGGER_NAME)
+
+    if not name or name == ROOT_LOGGER_NAME:
         if component:
             return logging.getLogger(f"{ROOT_LOGGER_NAME}.{component}")
         return logging.getLogger(ROOT_LOGGER_NAME)
@@ -418,7 +431,7 @@ def get_logger(name: Optional[str] = None, component: Optional[str] = None) -> l
     # Bare module name: auto-derive the component from the caller's directory so
     # already-migrated `get_logger(__name__)` sites become component-namespaced
     # with zero code churn.
-    comp = _derive_component()
+    comp = _derive_from_caller(2)[0]
     if comp:
         return logging.getLogger(f"{ROOT_LOGGER_NAME}.{comp}.{name}")
     return logging.getLogger(f"{ROOT_LOGGER_NAME}.{name}")
