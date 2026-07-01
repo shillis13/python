@@ -223,14 +223,41 @@ def _make_plain_file_handler(path: Union[str, Path], level: int) -> logging.Hand
     return handler
 
 
+def _make_plain_json_handler(path: Union[str, Path], level: int) -> logging.Handler:
+    """Non-rotating append JSONL handler — the machine-readable session twin.
+
+    Same multiprocess-append rationale as _make_plain_file_handler: the session
+    log is written by many short-lived processes, so it must not rotate.
+    """
+    path = Path(path)
+    if path.parent and not path.parent.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+    handler = logging.FileHandler(path, mode="a", encoding="utf-8")
+    handler.setLevel(level)
+    handler.setFormatter(JsonFormatter())
+    return handler
+
+
 def default_session_log_path() -> Optional[Path]:
-    """The per-session log path: ``$AI_SESSION_DIR/logs/session.log`` or None.
+    """The per-session text log path: ``$AI_SESSION_DIR/logs/session.log`` or None.
 
     Returns None when AI_SESSION_DIR is not set (e.g. running outside a managed
     session), in which case logging falls back to console-only.
     """
     sd = os.environ.get("AI_SESSION_DIR")
     return Path(sd) / "logs" / "session.log" if sd else None
+
+
+def default_session_json_path() -> Optional[Path]:
+    """The per-session JSONL log path: ``$AI_SESSION_DIR/logs/session.jsonl``.
+
+    This is the structured twin of session.log — one JSON object per line
+    ({ts, level, logger, func, line, message}); ``logger`` is
+    ``ai.<component>.<module>``. Consumed by the UAI Session Log tab and
+    read_jsonl tooling. None when AI_SESSION_DIR is unset.
+    """
+    sd = os.environ.get("AI_SESSION_DIR")
+    return Path(sd) / "logs" / "session.jsonl" if sd else None
 
 
 # =============================================================================
@@ -292,13 +319,21 @@ def configure_logging(
     if json_file is None:
         json_file = os.environ.get("AI_LOG_JSON") or None
 
-    # Per-session log: auto-on unless disabled or superseded by an explicit file.
+    explicit_json_file = json_file is not None or bool(os.environ.get("AI_LOG_JSON"))
+
+    # Per-session logs: auto-on unless disabled. Text + JSONL twins written to
+    # $AI_SESSION_DIR/logs/. Each is superseded by its explicit counterpart
+    # (log_file supersedes session.log; json_file supersedes session.jsonl).
     if session_file is None:
         env_sess = os.environ.get("AI_LOG_SESSION")
         session_file = True if env_sess is None else env_sess.lower() not in ("0", "false", "no", "off")
     session_path = None
-    if session_file and not explicit_log_file:
-        session_path = default_session_log_path()
+    session_json_path = None
+    if session_file:
+        if not explicit_log_file:
+            session_path = default_session_log_path()
+        if not explicit_json_file:
+            session_json_path = default_session_json_path()
 
     logger = logging.getLogger(logger_name)
 
@@ -322,11 +357,13 @@ def configure_logging(
     if console:
         logger.addHandler(_make_console_handler(lvl, stream=stream, use_color=use_color))
     if log_file:
-        logger.addHandler(_make_file_handler(log_file, lvl))
+        logger.addHandler(_make_file_handler(log_file, lvl))          # explicit, rotating
     elif session_path:
-        logger.addHandler(_make_plain_file_handler(session_path, lvl))
+        logger.addHandler(_make_plain_file_handler(session_path, lvl))  # session.log
     if json_file:
-        logger.addHandler(_make_json_handler(json_file, lvl))
+        logger.addHandler(_make_json_handler(json_file, lvl))          # explicit, rotating
+    elif session_json_path:
+        logger.addHandler(_make_plain_json_handler(session_json_path, lvl))  # session.jsonl
 
     # Never let the logger sit with zero handlers (would emit "no handlers" warnings
     # or fall through to root). A NullHandler is a safe floor.

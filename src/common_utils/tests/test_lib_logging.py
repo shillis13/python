@@ -456,14 +456,30 @@ class TestSessionFile:
         assert "session line" in text
         assert "\033[" not in text  # never any ANSI in the file
 
-    def test_session_log_handler_is_non_rotating(self, monkeypatch, tmp_path):
+    def test_session_creates_text_and_jsonl_twins(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("AI_SESSION_DIR", str(tmp_path))
+        L.configure_logging(console=False, force=True)
+        L.get_logger("send_prompt", component="prompting").info("twin")
+        for h in logging.getLogger("ai").handlers:
+            h.flush()
+        txt = tmp_path / "logs" / "session.log"
+        js = tmp_path / "logs" / "session.jsonl"
+        assert txt.exists() and js.exists()
+        rec = json.loads(_read_bytes(js).strip().splitlines()[-1])
+        assert rec["logger"] == "ai.prompting.send_prompt"
+        assert rec["level"] == "INFO"
+        assert rec["message"] == "twin"
+
+    def test_session_handlers_are_non_rotating(self, monkeypatch, tmp_path):
         monkeypatch.setenv("AI_SESSION_DIR", str(tmp_path))
         L.configure_logging(console=False, force=True)
         file_handlers = [h for h in logging.getLogger("ai").handlers
                          if isinstance(h, logging.FileHandler)]
-        assert len(file_handlers) == 1
-        # Plain FileHandler, NOT a RotatingFileHandler (multiprocess-append-safe).
-        assert not isinstance(file_handlers[0], logging.handlers.RotatingFileHandler)
+        # Two: session.log (text) + session.jsonl (structured twin).
+        assert len(file_handlers) == 2
+        # Neither rotates (multiprocess-append-safe).
+        assert not any(isinstance(h, logging.handlers.RotatingFileHandler)
+                       for h in file_handlers)
 
     def test_no_session_log_when_session_dir_unset(self, tmp_path):
         # Fixture already clears AI_SESSION_DIR.
@@ -497,8 +513,51 @@ class TestSessionFile:
         for h in logging.getLogger("ai").handlers:
             h.flush()
         assert explicit.exists()
-        # The session default must NOT also be attached when an explicit file wins.
+        # The session TEXT default must NOT be attached when an explicit file wins.
         assert not (tmp_path / "logs" / "session.log").exists()
+
+
+# =============================================================================
+# Runtime level control (set_level / signal toggle)
+# =============================================================================
+
+class TestRuntimeLevel:
+    def test_set_level_takes_effect_immediately(self):
+        buf = io.StringIO()
+        L.configure_logging(level="INFO", stream=buf, session_file=False, force=True)
+        log = L.get_logger("m", component="c")
+        log.debug("hidden")
+        assert "hidden" not in buf.getvalue()
+        L.set_level("DEBUG")
+        log.debug("now-visible")
+        assert "now-visible" in buf.getvalue()
+
+    def test_set_level_updates_all_handlers(self):
+        buf = io.StringIO()
+        L.configure_logging(level="INFO", stream=buf, session_file=False, force=True)
+        L.set_level("DEBUG")
+        for h in logging.getLogger("ai").handlers:
+            assert h.level == logging.DEBUG
+
+    def test_set_level_returns_numeric(self):
+        L.configure_logging(session_file=False, force=True)
+        assert L.set_level("WARNING") == logging.WARNING
+
+    @pytest.mark.skipif(not hasattr(__import__("signal"), "SIGUSR1"),
+                        reason="no SIGUSR on this platform")
+    def test_sigusr_toggle_changes_level(self):
+        import signal
+        buf = io.StringIO()
+        L.configure_logging(level="INFO", stream=buf, session_file=False, force=True)
+        L.install_sigusr_level_toggle()
+        os.kill(os.getpid(), signal.SIGUSR1)  # -> DEBUG
+        # signal handlers run synchronously between bytecode ops; a no-op call
+        # gives it a chance to fire.
+        import time; time.sleep(0.02)
+        assert logging.getLogger("ai").level == logging.DEBUG
+        os.kill(os.getpid(), signal.SIGUSR2)  # -> reset INFO
+        time.sleep(0.02)
+        assert logging.getLogger("ai").level == logging.INFO
 
 
 # =============================================================================
