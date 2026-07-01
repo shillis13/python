@@ -24,6 +24,7 @@ setup(
             "text_formatter=text_utils.text_formatter:main",
             "md_table_reformat=text_utils.md_table_reformat:main",
             "field_reorder=text_utils.field_reorder:main",
+            "batn=text_utils.batn:main",
         ],
     },
 )
