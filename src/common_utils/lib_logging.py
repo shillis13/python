@@ -42,6 +42,7 @@ import json
 import logging
 import logging.handlers
 import os
+import signal
 import sys
 from contextlib import contextmanager
 from functools import wraps
@@ -354,6 +355,43 @@ def add_file_handler(
     handler = _make_json_handler(path, lvl) if json else _make_file_handler(path, lvl)
     logger.addHandler(handler)
     return handler
+
+
+def set_level(level: Union[int, str], logger_name: str = ROOT_LOGGER_NAME) -> int:
+    """Change the effective log level at RUNTIME, without reconfiguring handlers.
+
+    Updates the namespace logger and all of its handlers, so a level drop to
+    DEBUG takes effect immediately for every sink. Returns the numeric level.
+
+    Use directly (``set_level("DEBUG")``) or wire it to a trigger — e.g. a
+    SIGUSR1 handler in a long-running daemon, or a control message on the comms
+    bus — to flip verbosity on a running process. Short-lived scripts don't need
+    this: they re-read ``AI_LOG_LEVEL`` from the env on their next invocation.
+    """
+    lvl = coerce_level(level)
+    logger = logging.getLogger(logger_name)
+    logger.setLevel(lvl)
+    for h in logger.handlers:
+        h.setLevel(lvl)
+    return lvl
+
+
+def install_sigusr_level_toggle(
+    debug_signal: int = signal.SIGUSR1,
+    reset_signal: int = signal.SIGUSR2,
+    reset_level: Union[int, str] = "INFO",
+    logger_name: str = ROOT_LOGGER_NAME,
+) -> None:
+    """Opt-in: let a long-running process flip log level via Unix signals.
+
+    ``kill -USR1 <pid>`` -> DEBUG, ``kill -USR2 <pid>`` -> reset (default INFO).
+    Call once from a daemon's setup. No-op on platforms without SIGUSR (Windows);
+    there, use ``set_level()`` via the comms bus or a control file instead.
+    """
+    if not hasattr(signal, "SIGUSR1"):  # e.g. Windows
+        return
+    signal.signal(debug_signal, lambda *_: set_level("DEBUG", logger_name))
+    signal.signal(reset_signal, lambda *_: set_level(reset_level, logger_name))
 
 
 def remove_handler(handler: logging.Handler, logger_name: str = ROOT_LOGGER_NAME) -> None:
