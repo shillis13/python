@@ -205,6 +205,33 @@ def _make_json_handler(
     return handler
 
 
+def _make_plain_file_handler(path: Union[str, Path], level: int) -> logging.Handler:
+    """Non-rotating append file handler.
+
+    Used for the per-session log: several short-lived processes may run under a
+    single session and append concurrently. Plain append is multiprocess-safe
+    for line-sized writes; RotatingFileHandler is NOT (rotation races), so the
+    session log deliberately does not rotate — session lifetime bounds its size.
+    """
+    path = Path(path)
+    if path.parent and not path.parent.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+    handler = logging.FileHandler(path, mode="a", encoding="utf-8")
+    handler.setLevel(level)
+    handler.setFormatter(logging.Formatter(DEFAULT_FORMAT, DEFAULT_DATEFMT))  # no color
+    return handler
+
+
+def default_session_log_path() -> Optional[Path]:
+    """The per-session log path: ``$AI_SESSION_DIR/logs/session.log`` or None.
+
+    Returns None when AI_SESSION_DIR is not set (e.g. running outside a managed
+    session), in which case logging falls back to console-only.
+    """
+    sd = os.environ.get("AI_SESSION_DIR")
+    return Path(sd) / "logs" / "session.log" if sd else None
+
+
 # =============================================================================
 # Public API — configuration
 # =============================================================================
@@ -215,6 +242,7 @@ def configure_logging(
     console: Optional[bool] = None,
     log_file: Union[str, Path, None] = None,
     json_file: Union[str, Path, None] = None,
+    session_file: Optional[bool] = None,
     stream=None,
     use_color: Optional[bool] = None,
     force: bool = False,
@@ -224,11 +252,23 @@ def configure_logging(
 
     Precedence: env vars set defaults, explicit kwargs override them.
 
+    Destinations:
+      * console  -> colored stderr (on by default)
+      * session log -> ``$AI_SESSION_DIR/logs/session.log`` (plain append, no
+        rotation), attached AUTOMATICALLY when AI_SESSION_DIR is set and no
+        explicit ``log_file`` was given. Disable with ``session_file=False`` or
+        env ``AI_LOG_SESSION=0``. Each record carries ``ai.<component>.<module>``
+        so a single session log is filterable by subsystem and module.
+      * log_file -> explicit rotating text log (overrides the session default).
+      * json_file -> rotating JSONL log.
+
     Args:
         level: min level (name/int). Env fallback ``AI_LOG_LEVEL`` (default INFO).
         console: attach colored stderr handler. Env ``AI_LOG_CONSOLE`` (default on).
-        log_file: plain rotating text log. Env fallback ``AI_LOG_FILE``.
+        log_file: explicit rotating text log. Env fallback ``AI_LOG_FILE``.
         json_file: JSONL rotating log. Env fallback ``AI_LOG_JSON``.
+        session_file: attach the per-session log. Default (None) = auto: on when
+            AI_SESSION_DIR is set and no explicit log_file. Env ``AI_LOG_SESSION``.
         stream: console stream (default ``sys.stderr``).
         use_color: force console color on/off (default: auto-detect the stream).
         force: reconfigure even if already configured (removes prior handlers).
@@ -245,10 +285,19 @@ def configure_logging(
         env_console = os.environ.get("AI_LOG_CONSOLE")
         console = True if env_console is None else env_console.lower() not in ("0", "false", "no", "off")
 
+    explicit_log_file = log_file is not None or bool(os.environ.get("AI_LOG_FILE"))
     if log_file is None:
         log_file = os.environ.get("AI_LOG_FILE") or None
     if json_file is None:
         json_file = os.environ.get("AI_LOG_JSON") or None
+
+    # Per-session log: auto-on unless disabled or superseded by an explicit file.
+    if session_file is None:
+        env_sess = os.environ.get("AI_LOG_SESSION")
+        session_file = True if env_sess is None else env_sess.lower() not in ("0", "false", "no", "off")
+    session_path = None
+    if session_file and not explicit_log_file:
+        session_path = default_session_log_path()
 
     logger = logging.getLogger(logger_name)
 
@@ -273,6 +322,8 @@ def configure_logging(
         logger.addHandler(_make_console_handler(lvl, stream=stream, use_color=use_color))
     if log_file:
         logger.addHandler(_make_file_handler(log_file, lvl))
+    elif session_path:
+        logger.addHandler(_make_plain_file_handler(session_path, lvl))
     if json_file:
         logger.addHandler(_make_json_handler(json_file, lvl))
 
@@ -315,23 +366,62 @@ def remove_handler(handler: logging.Handler, logger_name: str = ROOT_LOGGER_NAME
         pass
 
 
-def get_logger(name: Optional[str] = None) -> logging.Logger:
-    """Return a namespaced logger (child of the ``ai`` root).
+def _derive_component(depth: int = 2) -> Optional[str]:
+    """Best-effort component name = the directory the CALLER's file lives in.
 
-    ``get_logger("send_prompt")``          -> logger "ai.send_prompt"
-    ``get_logger(__name__)``               -> logger "ai.<module>"
-    ``get_logger()``                       -> the ``ai`` root logger
-    ``get_logger("ai.foo")`` / ``"ai"``    -> used as-is (already namespaced)
+    e.g. a module at ``.../scripts/prompting/send_prompt.py`` -> ``"prompting"``.
+    Walks up ``depth`` frames (get_logger's caller by default). Returns None if
+    it can't be determined (frozen/exec/REPL) — callers fall back gracefully.
     """
-    if not name or name == ROOT_LOGGER_NAME:
+    try:
+        import sys as _sys
+        frame = _sys._getframe(depth)
+        f = frame.f_globals.get("__file__")
+        if not f:
+            return None
+        parent = Path(f).resolve().parent.name
+        return parent or None
+    except Exception:
+        return None
+
+
+def get_logger(name: Optional[str] = None, component: Optional[str] = None) -> logging.Logger:
+    """Return a namespaced logger under the ``ai`` root: ``ai.<component>.<module>``.
+
+    The component makes logs filterable by subsystem; the module is the leaf.
+
+      get_logger(__name__)  (from prompting/send_prompt.py)  -> "ai.prompting.send_prompt"
+      get_logger("send_prompt", component="prompting")       -> "ai.prompting.send_prompt"
+      get_logger("cli.claude")   (already dotted)            -> "ai.cli.claude"
+      get_logger("ai.foo.bar")   (already namespaced)        -> used as-is
+      get_logger() / get_logger("__main__")                  -> the "ai" root
+
+    Component resolution order: explicit ``component=`` arg > the first segment
+    of a dotted ``name`` > auto-derived from the caller's directory > none.
+    """
+    if not name or name == ROOT_LOGGER_NAME or name == "__main__":
+        if component:
+            return logging.getLogger(f"{ROOT_LOGGER_NAME}.{component}")
         return logging.getLogger(ROOT_LOGGER_NAME)
-    if name == "__main__":
-        return logging.getLogger(ROOT_LOGGER_NAME)
+
     if name.startswith(ROOT_LOGGER_NAME + "."):
-        return logging.getLogger(name)
-    # Collapse dotted module paths to their leaf for readability.
-    leaf = name.rsplit(".", 1)[-1]
-    return logging.getLogger(f"{ROOT_LOGGER_NAME}.{leaf}")
+        return logging.getLogger(name)  # already fully qualified
+
+    if component:
+        leaf = name.rsplit(".", 1)[-1]
+        return logging.getLogger(f"{ROOT_LOGGER_NAME}.{component}.{leaf}")
+
+    if "." in name:
+        # Caller supplied its own component.module path — preserve it verbatim.
+        return logging.getLogger(f"{ROOT_LOGGER_NAME}.{name}")
+
+    # Bare module name: auto-derive the component from the caller's directory so
+    # already-migrated `get_logger(__name__)` sites become component-namespaced
+    # with zero code churn.
+    comp = _derive_component()
+    if comp:
+        return logging.getLogger(f"{ROOT_LOGGER_NAME}.{comp}.{name}")
+    return logging.getLogger(f"{ROOT_LOGGER_NAME}.{name}")
 
 
 def is_configured() -> bool:

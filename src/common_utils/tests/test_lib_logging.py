@@ -46,7 +46,9 @@ _ENV_KEYS = (
     "AI_LOG_FILE",
     "AI_LOG_JSON",
     "AI_LOG_CONSOLE",
-    "NO_COLOR",
+    "AI_LOG_SESSION",
+    "AI_SESSION_DIR",  # neutralize so the auto per-session log never fires
+    "NO_COLOR",        # into the REAL session dir during unrelated tests
     "TERM",
 )
 
@@ -92,11 +94,21 @@ def _read_bytes(path) -> str:
 # =============================================================================
 
 class TestGetLogger:
-    def test_leaf_namespacing(self):
-        assert L.get_logger("send_prompt").name == "ai.send_prompt"
+    def test_explicit_component(self):
+        assert L.get_logger("send_prompt", component="prompting").name == "ai.prompting.send_prompt"
 
-    def test_dotted_collapses_to_leaf(self):
-        assert L.get_logger("a.b.mod").name == "ai.mod"
+    def test_explicit_component_takes_leaf_of_dotted_name(self):
+        assert L.get_logger("pkg.send_prompt", component="prompting").name == "ai.prompting.send_prompt"
+
+    def test_dotted_name_preserved_as_component_path(self):
+        # First segment is treated as the component; nothing is collapsed.
+        assert L.get_logger("cli.claude").name == "ai.cli.claude"
+        assert L.get_logger("a.b.mod").name == "ai.a.b.mod"
+
+    def test_bare_name_auto_derives_component_from_caller_dir(self):
+        # This test file lives in .../common_utils/tests/, so a bare name gets
+        # the caller's directory ("tests") as its component.
+        assert L.get_logger("somemod").name == "ai.tests.somemod"
 
     def test_already_namespaced_preserved(self):
         assert L.get_logger("ai.x").name == "ai.x"
@@ -420,6 +432,70 @@ class TestEnvPrecedence:
         assert jsonf.exists()
         rec = json.loads(_read_bytes(jsonf).strip().splitlines()[-1])
         assert rec["message"] == "via-env-json"
+
+
+# =============================================================================
+# Per-session log ($AI_SESSION_DIR/logs/session.log)
+# =============================================================================
+
+class TestSessionFile:
+    def test_auto_session_log_when_session_dir_set(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("AI_SESSION_DIR", str(tmp_path))
+        L.configure_logging(console=False, force=True)
+        L.get_logger("send_prompt", component="prompting").info("session line")
+        for h in logging.getLogger("ai").handlers:
+            h.flush()
+        sess = tmp_path / "logs" / "session.log"
+        assert sess.exists()
+        text = _read_bytes(sess)
+        # Filterable by component AND module in the single session log.
+        assert "ai.prompting.send_prompt" in text
+        assert "session line" in text
+        assert "\033[" not in text  # never any ANSI in the file
+
+    def test_session_log_handler_is_non_rotating(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("AI_SESSION_DIR", str(tmp_path))
+        L.configure_logging(console=False, force=True)
+        file_handlers = [h for h in logging.getLogger("ai").handlers
+                         if isinstance(h, logging.FileHandler)]
+        assert len(file_handlers) == 1
+        # Plain FileHandler, NOT a RotatingFileHandler (multiprocess-append-safe).
+        assert not isinstance(file_handlers[0], logging.handlers.RotatingFileHandler)
+
+    def test_no_session_log_when_session_dir_unset(self, tmp_path):
+        # Fixture already clears AI_SESSION_DIR.
+        L.configure_logging(console=False, force=True)
+        assert L.default_session_log_path() is None
+        file_handlers = [h for h in logging.getLogger("ai").handlers
+                         if isinstance(h, logging.FileHandler)]
+        assert file_handlers == []
+
+    def test_session_file_disabled_via_env(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("AI_SESSION_DIR", str(tmp_path))
+        monkeypatch.setenv("AI_LOG_SESSION", "0")
+        L.configure_logging(console=False, force=True)
+        assert not (tmp_path / "logs" / "session.log").exists()
+        file_handlers = [h for h in logging.getLogger("ai").handlers
+                         if isinstance(h, logging.FileHandler)]
+        assert file_handlers == []
+
+    def test_session_file_disabled_via_kwarg(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("AI_SESSION_DIR", str(tmp_path))
+        L.configure_logging(console=False, session_file=False, force=True)
+        file_handlers = [h for h in logging.getLogger("ai").handlers
+                         if isinstance(h, logging.FileHandler)]
+        assert file_handlers == []
+
+    def test_explicit_log_file_supersedes_session_default(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("AI_SESSION_DIR", str(tmp_path))
+        explicit = tmp_path / "explicit.log"
+        L.configure_logging(console=False, log_file=explicit, force=True)
+        L.get_logger("m", component="c").info("hi")
+        for h in logging.getLogger("ai").handlers:
+            h.flush()
+        assert explicit.exists()
+        # The session default must NOT also be attached when an explicit file wins.
+        assert not (tmp_path / "logs" / "session.log").exists()
 
 
 # =============================================================================
