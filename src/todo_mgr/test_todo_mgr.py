@@ -369,16 +369,15 @@ def test_cmd_layer():
         note_hist = (note_dir / "history.log").read_text() if note_dir and (note_dir / "history.log").exists() else ""
         test("cmd status --note recorded in history", "regression note here" in note_hist, note_hist.strip()[:160])
 
-        # Regression (todo_0323): `create` honors --owner/--project (previously
-        # silently dropped, with a false "Verified: all fields match"). They must
-        # persist to origin.yml AND be covered by verification.
-        out = run_cli(test_root, "create", "owned_test", "--owner", "Anvil", "--project", "hamilton")
-        test("cmd create --owner/--project succeeds", "Created" in out, out.strip())
-        test("cmd create owner/project verified (no mismatch)",
+        # Regression (todo_0323): `create` honors --project (previously silently
+        # dropped, with a false "Verified: all fields match"). It must persist to
+        # origin.yml AND be covered by verification.
+        out = run_cli(test_root, "create", "owned_test", "--project", "hamilton")
+        test("cmd create --project succeeds", "Created" in out, out.strip())
+        test("cmd create project verified (no mismatch)",
              "Verified" in out and "mismatch" not in out.lower(), out.strip()[:200])
         owned_dir = next(Path(test_root).glob("*owned_test*"), None)
         origin_text = (owned_dir / "origin.yml").read_text() if owned_dir and (owned_dir / "origin.yml").exists() else ""
-        test("cmd create owner written to origin.yml", "owner: Anvil" in origin_text, origin_text.strip()[:160])
         test("cmd create project written to origin.yml", "project: hamilton" in origin_text, origin_text.strip()[:160])
 
         # Regression (todo_0323): unknown flags are surfaced, not silently swallowed.
@@ -391,38 +390,29 @@ def test_cmd_layer():
 
 
 # ============================================================
-# project / owner (origin.yml) TESTS — Unified Work Tracking
+# project (origin.yml) TESTS — Unified Work Tracking
 # ============================================================
 
 def test_ops_project(tm):
-    print("\n--- ops_project (scope, distinct from owner) ---")
+    print("\n--- ops_project (scope) ---")
     tm.ops_create(name="proj_target", status="RD")
 
-    # project is independent of owner: set project on an UNOWNED todo.
     r = tm.ops_set_project("proj_target", "uai")
     test("set project", r["success"] and r["project"] == "uai")
 
     info = tm.ops_get("proj_target")
     test("project surfaced in todo dict", info.get("project") == "uai")
     test("project written to origin.yml", info.get("origin", {}).get("project") == "uai")
-    test("unowned todo can still have a project", not info.get("owner"))
 
-    # owner and project are separate axes — set owner, project must persist.
-    tm.ops_set_owner("proj_target", "session_abc")
-    info2 = tm.ops_get("proj_target")
-    test("owner and project coexist independently",
-         info2.get("owner") == "session_abc" and info2.get("project") == "uai")
-
-    # clear project; owner must remain.
+    # clear project.
     rc = tm.ops_clear_project("proj_target")
     test("clear project", rc["success"] and rc["previous_project"] == "uai")
     info3 = tm.ops_get("proj_target")
-    test("project cleared, owner untouched",
-         not info3.get("project") and info3.get("owner") == "session_abc")
+    test("project cleared", not info3.get("project"))
 
-    # origin.yml key order: created_by, created_at, source, owner, project
+    # origin.yml key order: created_by, created_at, source, project
     test("origin key order", tm._ORIGIN_KEY_ORDER ==
-         ["created_by", "created_at", "source", "owner", "project"])
+         ["created_by", "created_at", "source", "project"])
 
 
 def test_parent_demoted(tm):

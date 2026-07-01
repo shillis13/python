@@ -182,7 +182,6 @@ class Todo:
     title: str = ""
     created: str = ""
     updated: str = ""
-    owner: str = ""                      # single owner from origin.yml (WHO executes: session|team|project id)
     project: str = ""                    # project/scope from origin.yml (WHAT context: project/team id)
     origin: dict = field(default_factory=dict)  # full origin.yml contents (provenance)
 
@@ -220,8 +219,7 @@ def todo_to_dict(todo: Todo, ref: str = "") -> dict:
         "parent": str(todo.parent.relative_to(CURRENT_ROOT)) if todo.parent else None,
         "children": [str(c.relative_to(CURRENT_ROOT)) for c in todo.children],
         # Unified Work Tracking (origin.yml) extensions — additive, optional.
-        # owner = WHO executes; project = WHAT scope it belongs to (distinct axes).
-        "owner": todo.owner or None,
+        # project = WHAT scope it belongs to.
         "project": todo.project or None,
         "created_by": todo.origin.get("created_by"),
         "source": todo.origin.get("source"),
@@ -297,7 +295,6 @@ def load_todos(include_completed: bool = False, include_trash: bool = False) -> 
 
         # Provenance / ownership (origin.yml) — absent on legacy todos.
         origin = read_origin(todo_dir)
-        owner = str(origin.get("owner") or "")
         project = str(origin.get("project") or "")
         if not created and origin.get("created_at"):
             created = str(origin["created_at"])
@@ -313,7 +310,6 @@ def load_todos(include_completed: bool = False, include_trash: bool = False) -> 
             title=title or todo_dir.name,
             created=created,
             updated=updated,
-            owner=owner,
             project=project,
             origin=origin,
         )
@@ -702,9 +698,7 @@ def view_todo_detail(todo: Todo, refs: dict[str, Path],
         assigned_colored = ", ".join(c(a, Colors.CYAN) for a in todo.assigned)
         lines.append(f"  {c('Assigned:', Colors.DIM)}   {assigned_colored}")
 
-    # Owner + project (origin.yml) — distinct axes: WHO executes vs WHAT scope.
-    if todo.owner:
-        lines.append(f"  {c('Owner:', Colors.DIM)}      {c(todo.owner, Colors.CYAN)}")
+    # Project (origin.yml) — WHAT scope the todo belongs to.
     if todo.project:
         lines.append(f"  {c('Project:', Colors.DIM)}    {c(todo.project, Colors.CYAN)}")
 
@@ -966,8 +960,8 @@ def _unassign_todo(todo_dir: Path, uri: str) -> str:
 
 # === Unified Work Tracking helpers (origin.yml / history.log) ===
 # Backward-compatible additions. Legacy todos simply lack these files; they are
-# created on demand when a todo is created via the lightweight path or when an
-# owner/parent/status mutation touches a todo for the first time.
+# created on demand when a todo is created via the lightweight path or when a
+# project/parent/status mutation touches a todo for the first time.
 
 def now_local_iso() -> str:
     """Local timestamp with timezone offset, e.g. 2026-06-16T16:00:00-04:00."""
@@ -984,7 +978,7 @@ def current_session() -> str:
 # Preferred key order for origin.yml readability.
 # NOTE: `parent` is intentionally NOT here — parent/child grouping is physical
 # directory nesting (the single source of truth), never an editable origin field.
-_ORIGIN_KEY_ORDER = ["created_by", "created_at", "source", "owner", "project"]
+_ORIGIN_KEY_ORDER = ["created_by", "created_at", "source", "project"]
 
 
 def read_origin(todo_dir: Path) -> dict:
@@ -1021,12 +1015,12 @@ def write_origin(todo_dir: Path, origin: dict) -> None:
 
 
 def init_origin(todo_dir: Path, *, created_by: str = "", source: str = "agent",
-                owner: str = "", project: str = "") -> dict:
+                project: str = "") -> dict:
     """Create origin.yml for a fresh todo. No-op if one already exists.
 
-    `owner` (WHO executes) and `project` (WHAT scope) are independent, optional
-    fields. Parent/child grouping is NOT recorded here — it is physical directory
-    nesting (the single source of truth).
+    `project` (WHAT scope) is an optional field. Parent/child grouping is NOT
+    recorded here — it is physical directory nesting (the single source of
+    truth).
     """
     todo_dir = Path(todo_dir)
     if (todo_dir / "origin.yml").exists():
@@ -1036,8 +1030,6 @@ def init_origin(todo_dir: Path, *, created_by: str = "", source: str = "agent",
         "created_at": now_local_iso(),
         "source": source,
     }
-    if owner:
-        origin["owner"] = owner
     if project:
         origin["project"] = project
     write_origin(todo_dir, origin)
@@ -1101,7 +1093,6 @@ def ops_create_light(
     name: str,
     summary: str = "",
     status: str = "triaging",
-    owner: str = "",
     project: str = "",
     source: str = "agent",
     created_by: str = "",
@@ -1115,7 +1106,7 @@ def ops_create_light(
         if resolved != "Triaging":
             run_script("set_status", resolved.lower(), str(new_path), quiet=True)
         init_origin(new_path, created_by=created_by, source=source,
-                    owner=owner, project=project)
+                    project=project)
         append_history(new_path, resolved,
                        session=created_by or current_session(),
                        note=f"created via {source}")
@@ -1134,45 +1125,10 @@ def ops_create_light(
         return {"success": False, "error": str(e)}
 
 
-def ops_set_owner(identifier: str, owner: str) -> dict:
-    """Set the single owner in origin.yml (creates origin.yml if absent)."""
-    todos = load_todos(include_completed=True)
-    refs = build_reference_map(todos)
-    try:
-        path = resolve_target(identifier, todos, refs)
-    except ValueError as e:
-        return {"success": False, "error": str(e)}
-    origin = read_origin(path)
-    if not origin:
-        origin = init_origin(path)
-    previous = origin.get("owner")
-    origin["owner"] = owner
-    write_origin(path, origin)
-    return {"success": True, "todo_id": path.name,
-            "owner": owner, "previous_owner": previous}
-
-
-def ops_clear_owner(identifier: str) -> dict:
-    """Remove the owner key from origin.yml (todo becomes unowned)."""
-    todos = load_todos(include_completed=True)
-    refs = build_reference_map(todos)
-    try:
-        path = resolve_target(identifier, todos, refs)
-    except ValueError as e:
-        return {"success": False, "error": str(e)}
-    origin = read_origin(path)
-    previous = origin.pop("owner", None)
-    if origin:
-        write_origin(path, origin)
-    return {"success": True, "todo_id": path.name, "previous_owner": previous}
-
-
 def ops_set_project(identifier: str, project: str) -> dict:
     """Set the project/scope in origin.yml (creates origin.yml if absent).
 
-    `project` is SEPARATE from `owner`: owner = WHO executes, project = WHAT
-    context/scope the todo belongs to (for project rollups). Independent — an
-    unowned todo can still carry a project.
+    `project` = WHAT context/scope the todo belongs to (for project rollups).
     """
     todos = load_todos(include_completed=True)
     refs = build_reference_map(todos)
@@ -1513,17 +1469,12 @@ def verify_todo(todo_path: Path, expected: dict) -> dict:
         if actual_flags != expected_flags:
             mismatches.append(f"flags: expected {expected_flags}, got {actual_flags}")
 
-    # Check owner / project (origin.yml) — only when the caller specifies them
-    if "owner" in expected or "project" in expected:
+    # Check project (origin.yml) — only when the caller specifies it
+    if "project" in expected:
         origin = read_origin(todo_path)
-        if "owner" in expected:
-            actual_owner = str(origin.get("owner") or "")
-            if actual_owner != str(expected["owner"] or ""):
-                mismatches.append(f"owner: expected '{expected['owner']}', got '{actual_owner}'")
-        if "project" in expected:
-            actual_project = str(origin.get("project") or "")
-            if actual_project != str(expected["project"] or ""):
-                mismatches.append(f"project: expected '{expected['project']}', got '{actual_project}'")
+        actual_project = str(origin.get("project") or "")
+        if actual_project != str(expected["project"] or ""):
+            mismatches.append(f"project: expected '{expected['project']}', got '{actual_project}'")
 
     return {"verified": len(mismatches) == 0, "mismatches": mismatches}
 
@@ -1535,7 +1486,6 @@ def ops_create(
     tags: list[str] | None = None,
     flags: list[str] | None = None,
     description: str = "",
-    owner: str = "",
     project: str = "",
     source: str = "agent",
     created_by: str = "",
@@ -1543,8 +1493,8 @@ def ops_create(
     """Create a new (rich) todo. Returns created todo dict with verification.
 
     `parent` keeps its existing meaning (physical directory nesting — the single
-    source of truth for grouping). `owner` (WHO executes) and `project` (WHAT
-    scope) are independent optional origin.yml fields.
+    source of truth for grouping). `project` (WHAT scope) is an optional
+    origin.yml field.
     """
     if not name or not name.strip():
         return {"success": False, "error": "Name required"}
@@ -1586,7 +1536,7 @@ def ops_create(
 
         # Provenance / ownership (origin.yml) + initial history trail.
         init_origin(new_path, created_by=created_by, source=source,
-                    owner=owner, project=project)
+                    project=project)
         append_history(new_path, resolved,
                        session=created_by or current_session(),
                        note=f"created via {source}")
@@ -1602,8 +1552,6 @@ def ops_create(
             for f in (flags or []) if re.sub(r'[^a-z0-9_]+', '_', f.lower()).strip('_')
         )
         expected = {"status": resolved_status, "tags": expected_tags, "flags": expected_flags}
-        if owner:
-            expected["owner"] = owner
         if project:
             expected["project"] = project
 
@@ -2200,53 +2148,29 @@ def cmd_assigned(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]
 
 
 def cmd_create_light(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> str:
-    """create-light <name> [--summary s] [--status s] [--owner id] [--project id] [--source src]"""
+    """create-light <name> [--summary s] [--status s] [--project id] [--source src]"""
     if not args:
         return c("Usage: create-light <name> [--summary <s>] [--status <s>] "
-                 "[--owner <id>] [--project <id>] [--source agent|backfill|manual]", Colors.RED)
+                 "[--project <id>] [--source agent|backfill|manual]", Colors.RED)
     name = args[0]
     rest = list(args[1:])
     summary = _pop_flag(rest, "--summary") or ""
     status = _pop_flag(rest, "--status") or "triaging"
-    owner = _pop_flag(rest, "--owner") or ""
     project = _pop_flag(rest, "--project") or ""
     source = _pop_flag(rest, "--source") or "agent"
     created_by = _pop_flag(rest, "--by") or ""
     result = ops_create_light(name=name, summary=summary, status=status,
-                              owner=owner, project=project, source=source,
+                              project=project, source=source,
                               created_by=created_by)
     if result["success"]:
         return c(f"✓ {result['message']}", Colors.GREEN)
     return c(f"Error: {result['error']}", Colors.RED)
 
 
-def cmd_owner(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> str:
-    """owner <ref> [<owner-id> | --clear]  — show, set, or clear the single owner."""
-    if not args:
-        return c("Usage: owner <ref> <owner-id>  |  owner <ref> --clear", Colors.RED)
-    identifier = args[0]
-    if len(args) >= 2 and args[1] in ("--clear", "clear"):
-        result = ops_clear_owner(identifier)
-        if result["success"]:
-            return c(f"✓ Owner cleared on {result['todo_id']} "
-                     f"(was {result.get('previous_owner')})", Colors.GREEN)
-        return c(f"Error: {result['error']}", Colors.RED)
-    if len(args) >= 2:
-        result = ops_set_owner(identifier, args[1])
-        if result["success"]:
-            return c(f"✓ Owner of {result['todo_id']} set to {result['owner']}", Colors.GREEN)
-        return c(f"Error: {result['error']}", Colors.RED)
-    # show
-    info = ops_get(identifier)
-    if not info.get("success"):
-        return c(f"Error: {info.get('error')}", Colors.RED)
-    return f"Owner of {info['id']}: {info.get('owner') or c('(unowned)', Colors.DIM)}"
-
-
 def cmd_project(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> str:
     """project <ref> [<project-id> | --clear]  — show, set, or clear the project/scope.
 
-    Project is SEPARATE from owner: owner = WHO executes, project = WHAT scope.
+    Project = WHAT scope the todo belongs to.
     (Parent/child grouping is physical directory nesting — use `move`, not this.)
     """
     if not args:
@@ -2400,10 +2324,10 @@ def create_todo_from_template(name: str, parent_dir: Path) -> Path:
 
 
 def cmd_create(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path], interactive: bool = True) -> str:
-    """Create a new todo. Usage: create <name> [--parent <ref>] [--status <status>] [--tags t1,t2] [--flags f1,f2] [--owner <id>] [--project <scope>]"""
+    """Create a new todo. Usage: create <name> [--parent <ref>] [--status <status>] [--tags t1,t2] [--flags f1,f2] [--project <scope>]"""
     if not args:
         if not interactive:
-            return c("Usage: create <name> [--parent <ref>] [--status <status>] [--tags t1,t2] [--flags f1,f2] [--owner <id>] [--project <scope>]", Colors.RED)
+            return c("Usage: create <name> [--parent <ref>] [--status <status>] [--tags t1,t2] [--flags f1,f2] [--project <scope>]", Colors.RED)
         return create_todo_interactive()
     
     name = args[0]
@@ -2412,7 +2336,6 @@ def cmd_create(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path], 
     tags = []
     flags = []
     description = ""
-    owner = ""
     project = ""
     unknown = []
 
@@ -2434,9 +2357,6 @@ def cmd_create(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path], 
         elif args[i] in ("--description", "-d") and i + 1 < len(args):
             description = args[i + 1]
             i += 2
-        elif args[i] == "--owner" and i + 1 < len(args):
-            owner = args[i + 1]
-            i += 2
         elif args[i] == "--project" and i + 1 < len(args):
             project = args[i + 1]
             i += 2
@@ -2448,7 +2368,7 @@ def cmd_create(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path], 
 
     result = ops_create(name=name, parent=parent, status=status,
                         tags=tags, flags=flags, description=description,
-                        owner=owner, project=project)
+                        project=project)
     if result["success"]:
         lines = [c(f"✓ {result['message']}", Colors.GREEN)]
         if unknown:
@@ -3144,10 +3064,8 @@ HELP_EXAMPLES = """
     edit IP2 description           # Edit specific field
 
 {bold}Work tracking (lightweight / origin):{reset}
-    create-light fix_typo --summary "Fix typo in header" --owner sess_123
+    create-light fix_typo --summary "Fix typo in header" --project hamilton
     create-light quick_idea --status ready --source manual
-    owner TR5 sess_123             # Set single owner (origin.yml)
-    owner TR5 --clear              # Clear owner (unowned)
     parent TR5 todo_0307           # Set logical work-group pointer
     parent TR5 --clear             # Clear group pointer
     history TR5                    # Show append-only status trail
@@ -3207,7 +3125,7 @@ HELP_VERBOSE = """
 
 {bold}MODIFICATION COMMANDS{reset}
 
-  {cyan}create{reset} <name> [--parent <ref>] [--status <s>] [--tags t1,t2] [--flags f1,f2] [--owner <id>] [--project <scope>]
+  {cyan}create{reset} <name> [--parent <ref>] [--status <s>] [--tags t1,t2] [--flags f1,f2] [--project <scope>]
       Create a new todo. In REPL mode without args, launches wizard.
       --parent     Create as child of another todo
       --status     Initial status (default: triaging)
@@ -3547,7 +3465,7 @@ List all current URI assignments for a todo.
     assigned 0038
 """,
     "create": """
-{bold}create{reset} <name> [--parent <ref>] [--status <s>] [--tags t1,t2] [--flags f1,f2] [--owner <id>] [--project <scope>]
+{bold}create{reset} <name> [--parent <ref>] [--status <s>] [--tags t1,t2] [--flags f1,f2] [--project <scope>]
 
 Create a new todo.
 
@@ -3558,14 +3476,13 @@ In REPL mode without arguments, launches an interactive wizard.
     --status <status>  Initial status (default: triaging)
     --tags t1,t2       Comma-separated tags to add
     --flags f1,f2      Comma-separated flags to add
-    --owner <id>       Owner — WHO executes (session/team/project id)
-    --project <scope>  Project — WHAT scope/context (independent of owner)
+    --project <scope>  Project — WHAT scope/context
 
 {bold}Examples:{reset}
     create fix_login_bug
     create api_refactor --status ready --tags api,backend
     create subtask --parent IP2 --flags high_priority
-    create hamilton_infra --owner Anvil --project hamilton
+    create hamilton_infra --project hamilton
 """,
 }
 
@@ -3663,7 +3580,6 @@ def run_command(line: str, interactive: bool = True) -> str | None:
         "unassign": lambda: cmd_unassign(args, todos, refs),
         "assigned": lambda: cmd_assigned(args, todos, refs),
         "create-light": lambda: cmd_create_light(args, todos, refs),
-        "owner": lambda: cmd_owner(args, todos, refs),
         "project": lambda: cmd_project(args, todos, refs),
         "history": lambda: cmd_history(args, todos, refs),
         "help": lambda: cmd_help(args),
@@ -3763,7 +3679,6 @@ def run_json_command(args: list[str]) -> None:
                     description=_pop_flag(cmd_args, "--description") or "",
                     tags=_pop_flag_list(cmd_args, "--tags"),
                     status=_pop_flag(cmd_args, "--status") or "triaging",
-                    owner=_pop_flag(cmd_args, "--owner") or "",
                     project=_pop_flag(cmd_args, "--project") or "",
                     source=_pop_flag(cmd_args, "--source") or "agent",
                     created_by=_pop_flag(cmd_args, "--by") or "",
@@ -3781,30 +3696,17 @@ def run_json_command(args: list[str]) -> None:
             name = _pop_flag(cmd_args, "--name") or (cmd_args[0] if cmd_args else None)
             if not name:
                 result = {"error": "Usage: create-light --name <name> [--summary <s>] "
-                                   "[--status <s>] [--owner <id>] [--project <id>] "
+                                   "[--status <s>] [--project <id>] "
                                    "[--source agent|backfill|manual] [--by <session>]"}
             else:
                 result = ops_create_light(
                     name=name,
                     summary=note_text,
                     status=_pop_flag(cmd_args, "--status") or "triaging",
-                    owner=_pop_flag(cmd_args, "--owner") or "",
                     project=_pop_flag(cmd_args, "--project") or "",
                     source=_pop_flag(cmd_args, "--source") or "agent",
                     created_by=_pop_flag(cmd_args, "--by") or "",
                 )
-        elif cmd == "owner":
-            identifier = _pop_flag(cmd_args, "--id") or (cmd_args[0] if cmd_args else None)
-            clear = "--clear" in cmd_args
-            owner_val = _pop_flag(cmd_args, "--owner")
-            if not identifier:
-                result = {"error": "Usage: owner --id <id> --owner <owner> | --clear"}
-            elif clear:
-                result = ops_clear_owner(identifier)
-            elif owner_val is not None:
-                result = ops_set_owner(identifier, owner_val)
-            else:
-                result = {"error": "Usage: owner --id <id> --owner <owner> | --clear"}
         elif cmd == "project":
             identifier = _pop_flag(cmd_args, "--id") or (cmd_args[0] if cmd_args else None)
             clear = "--clear" in cmd_args
