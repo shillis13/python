@@ -199,10 +199,22 @@ class Todo:
         return len(self.rel_path.parts) - 1
 
 
+def canonical_id(dir_name: str) -> str:
+    """The canonical todo id is the bare number handle: todo_NNNN / task_NNNN.
+
+    The directory name carries a human-readable slug (todo_0333_short_title), but
+    that slug is a LABEL, not identity — editing a title or renaming a directory
+    must never change a todo's id. So the id is just the numbered prefix. Falls
+    back to the full name if the prefix isn't found (shouldn't happen).
+    """
+    m = re.match(r"((?:todo|task)_\d{4})", dir_name)
+    return m.group(1) if m else dir_name
+
+
 def todo_to_dict(todo: Todo, ref: str = "") -> dict:
     """Convert Todo dataclass to dict for JSON serialization."""
     return {
-        "id": todo.name,
+        "id": canonical_id(todo.name),
         "ref": ref,
         "path": str(todo.path),
         "rel_path": str(todo.rel_path),
@@ -350,11 +362,13 @@ def extract_notes_metadata(notes_path: Path) -> tuple[str, str, str, str]:
         elif stripped.startswith("**Updated:**"):
             updated = stripped.replace("**Updated:**", "").strip()
         
-        # Summary from Description section
-        if stripped == "## Description":
+        # Summary from the Description section (legacy) or the subtab-convention
+        # `### Summary` section (new convention).
+        if stripped in ("## Description", "### Summary"):
             capture_summary = True
             continue
-        if capture_summary and stripped.startswith("## "):
+        if capture_summary and (stripped.startswith("## ")
+                                or stripped.startswith("### ")):
             break
         if capture_summary and stripped:
             summary_lines.append(stripped)
@@ -830,14 +844,22 @@ def resolve_target(token: str, todos: dict[Path, Todo], refs: dict[str, Path]) -
         if path.name == f"todo_{token}" or path.name == f"task_{token}":
             return path
     
-    # 6. Try as todo number (e.g., "0038" or "38" matches "todo_0038_*")
-    # Strip leading zeros for comparison, but also try with zeros
+    # 6. Try as a todo number or bare canonical id.
+    #    "0038" / "38"  → todo_0038_*
+    #    "todo_0038" / "task_0038" (the canonical id, no slug) → same dir.
+    num_str = None
     if token.isdigit():
-        num_str = token.zfill(4)  # Pad to 4 digits
+        num_str = token.zfill(4)
+    else:
+        m = re.match(r"(?:todo|task)_(\d{1,4})$", token)
+        if m:
+            num_str = m.group(1).zfill(4)
+    if num_str is not None:
         for path in todos:
-            # Match todo_NNNN_* or task_NNNN_* pattern
             name = path.name
-            if name.startswith(f"todo_{num_str}_") or name.startswith(f"task_{num_str}_"):
+            # Exact bare-number dir (todo_0038) or slugged dir (todo_0038_*).
+            if (name == f"todo_{num_str}" or name == f"task_{num_str}"
+                    or name.startswith(f"todo_{num_str}_") or name.startswith(f"task_{num_str}_")):
                 return path
     
     # 7. Try partial/substring match on directory name
@@ -2253,6 +2275,285 @@ def cmd_history(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path])
     return "\n".join(lines)
 
 
+# === notes.md convention migration (todo_0381) ===
+# Retro-fits legacy flat-`##` notes.md into the subtab/section convention:
+#   `## Contents` (subtab) + `### <Section>` (section). Fields (title, created,
+#   status, tags, owner) are engine-owned and stripped from notes bodies — they
+#   live in origin.yml / <Status>.status / *.tag / assigned.yml / history.log.
+
+# Metadata lines to strip from the preamble: any heading (the `# Title`) plus the
+# `**Created:**/**Updated:**/**Status:**/**Owner:**`-style key lines.
+_MIGRATE_META_LINE = re.compile(
+    r'^\s*(?:#{1,6}\s.*|[*_]{0,2}\s*'
+    r'(?:created|updated|last[ _]updated|status|owner|assigned|id|ref|priority)'
+    r'\s*[:*_].*)$', re.I)
+# System/provenance sections that are NOT user content (data lives in origin.yml
+# / <Status>.status) → dropped during migration.
+_MIGRATE_DROP_SECTION = re.compile(r'^\s*(origin|status)\s*$', re.I)
+# Detect an already-structured file (idempotency guard).
+_MIGRATE_CANON_TAB = re.compile(r'^##\s+(contents|activities|links|files)\b',
+                                re.I | re.M)
+_MIGRATE_HTML_COMMENT = re.compile(r'<!--.*?-->', re.DOTALL)
+
+
+def _migrate_strip_comments(text: str) -> str:
+    """Remove HTML-comment template guides."""
+    return _MIGRATE_HTML_COMMENT.sub('', text)
+
+
+def _migrate_parse_flat(md: str) -> tuple[str, list[tuple[str, str]]]:
+    """Split notes into (preamble, [(section_name, body), ...]) on flat `##`."""
+    lines = md.split('\n')
+    first = next((i for i, l in enumerate(lines) if re.match(r'^##\s+', l)), -1)
+    if first == -1:
+        return md.strip(), []
+    preamble = '\n'.join(lines[:first]).strip()
+    secs: list[tuple[str, str]] = []
+    cur: tuple[str, list[str]] | None = None
+    for l in lines[first:]:
+        h = re.match(r'^##\s+(.*)$', l)
+        if h:
+            if cur:
+                secs.append((cur[0], '\n'.join(cur[1]).strip()))
+            cur = (h.group(1).strip(), [])
+        elif cur is not None:
+            cur[1].append(l)
+    if cur:
+        secs.append((cur[0], '\n'.join(cur[1]).strip()))
+    return preamble, secs
+
+
+def _migrate_strip_meta(text: str) -> str:
+    """Drop metadata lines (title heading + Created/Status/Owner keys)."""
+    return '\n'.join(l for l in text.split('\n')
+                     if not _MIGRATE_META_LINE.match(l)).strip()
+
+
+def migrate_notes_content(md: str) -> tuple[str, bool]:
+    """Transform legacy notes.md into the subtab convention.
+
+    Returns (new_md, changed). Idempotent: a file already carrying a canonical
+    `## Contents/Activities/Links/Files` heading is returned unchanged.
+    All non-empty section bodies are preserved verbatim; only the `# Title` +
+    metadata block, HTML-comment guides, and system `## Origin`/`## Status`
+    sections are removed.
+    """
+    if _MIGRATE_CANON_TAB.search(md):
+        return md, False
+    preamble, secs = _migrate_parse_flat(md)
+    intro = _migrate_strip_meta(_migrate_strip_comments(preamble)).strip()
+    out: list[str] = ['## Contents']
+    if intro:
+        out += ['', '### Summary', '', intro]
+    for name, body in secs:
+        if _MIGRATE_DROP_SECTION.match(name):
+            continue
+        body = _migrate_strip_comments(body).strip()
+        out += ['', f'### {name}']
+        if body:
+            out += ['', body]
+    new = '\n'.join(out).rstrip() + '\n'
+    return new, True
+
+
+def _migrate_real_bodies(md: str) -> list[str]:
+    """Real (non-comment, non-system) content blocks that MUST survive migration.
+
+    Used as a data-loss safety net: every returned string must appear in the
+    migrated output or the todo is skipped for manual review.
+    """
+    preamble, secs = _migrate_parse_flat(md)
+    bodies: list[str] = []
+    intro = _migrate_strip_meta(_migrate_strip_comments(preamble)).strip()
+    if intro:
+        bodies.append(intro)
+    for name, body in secs:
+        if _MIGRATE_DROP_SECTION.match(name):
+            continue
+        b = _migrate_strip_comments(body).strip()
+        if b:
+            bodies.append(b)
+    return bodies
+
+
+def _migrate_notes_created(notes_text: str) -> str:
+    """Extract a `**Created:** <date>` value from a notes.md body, or ''.
+
+    Used as a created_at fallback when a todo has no history.log — the notes
+    metadata block is the only creation-date record, and migration strips it, so
+    the date must be captured into origin.yml first.
+    """
+    m = re.search(r'^\s*\*{0,2}\s*Created\s*:?\s*\*{0,2}\s*(\S.*?)\s*$',
+                  notes_text, re.I | re.M)
+    return m.group(1).strip() if m else ''
+
+
+def _migrate_backfill_origin(todo_dir: Path, dry_run: bool,
+                             fallback_ts: str = '') -> str:
+    """Backfill origin.yml created_at. Returns a note describing the action.
+
+    created_at source order: history.log line-1 timestamp, then `fallback_ts`
+    (typically the notes `**Created:**` date). origin.yml is created if absent
+    (source: unknown). Existing origin fields are never overwritten.
+    """
+    origin = read_origin(todo_dir)
+    hist = read_history(todo_dir)
+    created = (hist[0]['ts'] if hist else '') or fallback_ts
+    src = 'history' if hist else ('notes' if fallback_ts else 'n/a')
+    origin_file = todo_dir / 'origin.yml'
+    if not origin_file.exists():
+        if not dry_run:
+            new: dict = {}
+            if created:
+                new['created_at'] = created
+            new['source'] = 'unknown'
+            write_origin(todo_dir, new)
+        return (f"origin.yml created (created_at={created or 'n/a'} [{src}], "
+                f"source=unknown)")
+    if not origin.get('created_at'):
+        if created:
+            if not dry_run:
+                origin['created_at'] = created
+                write_origin(todo_dir, origin)
+            return f"origin.yml created_at backfilled ({created} [{src}])"
+        return "origin.yml lacks created_at, no ts available (skipped)"
+    return ""
+
+
+def cmd_migrate(args: list[str], todos: dict[Path, Todo],
+                refs: dict[str, Path]) -> str:
+    """Migrate notes.md to the subtab convention + backfill origin.yml.
+
+    Usage: migrate <ref> | migrate --all  [--dry-run]
+    """
+    dry_run = '--dry-run' in args
+    do_all = '--all' in args
+    positional = [a for a in args if not a.startswith('--')]
+
+    if do_all:
+        targets = sorted(todos.keys(), key=lambda p: p.as_posix())
+    elif positional:
+        try:
+            targets = [resolve_target(positional[0], todos, refs)]
+        except ValueError as e:
+            return c(str(e), Colors.RED)
+    else:
+        return c("Usage: migrate <ref> | migrate --all  [--dry-run]", Colors.RED)
+
+    migrated = skipped = errors = origin_actions = 0
+    flagged: list[str] = []
+    lines: list[str] = []
+    header = "DRY-RUN migrate" if dry_run else "migrate"
+    lines.append(c(f"=== {header} ({len(targets)} todo(s)) ===", Colors.BOLD))
+
+    for path in targets:
+        name = path.name
+        notes_path = path / 'notes.md'
+        # Read notes first so the `**Created:**` date can seed origin.yml before
+        # migration strips it (the only creation record for history-less todos).
+        old = notes_path.read_text() if notes_path.exists() else ''
+        fallback_created = _migrate_notes_created(old)
+
+        # --- origin.yml backfill (independent of notes structure) ---
+        try:
+            origin_note = _migrate_backfill_origin(path, dry_run, fallback_created)
+        except Exception as e:  # noqa: BLE001 — never let one todo abort the run
+            origin_note = f"origin error: {e}"
+        if origin_note and 'skipped' not in origin_note and 'error' not in origin_note:
+            origin_actions += 1
+
+        # --- notes.md structure migration ---
+        if not notes_path.exists():
+            skipped += 1
+            lines.append(c(f"  SKIP {name}: no notes.md", Colors.DIM)
+                         + (f"  [{origin_note}]" if origin_note else ""))
+            continue
+        if not old.strip():
+            skipped += 1
+            lines.append(c(f"  SKIP {name}: empty notes.md", Colors.DIM)
+                         + (f"  [{origin_note}]" if origin_note else ""))
+            continue
+        try:
+            new, changed = migrate_notes_content(old)
+        except Exception as e:  # noqa: BLE001
+            errors += 1
+            flagged.append(f"{name}: transform error: {e}")
+            lines.append(c(f"  ERROR {name}: {e}", Colors.RED))
+            continue
+
+        if not changed:
+            skipped += 1
+            lines.append(c(f"  skip {name}: already structured", Colors.DIM)
+                         + (f"  [{origin_note}]" if origin_note else ""))
+            continue
+
+        # Data-loss safety net: every real body block must survive.
+        missing = [b for b in _migrate_real_bodies(old) if b not in new]
+        if missing:
+            errors += 1
+            flagged.append(f"{name}: content-preservation check failed "
+                           f"({len(missing)} block(s) missing) — manual review")
+            lines.append(c(f"  FLAG {name}: preservation check failed, skipped",
+                           Colors.RED))
+            continue
+
+        if dry_run:
+            migrated += 1
+            lines.append(c(f"  would migrate {name}", Colors.GREEN)
+                         + (f"  [{origin_note}]" if origin_note else ""))
+            lines.append(c("    --- BEFORE ---", Colors.DIM))
+            lines.append(indent(old.strip(), "    "))
+            lines.append(c("    --- AFTER ---", Colors.DIM))
+            lines.append(indent(new.strip(), "    "))
+        else:
+            notes_path.write_text(new)
+            migrated += 1
+            lines.append(c(f"  migrated {name}", Colors.GREEN)
+                         + (f"  [{origin_note}]" if origin_note else ""))
+
+    lines.append("")
+    verb = "would migrate" if dry_run else "migrated"
+    lines.append(c(f"Totals: {verb}={migrated}  skipped={skipped}  "
+                   f"errors={errors}  origin_backfilled={origin_actions}",
+                   Colors.BOLD))
+    if flagged:
+        lines.append(c("Flagged for manual review:", Colors.YELLOW))
+        for f in flagged:
+            lines.append(c(f"  - {f}", Colors.YELLOW))
+    return "\n".join(lines)
+
+
+def cmd_set_notes(args: list[str], todos: dict[Path, Todo],
+                  refs: dict[str, Path]) -> str:
+    """Replace a todo's whole notes.md. Usage: set-notes <ref> [--content <text>]
+
+    Without --content, the new body is read from stdin. This routes ALL notes
+    writes through todo_mgr (the data authority) so the UI/scripts never write
+    notes.md directly.
+    """
+    positional = [a for a in args if not a.startswith('--')]
+    if not positional:
+        return c("Usage: set-notes <ref> [--content <text>]  (else reads stdin)",
+                 Colors.RED)
+    content: str | None = None
+    if '--content' in args:
+        i = args.index('--content')
+        if i + 1 < len(args):
+            content = args[i + 1]
+    if content is None:
+        content = sys.stdin.read()
+    try:
+        path = resolve_target(positional[0], todos, refs)
+    except ValueError as e:
+        return c(str(e), Colors.RED)
+    notes_path = path / 'notes.md'
+    if not content.endswith('\n'):
+        content += '\n'
+    notes_path.write_text(content)
+    return c(f"notes.md replaced ({len(content)} bytes) for {path.name}",
+             Colors.GREEN)
+
+
 def get_next_todo_number() -> int:
     """Get the next available todo number by scanning all directories."""
     max_num = 0
@@ -2318,22 +2619,20 @@ def create_todo_from_template(name: str, parent_dir: Path) -> Path:
         (target_dir / "data").mkdir()
         (target_dir / "Triaging.status").touch()
         
-        # Create basic notes.md
-        display_name = capped_title.replace("_", " ").title()
-        today = datetime.now().strftime("%Y-%m-%d")
-        notes_content = f"""# {display_name}
+        # Create basic notes.md (subtab convention — fields are engine-owned:
+        # title/created/status/tags/owner live in origin.yml, <Status>.status,
+        # *.tag, assigned.yml — never repeated in notes bodies).
+        notes_content = """## Contents
 
-**Created:** {today}
-**Updated:** {today}
+### Summary
 
-## Description
+### What Success Looks Like
 
-## Requirements
+### Approach
 
-## Done When
+### Requirements
 
-## Notes
-
+### Dependencies
 """
         (target_dir / "notes.md").write_text(notes_content)
     else:
@@ -2769,6 +3068,11 @@ def edit_field(todo: Todo, field: str, notes_path: Path,
     elif field in ("description", "requirements", "done_when"):
         section_name = {"description": "Description", "requirements": "Requirements",
                        "done_when": "Done When"}[field]
+        # Non-interactive path: an inline value writes the section directly so
+        # the UI/scripts can edit through todo_mgr without a prompt.
+        if inline_value is not None:
+            update_notes_section(notes_path, section_name, inline_value)
+            return c(f"{section_name} updated", Colors.GREEN)
         current = extract_section(notes_path, section_name).strip()
         display = re.sub(r'<!--.*?-->', '', current, flags=re.DOTALL).strip()
         print(f"  Current {section_name}:")
@@ -2876,37 +3180,48 @@ def update_notes_field(notes_path: Path, field: str, value: str) -> None:
 def update_notes_section(notes_path: Path, section: str, new_content: str) -> None:
     """Update a section in notes.md.
 
+    Handles both legacy flat `## Section` headings and the subtab-convention
+    `### Section` headings (a section within `## Contents`). A section body runs
+    until the next heading of the same-or-higher level. If the section is
+    missing, it is appended as `### Section` under an existing `## Contents`
+    subtab, else as a legacy `## Section`.
+
     Args:
         notes_path: Path to the notes.md file.
-        section: Section heading (without ##) to update.
+        section: Section heading (without leading #'s) to update.
         new_content: New content for the section.
     """
     lines = notes_path.read_text().splitlines()
 
-    new_lines = []
+    new_lines: list[str] = []
     in_section = False
     section_written = False
+    section_level = 0
+    has_contents = any(l.strip().lower() == "## contents" for l in lines)
 
     for line in lines:
-        if line.strip() == f"## {section}":
+        m = re.match(r'^(#{2,3})\s+(.*)$', line.strip())
+        if m and m.group(2).strip() == section and not section_written:
             new_lines.append(line)
             new_lines.append("")
             new_lines.append(new_content)
             new_lines.append("")
             in_section = True
             section_written = True
+            section_level = len(m.group(1))
             continue
 
-        if in_section and line.startswith("## "):
+        # A heading of same-or-higher level closes the current section.
+        if in_section and m and len(m.group(1)) <= section_level:
             in_section = False
 
         if not in_section:
             new_lines.append(line)
 
-    # If section didn't exist, append it
+    # If section didn't exist, append it (under Contents when present).
     if not section_written:
         new_lines.append("")
-        new_lines.append(f"## {section}")
+        new_lines.append(f"### {section}" if has_contents else f"## {section}")
         new_lines.append("")
         new_lines.append(new_content)
         new_lines.append("")
@@ -3629,6 +3944,8 @@ def run_command(line: str, interactive: bool = True) -> str | None:
         "create-light": lambda: cmd_create_light(args, todos, refs),
         "project": lambda: cmd_project(args, todos, refs),
         "history": lambda: cmd_history(args, todos, refs),
+        "migrate": lambda: cmd_migrate(args, todos, refs),
+        "set-notes": lambda: cmd_set_notes(args, todos, refs),
         "help": lambda: cmd_help(args),
     }
 

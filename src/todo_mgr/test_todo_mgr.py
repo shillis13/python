@@ -8,6 +8,7 @@ Run: python3 test_todo_mgr.py
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -106,9 +107,10 @@ def test_title_length_cap(tm):
     r = tm.ops_create(name=para)
     test("paragraph create succeeds", r["success"], str(r.get("error")))
     tid = r["todo"]["id"]
-    test("dir slug bounded", len(tid) <= len("todo_0000_") + MAX + 1, f"got {tid}")
+    test("canonical id is bare number", bool(re.fullmatch(r"todo_\d{4}", tid)), tid)
+    test("dir slug bounded", len(r["todo"]["rel_path"]) <= len("todo_0000_") + MAX + 1, r["todo"]["rel_path"])
     test("stored title bounded", len(r["todo"]["title"]) <= MAX + 4, r["todo"]["title"])
-    # full original text preserved in the Description
+    # full original text preserved in the Description; resolve by bare id
     got = tm.ops_get(tid)
     test("full title preserved in description", "keeps going" in got.get("notes", ""))
 
@@ -121,10 +123,12 @@ def test_title_length_cap(tm):
     r3 = tm.ops_create_light(name=para)
     test("light paragraph create succeeds", r3["success"], str(r3.get("error")))
     lt_id = r3["todo"]["id"]
-    test("light dir slug bounded", len(lt_id) <= len("todo_0000_") + MAX + 1, f"got {lt_id}")
+    test("light canonical id is bare number", bool(re.fullmatch(r"todo_\d{4}", lt_id)), lt_id)
+    lt_dir = r3["todo"]["rel_path"]  # dir name carries the (capped) slug
+    test("light dir slug bounded", len(lt_dir) <= len("todo_0000_") + MAX + 1, f"got {lt_dir}")
     test("light title (summary first line) bounded", len(r3["todo"]["summary"]) <= MAX + 1,
          r3["todo"]["summary"])
-    summary_file = (tm.CURRENT_ROOT / lt_id / "summary").read_text()
+    summary_file = (tm.CURRENT_ROOT / lt_dir / "summary").read_text()
     test("light full title preserved below summary line", "keeps going" in summary_file)
 
 
@@ -146,7 +150,8 @@ def test_ops_list(tm):
     test("list filter by tag", all("test" in t["tags"] for t in r4["todos"]))
 
     r5 = tm.ops_list(name_pattern="*alpha*")
-    test("list filter by glob", all("alpha" in t["id"] for t in r5["todos"]))
+    # glob matches the directory slug (rel_path); id is the bare number handle.
+    test("list filter by glob", r5["count"] > 0 and all("alpha" in t["rel_path"] for t in r5["todos"]))
 
     r6 = tm.ops_list(flag="high_priority")
     test("list filter by flag", all("high_priority" in t["flags"] for t in r6["todos"]))
