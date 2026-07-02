@@ -84,6 +84,50 @@ def test_ops_create(tm):
     test("child parent set", r5["todo"]["parent"] is not None)
 
 
+def test_title_length_cap(tm):
+    print("\n--- title length cap ---")
+    MAX = tm.MAX_TITLE_LEN
+
+    # _cap_title unit behavior
+    short, trunc = tm._cap_title("fix_login_bug")
+    test("short title unchanged", short == "fix_login_bug" and not trunc)
+
+    multiline, _ = tm._cap_title("line one\nline two\n  extra   spaces")
+    test("newlines/whitespace collapsed", "\n" not in multiline and "  " not in multiline)
+
+    para = ("This is an absurdly long todo title that some agent decided to write as "
+            "an entire paragraph instead of a concise handle and it just keeps going")
+    capped, was_trunc = tm._cap_title(para)
+    test("long title truncated", was_trunc and len(capped) <= MAX)
+    test("truncation on a word boundary (no dangling partial word)",
+         not capped.endswith(" ") and para.startswith(capped))
+
+    # ops_create (rich) with a paragraph name
+    r = tm.ops_create(name=para)
+    test("paragraph create succeeds", r["success"], str(r.get("error")))
+    tid = r["todo"]["id"]
+    test("dir slug bounded", len(tid) <= len("todo_0000_") + MAX + 1, f"got {tid}")
+    test("stored title bounded", len(r["todo"]["title"]) <= MAX + 4, r["todo"]["title"])
+    # full original text preserved in the Description
+    got = tm.ops_get(tid)
+    test("full title preserved in description", "keeps going" in got.get("notes", ""))
+
+    # explicit description is NOT clobbered by the preservation logic
+    r2 = tm.ops_create(name=para, description="explicit desc")
+    got2 = tm.ops_get(r2["todo"]["id"])
+    test("explicit description preserved", "explicit desc" in got2.get("notes", ""))
+
+    # ops_create_light with a paragraph name, no summary
+    r3 = tm.ops_create_light(name=para)
+    test("light paragraph create succeeds", r3["success"], str(r3.get("error")))
+    lt_id = r3["todo"]["id"]
+    test("light dir slug bounded", len(lt_id) <= len("todo_0000_") + MAX + 1, f"got {lt_id}")
+    test("light title (summary first line) bounded", len(r3["todo"]["summary"]) <= MAX + 1,
+         r3["todo"]["summary"])
+    summary_file = (tm.CURRENT_ROOT / lt_id / "summary").read_text()
+    test("light full title preserved below summary line", "keeps going" in summary_file)
+
+
 def test_ops_list(tm):
     print("\n--- ops_list ---")
     r = tm.ops_list()
@@ -495,6 +539,7 @@ def main():
 
         test_resolve_status(tm)
         test_ops_create(tm)
+        test_title_length_cap(tm)
         test_todo_to_dict(tm)
         test_ops_list(tm)
         test_ops_get(tm)

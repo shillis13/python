@@ -1065,6 +1065,32 @@ def read_history(todo_dir: Path) -> list[dict]:
     return entries
 
 
+# A todo title is a short one-line handle, not a place to dump a paragraph.
+# Some agents pass multi-sentence "names"; cap the title (and the derived
+# directory slug + display heading) to a sane length. The full original text is
+# never lost — it is preserved in the Description (rich) / below the summary
+# line (lightweight) by the create ops.
+MAX_TITLE_LEN = 80
+
+
+def _cap_title(name: str) -> tuple[str, bool]:
+    """Normalize whitespace and cap a todo title to MAX_TITLE_LEN characters.
+
+    Returns (capped_title, was_truncated). Collapses any internal newlines/runs
+    of whitespace to single spaces (a title is one line) and, when over the
+    limit, backs off to the last word/underscore boundary so a token isn't split
+    mid-way (unless that would gut the title to less than half the budget).
+    """
+    t = " ".join(str(name).split())
+    if len(t) <= MAX_TITLE_LEN:
+        return t, False
+    cut = t[:MAX_TITLE_LEN]
+    boundary = max(cut.rfind(" "), cut.rfind("_"))
+    if boundary >= MAX_TITLE_LEN // 2:
+        cut = cut[:boundary]
+    return cut.rstrip(" _"), True
+
+
 def create_lightweight_todo(name: str, parent_dir: Path, summary: str) -> Path:
     """Create a minimal todo dir: summary + Triaging.status. No notes.md/data/.
 
@@ -1072,7 +1098,8 @@ def create_lightweight_todo(name: str, parent_dir: Path, summary: str) -> Path:
     rich todos share one numbering space.
     """
     num = get_next_todo_number()
-    slug = re.sub(r'_+', '_', re.sub(r'[^a-z0-9_]+', '_', name.lower())).strip('_')
+    capped_title, truncated = _cap_title(name)
+    slug = re.sub(r'_+', '_', re.sub(r'[^a-z0-9_]+', '_', capped_title.lower())).strip('_')
     if not slug:
         raise ValueError("Invalid todo name - no valid characters")
     prefix = f"todo_{num:04d}_"
@@ -1083,7 +1110,15 @@ def create_lightweight_todo(name: str, parent_dir: Path, summary: str) -> Path:
     if target_dir.exists():
         raise ValueError(f"Directory already exists: {target_dir}")
     target_dir.mkdir(parents=True)
-    body = (summary or name.replace("_", " ")).strip()
+    # The summary's FIRST line is the todo's title, so it must be the capped
+    # form. When no explicit summary is given and the name was too long, keep the
+    # full original text on a following line so nothing is lost.
+    if summary:
+        body = summary.strip()
+    elif truncated:
+        body = capped_title + "\n\n" + " ".join(name.split())
+    else:
+        body = capped_title.replace("_", " ")
     (target_dir / "summary").write_text(body + "\n")
     (target_dir / "Triaging.status").touch()
     return target_dir
@@ -1510,6 +1545,13 @@ def ops_create(
             parent_dir = resolve_target(parent, todos, refs)
 
         new_path = create_todo_from_template(name, parent_dir)
+
+        # If the title had to be capped, preserve the full original text in the
+        # Description so no content is lost (only when the caller didn't supply
+        # its own description).
+        _, _title_truncated = _cap_title(name)
+        if _title_truncated and not description:
+            description = " ".join(name.split())
 
         # Set status (uses resolve_status to handle codes like 'RD')
         resolved = resolve_status(status)
@@ -2236,9 +2278,14 @@ def create_todo_from_template(name: str, parent_dir: Path) -> Path:
     """
     # Get next number
     num = get_next_todo_number()
-    
-    # Slugify name
-    slug = name.lower()
+
+    # Cap the title first: the slug AND the display heading derive from it, so a
+    # paragraph-long name can't produce a paragraph-long title. (The full text is
+    # preserved in the Description by ops_create when truncation occurs.)
+    capped_title, _ = _cap_title(name)
+
+    # Slugify the capped title
+    slug = capped_title.lower()
     slug = re.sub(r'[^a-z0-9_]+', '_', slug)
     slug = re.sub(r'_+', '_', slug).strip('_')
 
@@ -2272,7 +2319,7 @@ def create_todo_from_template(name: str, parent_dir: Path) -> Path:
         (target_dir / "Triaging.status").touch()
         
         # Create basic notes.md
-        display_name = name.replace("_", " ").title()
+        display_name = capped_title.replace("_", " ").title()
         today = datetime.now().strftime("%Y-%m-%d")
         notes_content = f"""# {display_name}
 
@@ -2301,7 +2348,7 @@ def create_todo_from_template(name: str, parent_dir: Path) -> Path:
         # Update notes.md
         notes_path = target_dir / "notes.md"
         if notes_path.exists():
-            display_name = name.replace("_", " ").title()
+            display_name = capped_title.replace("_", " ").title()
             today = datetime.now().strftime("%Y-%m-%d")
             
             content = notes_path.read_text()
