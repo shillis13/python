@@ -182,7 +182,7 @@ class Todo:
     title: str = ""
     created: str = ""
     updated: str = ""
-    project: str = ""                    # project/scope from origin.yml (WHAT context: project/team id)
+    project: str = ""                    # DERIVED from the uai://project/<id> assignee (not a stored field)
     origin: dict = field(default_factory=dict)  # full origin.yml contents (provenance)
 
     @property
@@ -211,6 +211,23 @@ def canonical_id(dir_name: str) -> str:
     return m.group(1) if m else dir_name
 
 
+# Project membership is expressed through ASSIGNMENT, not a separate origin.yml
+# scope field: a project is an assignee whose URI is ``uai://project/<id>`` in
+# assigned.yml — exactly like a session (``uai://session/…``) or team
+# (``uai://team/…``). ``Todo.project`` is DERIVED from that assignee for display
+# / rollups; there is no independent scope field. (Migrated 2026-07-03 per
+# note_0004 — the old origin.yml ``project`` field was retired.)
+PROJECT_URI_PREFIX = "uai://project/"
+
+
+def _project_from_assigned(assigned) -> str:
+    """The project id from the first ``uai://project/<id>`` assignee, else ''."""
+    for uri in assigned or []:
+        if isinstance(uri, str) and uri.startswith(PROJECT_URI_PREFIX):
+            return uri[len(PROJECT_URI_PREFIX):]
+    return ""
+
+
 def todo_to_dict(todo: Todo, ref: str = "") -> dict:
     """Convert Todo dataclass to dict for JSON serialization."""
     return {
@@ -230,8 +247,8 @@ def todo_to_dict(todo: Todo, ref: str = "") -> dict:
         # of truth for parent/child grouping) — never an editable origin.yml field.
         "parent": str(todo.parent.relative_to(CURRENT_ROOT)) if todo.parent else None,
         "children": [str(c.relative_to(CURRENT_ROOT)) for c in todo.children],
-        # Unified Work Tracking (origin.yml) extensions — additive, optional.
-        # project = WHAT scope it belongs to.
+        # project = the uai://project/<id> assignee, surfaced here (derived) for
+        # rollups/back-compat; it also appears in `assigned` as the full URI.
         "project": todo.project or None,
         "created_by": todo.origin.get("created_by"),
         "source": todo.origin.get("source"),
@@ -305,9 +322,11 @@ def load_todos(include_completed: bool = False, include_trash: bool = False) -> 
                 "",
             )
 
-        # Provenance / ownership (origin.yml) — absent on legacy todos.
+        # Provenance (origin.yml) — absent on legacy todos.
         origin = read_origin(todo_dir)
-        project = str(origin.get("project") or "")
+        # project is DERIVED from the uai://project/<id> assignee (single source
+        # of truth = assignment), not an independent origin.yml scope field.
+        project = _project_from_assigned(assigned)
         if not created and origin.get("created_at"):
             created = str(origin["created_at"])
 
@@ -712,7 +731,7 @@ def view_todo_detail(todo: Todo, refs: dict[str, Path],
         assigned_colored = ", ".join(c(a, Colors.CYAN) for a in todo.assigned)
         lines.append(f"  {c('Assigned:', Colors.DIM)}   {assigned_colored}")
 
-    # Project (origin.yml) — WHAT scope the todo belongs to.
+    # Project — the uai://project/<id> assignee (derived).
     if todo.project:
         lines.append(f"  {c('Project:', Colors.DIM)}    {c(todo.project, Colors.CYAN)}")
 
@@ -1000,7 +1019,7 @@ def current_session() -> str:
 # Preferred key order for origin.yml readability.
 # NOTE: `parent` is intentionally NOT here — parent/child grouping is physical
 # directory nesting (the single source of truth), never an editable origin field.
-_ORIGIN_KEY_ORDER = ["created_by", "created_at", "source", "project"]
+_ORIGIN_KEY_ORDER = ["created_by", "created_at", "source"]
 
 
 def read_origin(todo_dir: Path) -> dict:
@@ -1036,13 +1055,12 @@ def write_origin(todo_dir: Path, origin: dict) -> None:
     )
 
 
-def init_origin(todo_dir: Path, *, created_by: str = "", source: str = "agent",
-                project: str = "") -> dict:
-    """Create origin.yml for a fresh todo. No-op if one already exists.
+def init_origin(todo_dir: Path, *, created_by: str = "", source: str = "agent") -> dict:
+    """Create origin.yml (provenance only) for a fresh todo. No-op if present.
 
-    `project` (WHAT scope) is an optional field. Parent/child grouping is NOT
-    recorded here — it is physical directory nesting (the single source of
-    truth).
+    origin.yml records ONLY provenance (created_by/created_at/source). Project
+    membership is an assignment (``uai://project/<id>`` in assigned.yml), not an
+    origin field; parent/child grouping is physical directory nesting.
     """
     todo_dir = Path(todo_dir)
     if (todo_dir / "origin.yml").exists():
@@ -1052,8 +1070,6 @@ def init_origin(todo_dir: Path, *, created_by: str = "", source: str = "agent",
         "created_at": now_local_iso(),
         "source": source,
     }
-    if project:
-        origin["project"] = project
     write_origin(todo_dir, origin)
     return origin
 
@@ -1162,8 +1178,10 @@ def ops_create_light(
         new_path = create_lightweight_todo(name, CURRENT_ROOT, summary)
         if resolved != "Triaging":
             run_script("set_status", resolved.lower(), str(new_path), quiet=True)
-        init_origin(new_path, created_by=created_by, source=source,
-                    project=project)
+        init_origin(new_path, created_by=created_by, source=source)
+        # Project membership is an assignment, not an origin field.
+        if project:
+            _assign_todo(new_path, PROJECT_URI_PREFIX + project)
         append_history(new_path, resolved,
                        session=created_by or current_session(),
                        note=f"created via {source}")
@@ -1182,10 +1200,20 @@ def ops_create_light(
         return {"success": False, "error": str(e)}
 
 
-def ops_set_project(identifier: str, project: str) -> dict:
-    """Set the project/scope in origin.yml (creates origin.yml if absent).
+def _read_assigned(path: Path) -> list:
+    import yaml
+    af = Path(path) / "assigned.yml"
+    if not af.exists():
+        return []
+    return yaml.safe_load(af.read_text()) or []
 
-    `project` = WHAT context/scope the todo belongs to (for project rollups).
+
+def ops_set_project(identifier: str, project: str) -> dict:
+    """Set the todo's project by assigning ``uai://project/<project>``.
+
+    Project membership is an assignment, not an origin.yml field. Setting the
+    project REPLACES any existing project assignee (a todo has one project); the
+    session/team assignees are untouched. Empty ``project`` clears it.
     """
     todos = load_todos(include_completed=True)
     refs = build_reference_map(todos)
@@ -1193,29 +1221,32 @@ def ops_set_project(identifier: str, project: str) -> dict:
         path = resolve_target(identifier, todos, refs)
     except ValueError as e:
         return {"success": False, "error": str(e)}
-    origin = read_origin(path)
-    if not origin:
-        origin = init_origin(path)
-    previous = origin.get("project")
-    origin["project"] = project
-    write_origin(path, origin)
+    assigned = _read_assigned(path)
+    previous = _project_from_assigned(assigned)
+    # Drop any existing project assignee(s), then add the new one.
+    for uri in list(assigned):
+        if isinstance(uri, str) and uri.startswith(PROJECT_URI_PREFIX):
+            _unassign_todo(path, uri)
+    if project:
+        _assign_todo(path, PROJECT_URI_PREFIX + project)
     return {"success": True, "todo_id": path.name,
-            "project": project, "previous_project": previous}
+            "project": project or None, "previous_project": previous or None}
 
 
 def ops_clear_project(identifier: str) -> dict:
-    """Remove the project key from origin.yml (todo becomes project-less)."""
+    """Remove the todo's project assignee(s) (todo becomes project-less)."""
     todos = load_todos(include_completed=True)
     refs = build_reference_map(todos)
     try:
         path = resolve_target(identifier, todos, refs)
     except ValueError as e:
         return {"success": False, "error": str(e)}
-    origin = read_origin(path)
-    previous = origin.pop("project", None)
-    if origin:
-        write_origin(path, origin)
-    return {"success": True, "todo_id": path.name, "previous_project": previous}
+    assigned = _read_assigned(path)
+    previous = _project_from_assigned(assigned)
+    for uri in list(assigned):
+        if isinstance(uri, str) and uri.startswith(PROJECT_URI_PREFIX):
+            _unassign_todo(path, uri)
+    return {"success": True, "todo_id": path.name, "previous_project": previous or None}
 
 
 def ops_history(identifier: str) -> dict:
@@ -1526,10 +1557,12 @@ def verify_todo(todo_path: Path, expected: dict) -> dict:
         if actual_flags != expected_flags:
             mismatches.append(f"flags: expected {expected_flags}, got {actual_flags}")
 
-    # Check project (origin.yml) — only when the caller specifies it
+    # Check project — derived from the uai://project/<id> assignee (assigned.yml)
     if "project" in expected:
-        origin = read_origin(todo_path)
-        actual_project = str(origin.get("project") or "")
+        import yaml as _yaml
+        af = todo_path / "assigned.yml"
+        assigned = (_yaml.safe_load(af.read_text()) or []) if af.exists() else []
+        actual_project = _project_from_assigned(assigned)
         if actual_project != str(expected["project"] or ""):
             mismatches.append(f"project: expected '{expected['project']}', got '{actual_project}'")
 
@@ -1598,9 +1631,11 @@ def ops_create(
             if notes_path.exists():
                 update_notes_section(notes_path, "Description", description)
 
-        # Provenance / ownership (origin.yml) + initial history trail.
-        init_origin(new_path, created_by=created_by, source=source,
-                    project=project)
+        # Provenance (origin.yml) + initial history trail.
+        init_origin(new_path, created_by=created_by, source=source)
+        # Project membership is an assignment (uai://project/<id>), not an origin field.
+        if project:
+            _assign_todo(new_path, PROJECT_URI_PREFIX + project)
         append_history(new_path, resolved,
                        session=created_by or current_session(),
                        note=f"created via {source}")
@@ -2234,7 +2269,7 @@ def cmd_create_light(args: list[str], todos: dict[Path, Todo], refs: dict[str, P
 def cmd_project(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> str:
     """project <ref> [<project-id> | --clear]  — show, set, or clear the project/scope.
 
-    Project = WHAT scope the todo belongs to.
+    Project = the uai://project/<id> assignee (stored in assigned.yml).
     (Parent/child grouping is physical directory nesting — use `move`, not this.)
     """
     if not args:
@@ -3838,7 +3873,7 @@ In REPL mode without arguments, launches an interactive wizard.
     --status <status>  Initial status (default: triaging)
     --tags t1,t2       Comma-separated tags to add
     --flags f1,f2      Comma-separated flags to add
-    --project <scope>  Project — WHAT scope/context
+    --project <id>     Project — assigns uai://project/<id> (an assignee)
 
 {bold}Examples:{reset}
     create fix_login_bug

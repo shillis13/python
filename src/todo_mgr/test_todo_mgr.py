@@ -418,16 +418,19 @@ def test_cmd_layer():
         note_hist = (note_dir / "history.log").read_text() if note_dir and (note_dir / "history.log").exists() else ""
         test("cmd status --note recorded in history", "regression note here" in note_hist, note_hist.strip()[:160])
 
-        # Regression (todo_0323): `create` honors --project (previously silently
-        # dropped, with a false "Verified: all fields match"). It must persist to
-        # origin.yml AND be covered by verification.
+        # Regression (todo_0323 + note_0004): `create` honors --project — now
+        # persisted as a uai://project/<id> ASSIGNEE (assigned.yml), not an
+        # origin.yml scope field — AND covered by verification.
         out = run_cli(test_root, "create", "owned_test", "--project", "hamilton")
         test("cmd create --project succeeds", "Created" in out, out.strip())
         test("cmd create project verified (no mismatch)",
              "Verified" in out and "mismatch" not in out.lower(), out.strip()[:200])
         owned_dir = next(Path(test_root).glob("*owned_test*"), None)
+        assigned_text = (owned_dir / "assigned.yml").read_text() if owned_dir and (owned_dir / "assigned.yml").exists() else ""
         origin_text = (owned_dir / "origin.yml").read_text() if owned_dir and (owned_dir / "origin.yml").exists() else ""
-        test("cmd create project written to origin.yml", "project: hamilton" in origin_text, origin_text.strip()[:160])
+        test("cmd create project written as uai://project assignee",
+             "uai://project/hamilton" in assigned_text, assigned_text.strip()[:160])
+        test("cmd create project NOT in origin.yml", "project:" not in origin_text, origin_text.strip()[:160])
 
         # Regression (todo_0323): unknown flags are surfaced, not silently swallowed.
         out = run_cli(test_root, "create", "bogus_flag_test", "--no-such-flag")
@@ -443,7 +446,7 @@ def test_cmd_layer():
 # ============================================================
 
 def test_ops_project(tm):
-    print("\n--- ops_project (scope) ---")
+    print("\n--- ops_project (project = uai://project/<id> assignee) ---")
     tm.ops_create(name="proj_target", status="RD")
 
     r = tm.ops_set_project("proj_target", "uai")
@@ -451,17 +454,30 @@ def test_ops_project(tm):
 
     info = tm.ops_get("proj_target")
     test("project surfaced in todo dict", info.get("project") == "uai")
-    test("project written to origin.yml", info.get("origin", {}).get("project") == "uai")
+    # Project membership is an ASSIGNMENT, not an origin.yml field.
+    test("project is a uai://project/ assignee",
+         "uai://project/uai" in (info.get("assigned") or []))
+    test("project NOT written to origin.yml",
+         "project" not in (info.get("origin", {}) or {}))
 
-    # clear project.
+    # set replaces the existing project assignee (a todo has one project).
+    tm.ops_set_project("proj_target", "hamilton")
+    info2 = tm.ops_get("proj_target")
+    assigned2 = info2.get("assigned") or []
+    test("set replaces prior project assignee",
+         "uai://project/hamilton" in assigned2 and "uai://project/uai" not in assigned2)
+
+    # clear project removes the project assignee.
     rc = tm.ops_clear_project("proj_target")
-    test("clear project", rc["success"] and rc["previous_project"] == "uai")
+    test("clear project", rc["success"] and rc["previous_project"] == "hamilton")
     info3 = tm.ops_get("proj_target")
     test("project cleared", not info3.get("project"))
+    test("project assignee removed",
+         not any(str(u).startswith("uai://project/") for u in (info3.get("assigned") or [])))
 
-    # origin.yml key order: created_by, created_at, source, project
-    test("origin key order", tm._ORIGIN_KEY_ORDER ==
-         ["created_by", "created_at", "source", "project"])
+    # origin.yml key order no longer carries project.
+    test("origin key order (no project)", tm._ORIGIN_KEY_ORDER ==
+         ["created_by", "created_at", "source"])
 
 
 def test_parent_demoted(tm):
