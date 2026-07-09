@@ -182,7 +182,6 @@ class Todo:
     title: str = ""
     created: str = ""
     updated: str = ""
-    project: str = ""                    # DERIVED from the uai://project/<id> assignee (not a stored field)
     origin: dict = field(default_factory=dict)  # full origin.yml contents (provenance)
 
     @property
@@ -211,21 +210,10 @@ def canonical_id(dir_name: str) -> str:
     return m.group(1) if m else dir_name
 
 
-# Project membership is expressed through ASSIGNMENT, not a separate origin.yml
-# scope field: a project is an assignee whose URI is ``uai://project/<id>`` in
-# assigned.yml — exactly like a session (``uai://session/…``) or team
-# (``uai://team/…``). ``Todo.project`` is DERIVED from that assignee for display
-# / rollups; there is no independent scope field. (Migrated 2026-07-03 per
-# note_0004 — the old origin.yml ``project`` field was retired.)
-PROJECT_URI_PREFIX = "uai://project/"
-
-
-def _project_from_assigned(assigned) -> str:
-    """The project id from the first ``uai://project/<id>`` assignee, else ''."""
-    for uri in assigned or []:
-        if isinstance(uri, str) and uri.startswith(PROJECT_URI_PREFIX):
-            return uri[len(PROJECT_URI_PREFIX):]
-    return ""
+# A project is just another assignee: a todo is "in" a project when it carries a
+# ``uai://project/<id>`` URI in assigned.yml — exactly like a session
+# (``uai://session/…``) or team (``uai://team/…``) assignee. It is assigned via
+# the generic ``assign`` verb; there is no separate project field or verb.
 
 
 def todo_to_dict(todo: Todo, ref: str = "") -> dict:
@@ -247,9 +235,6 @@ def todo_to_dict(todo: Todo, ref: str = "") -> dict:
         # of truth for parent/child grouping) — never an editable origin.yml field.
         "parent": str(todo.parent.relative_to(CURRENT_ROOT)) if todo.parent else None,
         "children": [str(c.relative_to(CURRENT_ROOT)) for c in todo.children],
-        # project = the uai://project/<id> assignee, surfaced here (derived) for
-        # rollups/back-compat; it also appears in `assigned` as the full URI.
-        "project": todo.project or None,
         "created_by": todo.origin.get("created_by"),
         "source": todo.origin.get("source"),
         "origin": todo.origin or None,
@@ -324,9 +309,6 @@ def load_todos(include_completed: bool = False, include_trash: bool = False) -> 
 
         # Provenance (origin.yml) — absent on legacy todos.
         origin = read_origin(todo_dir)
-        # project is DERIVED from the uai://project/<id> assignee (single source
-        # of truth = assignment), not an independent origin.yml scope field.
-        project = _project_from_assigned(assigned)
         if not created and origin.get("created_at"):
             created = str(origin["created_at"])
 
@@ -341,7 +323,6 @@ def load_todos(include_completed: bool = False, include_trash: bool = False) -> 
             title=title or todo_dir.name,
             created=created,
             updated=updated,
-            project=project,
             origin=origin,
         )
     
@@ -731,10 +712,6 @@ def view_todo_detail(todo: Todo, refs: dict[str, Path],
         assigned_colored = ", ".join(c(a, Colors.CYAN) for a in todo.assigned)
         lines.append(f"  {c('Assigned:', Colors.DIM)}   {assigned_colored}")
 
-    # Project — the uai://project/<id> assignee (derived).
-    if todo.project:
-        lines.append(f"  {c('Project:', Colors.DIM)}    {c(todo.project, Colors.CYAN)}")
-
     # Parent — DERIVED from physical directory nesting (single source of truth).
     if todo.parent:
         parent_rel = todo.parent.relative_to(CURRENT_ROOT)
@@ -1002,7 +979,7 @@ def _unassign_todo(todo_dir: Path, uri: str) -> str:
 # === Unified Work Tracking helpers (origin.yml / history.log) ===
 # Backward-compatible additions. Legacy todos simply lack these files; they are
 # created on demand when a todo is created via the lightweight path or when a
-# project/parent/status mutation touches a todo for the first time.
+# parent/status mutation touches a todo for the first time.
 
 def now_local_iso() -> str:
     """Local timestamp with timezone offset, e.g. 2026-06-16T16:00:00-04:00."""
@@ -1166,7 +1143,6 @@ def ops_create_light(
     name: str,
     summary: str = "",
     status: str = "triaging",
-    project: str = "",
     source: str = "agent",
     created_by: str = "",
 ) -> dict:
@@ -1179,9 +1155,6 @@ def ops_create_light(
         if resolved != "Triaging":
             run_script("set_status", resolved.lower(), str(new_path), quiet=True)
         init_origin(new_path, created_by=created_by, source=source)
-        # Project membership is an assignment, not an origin field.
-        if project:
-            _assign_todo(new_path, PROJECT_URI_PREFIX + project)
         append_history(new_path, resolved,
                        session=created_by or current_session(),
                        note=f"created via {source}")
@@ -1198,55 +1171,6 @@ def ops_create_light(
         }
     except (ValueError, OSError, subprocess.CalledProcessError) as e:
         return {"success": False, "error": str(e)}
-
-
-def _read_assigned(path: Path) -> list:
-    import yaml
-    af = Path(path) / "assigned.yml"
-    if not af.exists():
-        return []
-    return yaml.safe_load(af.read_text()) or []
-
-
-def ops_set_project(identifier: str, project: str) -> dict:
-    """Set the todo's project by assigning ``uai://project/<project>``.
-
-    Project membership is an assignment, not an origin.yml field. Setting the
-    project REPLACES any existing project assignee (a todo has one project); the
-    session/team assignees are untouched. Empty ``project`` clears it.
-    """
-    todos = load_todos(include_completed=True)
-    refs = build_reference_map(todos)
-    try:
-        path = resolve_target(identifier, todos, refs)
-    except ValueError as e:
-        return {"success": False, "error": str(e)}
-    assigned = _read_assigned(path)
-    previous = _project_from_assigned(assigned)
-    # Drop any existing project assignee(s), then add the new one.
-    for uri in list(assigned):
-        if isinstance(uri, str) and uri.startswith(PROJECT_URI_PREFIX):
-            _unassign_todo(path, uri)
-    if project:
-        _assign_todo(path, PROJECT_URI_PREFIX + project)
-    return {"success": True, "todo_id": path.name,
-            "project": project or None, "previous_project": previous or None}
-
-
-def ops_clear_project(identifier: str) -> dict:
-    """Remove the todo's project assignee(s) (todo becomes project-less)."""
-    todos = load_todos(include_completed=True)
-    refs = build_reference_map(todos)
-    try:
-        path = resolve_target(identifier, todos, refs)
-    except ValueError as e:
-        return {"success": False, "error": str(e)}
-    assigned = _read_assigned(path)
-    previous = _project_from_assigned(assigned)
-    for uri in list(assigned):
-        if isinstance(uri, str) and uri.startswith(PROJECT_URI_PREFIX):
-            _unassign_todo(path, uri)
-    return {"success": True, "todo_id": path.name, "previous_project": previous or None}
 
 
 def ops_history(identifier: str) -> dict:
@@ -1557,15 +1481,6 @@ def verify_todo(todo_path: Path, expected: dict) -> dict:
         if actual_flags != expected_flags:
             mismatches.append(f"flags: expected {expected_flags}, got {actual_flags}")
 
-    # Check project — derived from the uai://project/<id> assignee (assigned.yml)
-    if "project" in expected:
-        import yaml as _yaml
-        af = todo_path / "assigned.yml"
-        assigned = (_yaml.safe_load(af.read_text()) or []) if af.exists() else []
-        actual_project = _project_from_assigned(assigned)
-        if actual_project != str(expected["project"] or ""):
-            mismatches.append(f"project: expected '{expected['project']}', got '{actual_project}'")
-
     return {"verified": len(mismatches) == 0, "mismatches": mismatches}
 
 
@@ -1576,15 +1491,13 @@ def ops_create(
     tags: list[str] | None = None,
     flags: list[str] | None = None,
     description: str = "",
-    project: str = "",
     source: str = "agent",
     created_by: str = "",
 ) -> dict:
     """Create a new (rich) todo. Returns created todo dict with verification.
 
     `parent` keeps its existing meaning (physical directory nesting — the single
-    source of truth for grouping). `project` (WHAT scope) is an optional
-    origin.yml field.
+    source of truth for grouping).
     """
     if not name or not name.strip():
         return {"success": False, "error": "Name required"}
@@ -1633,9 +1546,6 @@ def ops_create(
 
         # Provenance (origin.yml) + initial history trail.
         init_origin(new_path, created_by=created_by, source=source)
-        # Project membership is an assignment (uai://project/<id>), not an origin field.
-        if project:
-            _assign_todo(new_path, PROJECT_URI_PREFIX + project)
         append_history(new_path, resolved,
                        session=created_by or current_session(),
                        note=f"created via {source}")
@@ -1651,8 +1561,6 @@ def ops_create(
             for f in (flags or []) if re.sub(r'[^a-z0-9_]+', '_', f.lower()).strip('_')
         )
         expected = {"status": resolved_status, "tags": expected_tags, "flags": expected_flags}
-        if project:
-            expected["project"] = project
 
         verification = verify_todo(new_path, expected)
 
@@ -2247,49 +2155,21 @@ def cmd_assigned(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]
 
 
 def cmd_create_light(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> str:
-    """create-light <name> [--summary s] [--status s] [--project id] [--source src]"""
+    """create-light <name> [--summary s] [--status s] [--source src]"""
     if not args:
         return c("Usage: create-light <name> [--summary <s>] [--status <s>] "
-                 "[--project <id>] [--source agent|backfill|manual]", Colors.RED)
+                 "[--source agent|backfill|manual]", Colors.RED)
     name = args[0]
     rest = list(args[1:])
     summary = _pop_flag(rest, "--summary") or ""
     status = _pop_flag(rest, "--status") or "triaging"
-    project = _pop_flag(rest, "--project") or ""
     source = _pop_flag(rest, "--source") or "agent"
     created_by = _pop_flag(rest, "--by") or ""
     result = ops_create_light(name=name, summary=summary, status=status,
-                              project=project, source=source,
-                              created_by=created_by)
+                              source=source, created_by=created_by)
     if result["success"]:
         return c(f"✓ {result['message']}", Colors.GREEN)
     return c(f"Error: {result['error']}", Colors.RED)
-
-
-def cmd_project(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> str:
-    """project <ref> [<project-id> | --clear]  — show, set, or clear the project/scope.
-
-    Project = the uai://project/<id> assignee (stored in assigned.yml).
-    (Parent/child grouping is physical directory nesting — use `move`, not this.)
-    """
-    if not args:
-        return c("Usage: project <ref> <project-id>  |  project <ref> --clear", Colors.RED)
-    identifier = args[0]
-    if len(args) >= 2 and args[1] in ("--clear", "clear"):
-        result = ops_clear_project(identifier)
-        if result["success"]:
-            return c(f"✓ Project cleared on {result['todo_id']} "
-                     f"(was {result.get('previous_project')})", Colors.GREEN)
-        return c(f"Error: {result['error']}", Colors.RED)
-    if len(args) >= 2:
-        result = ops_set_project(identifier, args[1])
-        if result["success"]:
-            return c(f"✓ Project of {result['todo_id']} set to {result['project']}", Colors.GREEN)
-        return c(f"Error: {result['error']}", Colors.RED)
-    info = ops_get(identifier)
-    if not info.get("success"):
-        return c(f"Error: {info.get('error')}", Colors.RED)
-    return f"Project of {info['id']}: {info.get('project') or c('(none)', Colors.DIM)}"
 
 
 def cmd_history(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> str:
@@ -2705,10 +2585,10 @@ def create_todo_from_template(name: str, parent_dir: Path) -> Path:
 
 
 def cmd_create(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path], interactive: bool = True) -> str:
-    """Create a new todo. Usage: create <name> [--parent <ref>] [--status <status>] [--tags t1,t2] [--flags f1,f2] [--project <scope>]"""
+    """Create a new todo. Usage: create <name> [--parent <ref>] [--status <status>] [--tags t1,t2] [--flags f1,f2]"""
     if not args:
         if not interactive:
-            return c("Usage: create <name> [--parent <ref>] [--status <status>] [--tags t1,t2] [--flags f1,f2] [--project <scope>]", Colors.RED)
+            return c("Usage: create <name> [--parent <ref>] [--status <status>] [--tags t1,t2] [--flags f1,f2]", Colors.RED)
         return create_todo_interactive()
     
     name = args[0]
@@ -2717,7 +2597,6 @@ def cmd_create(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path], 
     tags = []
     flags = []
     description = ""
-    project = ""
     unknown = []
 
     # Parse optional args
@@ -2738,9 +2617,6 @@ def cmd_create(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path], 
         elif args[i] in ("--description", "-d") and i + 1 < len(args):
             description = args[i + 1]
             i += 2
-        elif args[i] == "--project" and i + 1 < len(args):
-            project = args[i + 1]
-            i += 2
         elif args[i].startswith("--"):
             unknown.append(args[i])
             i += 1
@@ -2748,8 +2624,7 @@ def cmd_create(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path], 
             i += 1
 
     result = ops_create(name=name, parent=parent, status=status,
-                        tags=tags, flags=flags, description=description,
-                        project=project)
+                        tags=tags, flags=flags, description=description)
     if result["success"]:
         lines = [c(f"✓ {result['message']}", Colors.GREEN)]
         if unknown:
@@ -3464,7 +3339,7 @@ HELP_EXAMPLES = """
     edit IP2 description           # Edit specific field
 
 {bold}Work tracking (lightweight / origin):{reset}
-    create-light fix_typo --summary "Fix typo in header" --project hamilton
+    create-light fix_typo --summary "Fix typo in header" --source manual
     create-light quick_idea --status ready --source manual
     parent TR5 todo_0307           # Set logical work-group pointer
     parent TR5 --clear             # Clear group pointer
@@ -3525,7 +3400,7 @@ HELP_VERBOSE = """
 
 {bold}MODIFICATION COMMANDS{reset}
 
-  {cyan}create{reset} <name> [--parent <ref>] [--status <s>] [--tags t1,t2] [--flags f1,f2] [--project <scope>]
+  {cyan}create{reset} <name> [--parent <ref>] [--status <s>] [--tags t1,t2] [--flags f1,f2]
       Create a new todo. In REPL mode without args, launches wizard.
       --parent     Create as child of another todo
       --status     Initial status (default: triaging)
@@ -3556,7 +3431,8 @@ HELP_VERBOSE = """
 
   {cyan}assign{reset} <ref> <uri>
       Assign a URI to a todo. Stored in assigned.yml.
-      Multiple URIs can be assigned to one todo.
+      Multiple URIs can be assigned to one todo. A project is just an
+      assignee — assign uai://project/<id> to put a todo in a project.
       Example: assign IP2 uai://project/abc
 
   {cyan}unassign{reset} <ref> <uri>
@@ -3865,7 +3741,7 @@ List all current URI assignments for a todo.
     assigned 0038
 """,
     "create": """
-{bold}create{reset} <name> [--parent <ref>] [--status <s>] [--tags t1,t2] [--flags f1,f2] [--project <scope>]
+{bold}create{reset} <name> [--parent <ref>] [--status <s>] [--tags t1,t2] [--flags f1,f2]
 
 Create a new todo.
 
@@ -3876,13 +3752,13 @@ In REPL mode without arguments, launches an interactive wizard.
     --status <status>  Initial status (default: triaging)
     --tags t1,t2       Comma-separated tags to add
     --flags f1,f2      Comma-separated flags to add
-    --project <id>     Project — assigns uai://project/<id> (an assignee)
+
+To put a todo in a project, assign it: assign <ref> uai://project/<id>
 
 {bold}Examples:{reset}
     create fix_login_bug
     create api_refactor --status ready --tags api,backend
     create subtask --parent IP2 --flags high_priority
-    create hamilton_infra --project hamilton
 """,
 }
 
@@ -3980,7 +3856,6 @@ def run_command(line: str, interactive: bool = True) -> str | None:
         "unassign": lambda: cmd_unassign(args, todos, refs),
         "assigned": lambda: cmd_assigned(args, todos, refs),
         "create-light": lambda: cmd_create_light(args, todos, refs),
-        "project": lambda: cmd_project(args, todos, refs),
         "history": lambda: cmd_history(args, todos, refs),
         "migrate": lambda: cmd_migrate(args, todos, refs),
         "set-notes": lambda: cmd_set_notes(args, todos, refs),
@@ -4081,7 +3956,6 @@ def run_json_command(args: list[str]) -> None:
                     description=_pop_flag(cmd_args, "--description") or "",
                     tags=_pop_flag_list(cmd_args, "--tags"),
                     status=_pop_flag(cmd_args, "--status") or "triaging",
-                    project=_pop_flag(cmd_args, "--project") or "",
                     source=_pop_flag(cmd_args, "--source") or "agent",
                     created_by=_pop_flag(cmd_args, "--by") or "",
                 )
@@ -4098,29 +3972,16 @@ def run_json_command(args: list[str]) -> None:
             name = _pop_flag(cmd_args, "--name") or (cmd_args[0] if cmd_args else None)
             if not name:
                 result = {"error": "Usage: create-light --name <name> [--summary <s>] "
-                                   "[--status <s>] [--project <id>] "
+                                   "[--status <s>] "
                                    "[--source agent|backfill|manual] [--by <session>]"}
             else:
                 result = ops_create_light(
                     name=name,
                     summary=note_text,
                     status=_pop_flag(cmd_args, "--status") or "triaging",
-                    project=_pop_flag(cmd_args, "--project") or "",
                     source=_pop_flag(cmd_args, "--source") or "agent",
                     created_by=_pop_flag(cmd_args, "--by") or "",
                 )
-        elif cmd == "project":
-            identifier = _pop_flag(cmd_args, "--id") or (cmd_args[0] if cmd_args else None)
-            clear = "--clear" in cmd_args
-            project_val = _pop_flag(cmd_args, "--project")
-            if not identifier:
-                result = {"error": "Usage: project --id <id> --project <id> | --clear"}
-            elif clear:
-                result = ops_clear_project(identifier)
-            elif project_val is not None:
-                result = ops_set_project(identifier, project_val)
-            else:
-                result = {"error": "Usage: project --id <id> --project <id> | --clear"}
         elif cmd == "history":
             identifier = _pop_flag(cmd_args, "--id") or (cmd_args[0] if cmd_args else None)
             if not identifier:

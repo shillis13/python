@@ -418,19 +418,20 @@ def test_cmd_layer():
         note_hist = (note_dir / "history.log").read_text() if note_dir and (note_dir / "history.log").exists() else ""
         test("cmd status --note recorded in history", "regression note here" in note_hist, note_hist.strip()[:160])
 
-        # Regression (todo_0323 + note_0004): `create` honors --project — now
-        # persisted as a uai://project/<id> ASSIGNEE (assigned.yml), not an
-        # origin.yml scope field — AND covered by verification.
-        out = run_cli(test_root, "create", "owned_test", "--project", "hamilton")
-        test("cmd create --project succeeds", "Created" in out, out.strip())
-        test("cmd create project verified (no mismatch)",
-             "Verified" in out and "mismatch" not in out.lower(), out.strip()[:200])
+        # Regression (note_0004): a project is just an assignee. There is no
+        # --project flag on create; you put a todo in a project via the GENERIC
+        # `assign` verb with a uai://project/<id> URI (assigned.yml), never an
+        # origin.yml scope field.
+        run_cli(test_root, "create", "owned_test", "--status", "RD")
         owned_dir = next(Path(test_root).glob("*owned_test*"), None)
+        owned_id = owned_dir.name if owned_dir else "owned_test"
+        out = run_cli(test_root, "assign", owned_id, "uai://project/hamilton")
+        test("cmd assign project URI succeeds", "Assigned" in out, out.strip())
         assigned_text = (owned_dir / "assigned.yml").read_text() if owned_dir and (owned_dir / "assigned.yml").exists() else ""
         origin_text = (owned_dir / "origin.yml").read_text() if owned_dir and (owned_dir / "origin.yml").exists() else ""
-        test("cmd create project written as uai://project assignee",
+        test("project written as uai://project assignee",
              "uai://project/hamilton" in assigned_text, assigned_text.strip()[:160])
-        test("cmd create project NOT in origin.yml", "project:" not in origin_text, origin_text.strip()[:160])
+        test("project NOT in origin.yml", "project:" not in origin_text, origin_text.strip()[:160])
 
         # Regression (todo_0323): unknown flags are surfaced, not silently swallowed.
         out = run_cli(test_root, "create", "bogus_flag_test", "--no-such-flag")
@@ -442,40 +443,41 @@ def test_cmd_layer():
 
 
 # ============================================================
-# project (origin.yml) TESTS — Unified Work Tracking
+# project = just another assignee (no separate field or verb)
 # ============================================================
 
 def test_ops_project(tm):
-    print("\n--- ops_project (project = uai://project/<id> assignee) ---")
+    print("\n--- project = uai://project/<id> assignee (via generic assign) ---")
+    # The project-specific field/verbs/helpers must be gone — a project is just
+    # an assignee reachable through the generic `assign` verb.
+    test("ops_set_project removed", not hasattr(tm, "ops_set_project"))
+    test("ops_clear_project removed", not hasattr(tm, "ops_clear_project"))
+    test("cmd_project removed", not hasattr(tm, "cmd_project"))
+    test("PROJECT_URI_PREFIX removed", not hasattr(tm, "PROJECT_URI_PREFIX"))
+    test("_project_from_assigned removed", not hasattr(tm, "_project_from_assigned"))
+
     tm.ops_create(name="proj_target", status="RD")
 
-    r = tm.ops_set_project("proj_target", "uai")
-    test("set project", r["success"] and r["project"] == "uai")
+    # Assign a project via the GENERIC assign verb (arbitrary uai:// URI).
+    r = tm.ops_assign("proj_target", "uai://project/uai")
+    test("assign project URI", r["success"] and r["uri"] == "uai://project/uai")
 
     info = tm.ops_get("proj_target")
-    test("project surfaced in todo dict", info.get("project") == "uai")
-    # Project membership is an ASSIGNMENT, not an origin.yml field.
+    # No derived `project` key on the todo dict any more.
+    test("no derived project key in todo dict", "project" not in info)
+    # Project membership shows up in `assigned` like any other assignee.
     test("project is a uai://project/ assignee",
          "uai://project/uai" in (info.get("assigned") or []))
     test("project NOT written to origin.yml",
          "project" not in (info.get("origin", {}) or {}))
 
-    # set replaces the existing project assignee (a todo has one project).
-    tm.ops_set_project("proj_target", "hamilton")
+    # Unassigning the project URI removes membership (generic unassign).
+    tm.ops_unassign("proj_target", "uai://project/uai")
     info2 = tm.ops_get("proj_target")
-    assigned2 = info2.get("assigned") or []
-    test("set replaces prior project assignee",
-         "uai://project/hamilton" in assigned2 and "uai://project/uai" not in assigned2)
+    test("project assignee removed via unassign",
+         not any(str(u).startswith("uai://project/") for u in (info2.get("assigned") or [])))
 
-    # clear project removes the project assignee.
-    rc = tm.ops_clear_project("proj_target")
-    test("clear project", rc["success"] and rc["previous_project"] == "hamilton")
-    info3 = tm.ops_get("proj_target")
-    test("project cleared", not info3.get("project"))
-    test("project assignee removed",
-         not any(str(u).startswith("uai://project/") for u in (info3.get("assigned") or [])))
-
-    # origin.yml key order no longer carries project.
+    # origin.yml key order never carried project.
     test("origin key order (no project)", tm._ORIGIN_KEY_ORDER ==
          ["created_by", "created_at", "source"])
 
