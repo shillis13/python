@@ -1184,6 +1184,27 @@ def ops_history(identifier: str) -> dict:
     return {"success": True, "todo_id": path.name, "history": read_history(path)}
 
 
+def ops_comment(identifier: str, text: str, session: str = "") -> dict:
+    """Append a free-text comment to a todo.
+
+    Comments live in the append-only history.log under the pseudo-status
+    'comment' (they never change the todo's real status), so read_history /
+    ops_history surface them alongside the status trail and a UI can style them
+    apart. Newlines are collapsed to keep the one-line-per-entry log parseable.
+    """
+    text = " ".join((text or "").split())
+    if not text:
+        return {"success": False, "error": "empty comment"}
+    todos = load_todos(include_completed=True)
+    refs = build_reference_map(todos)
+    try:
+        path = resolve_target(identifier, todos, refs)
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
+    append_history(path, "comment", session=session, note=text)
+    return {"success": True, "todo_id": path.name}
+
+
 # === Operations Layer ===
 # Pure operations returning structured dicts. Used by cmd_*() and MCP server.
 
@@ -2188,6 +2209,34 @@ def cmd_history(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path])
         lines.append(f"  {c(e['ts'], Colors.DIM)}  {status}  "
                      f"{c(e['session'], Colors.CYAN)}  {e['note']}")
     return "\n".join(lines)
+
+
+def cmd_comment(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> str:
+    """comment <ref> --text <comment> [--session <who>]  — add a comment to a todo.
+
+    The comment is appended to the todo's history.log (status 'comment'); it does
+    NOT change the todo's status. Reads the comment from stdin when --text is
+    omitted.
+    """
+    if not args:
+        return c("Usage: comment <ref> --text <comment> [--session <who>]", Colors.RED)
+    ref = args[0]
+    text = ""
+    session = ""
+    i = 1
+    while i < len(args):
+        if args[i] == "--text" and i + 1 < len(args):
+            text = args[i + 1]; i += 2
+        elif args[i] == "--session" and i + 1 < len(args):
+            session = args[i + 1]; i += 2
+        else:
+            i += 1
+    if not text and not sys.stdin.isatty():
+        text = sys.stdin.read()
+    result = ops_comment(ref, text, session)
+    if not result["success"]:
+        return c(f"Error: {result['error']}", Colors.RED)
+    return c(f"Comment added to {result['todo_id']}", Colors.GREEN)
 
 
 # === notes.md convention migration (todo_0381) ===
@@ -3857,6 +3906,7 @@ def run_command(line: str, interactive: bool = True) -> str | None:
         "assigned": lambda: cmd_assigned(args, todos, refs),
         "create-light": lambda: cmd_create_light(args, todos, refs),
         "history": lambda: cmd_history(args, todos, refs),
+        "comment": lambda: cmd_comment(args, todos, refs),
         "migrate": lambda: cmd_migrate(args, todos, refs),
         "set-notes": lambda: cmd_set_notes(args, todos, refs),
         "help": lambda: cmd_help(args),

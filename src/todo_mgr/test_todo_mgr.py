@@ -202,6 +202,30 @@ def test_ops_status(tm):
     test("status invalid status", not r4["success"])
 
 
+def test_ops_comment(tm):
+    print("\n--- ops_comment ---")
+    first = tm.ops_list()["todos"][0]
+    tid = first["id"]
+
+    r = tm.ops_comment(tid, "  first   comment   here  ")
+    test("comment succeeds", r["success"])
+
+    hist = tm.ops_history(tid)["history"]
+    comments = [h for h in hist if h["status"] == "comment"]
+    test("comment recorded in history", len(comments) >= 1)
+    test("comment whitespace collapsed", any(h["note"] == "first comment here" for h in comments))
+
+    # Newlines collapse so the one-line-per-entry log stays parseable.
+    tm.ops_comment(tid, "line one\nline two")
+    hist2 = tm.ops_history(tid)["history"]
+    test("comment newlines collapsed", any(h["note"] == "line one line two" for h in hist2 if h["status"] == "comment"))
+    after = next((t for t in tm.ops_list(include_all=True)["todos"] if t["id"] == tid), None)
+    test("comment did NOT change status", after is not None and after["status"] == first["status"])
+
+    test("empty comment rejected", not tm.ops_comment(tid, "   ")["success"])
+    test("comment invalid ref", not tm.ops_comment("NOPE_FAKE", "x")["success"])
+
+
 def test_ops_flag(tm):
     print("\n--- ops_flag ---")
     first_ref = tm.ops_list()["todos"][0]["ref"]
@@ -567,6 +591,7 @@ def main():
         test_ops_list(tm)
         test_ops_get(tm)
         test_ops_status(tm)
+        test_ops_comment(tm)
         test_ops_flag(tm)
         test_ops_tag(tm)
         test_ops_kanban(tm)
