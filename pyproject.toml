@@ -11,8 +11,14 @@ authors = [{name = "gdir"}]
 requires-python = ">=3.9"
 dependencies = []
 
+[project.optional-dependencies]
+# Enhanced interactive REPL (completion menu + live status bar). The engine and
+# the oneshot/filter paths never need this.
+calc-repl = ["prompt_toolkit>=3.0"]
+
 [project.scripts]
 gdir = "gdir.cli:main"
+calc = "calc.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
