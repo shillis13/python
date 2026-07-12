@@ -30,6 +30,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import uuid
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -1184,13 +1185,17 @@ def ops_history(identifier: str) -> dict:
     return {"success": True, "todo_id": path.name, "history": read_history(path)}
 
 
-def ops_comment(identifier: str, text: str, session: str = "") -> dict:
-    """Append a free-text comment to a todo.
+def ops_comment(identifier: str, text: str, session: str = "",
+                reply_to: str = "") -> dict:
+    """Append a free-text comment to a todo (optionally as a reply).
 
     Comments live in the append-only history.log under the pseudo-status
     'comment' (they never change the todo's real status), so read_history /
-    ops_history surface them alongside the status trail and a UI can style them
-    apart. Newlines are collapsed to keep the one-line-per-entry log parseable.
+    ops_history surface them alongside the status trail. To support NESTED,
+    repliable comment threads without breaking the 4-field log format, the note
+    is prefixed with `[<comment_id>|<parent_id>] ` — parent_id empty for a
+    top-level comment. Old comments with no prefix read as top-level. Newlines
+    are collapsed to keep the one-line-per-entry log parseable.
     """
     text = " ".join((text or "").split())
     if not text:
@@ -1201,8 +1206,11 @@ def ops_comment(identifier: str, text: str, session: str = "") -> dict:
         path = resolve_target(identifier, todos, refs)
     except ValueError as e:
         return {"success": False, "error": str(e)}
-    append_history(path, "comment", session=session, note=text)
-    return {"success": True, "todo_id": path.name}
+    cid = uuid.uuid4().hex[:8]
+    parent = " ".join((reply_to or "").split())
+    note = "[{}|{}] {}".format(cid, parent, text)
+    append_history(path, "comment", session=session, note=note)
+    return {"success": True, "todo_id": path.name, "comment_id": cid}
 
 
 # === Operations Layer ===
@@ -2212,31 +2220,34 @@ def cmd_history(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path])
 
 
 def cmd_comment(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> str:
-    """comment <ref> --text <comment> [--session <who>]  — add a comment to a todo.
+    """comment <ref> --text <comment> [--session <who>] [--reply-to <comment_id>]
 
-    The comment is appended to the todo's history.log (status 'comment'); it does
-    NOT change the todo's status. Reads the comment from stdin when --text is
-    omitted.
+    Add a comment to a todo. Appended to history.log (status 'comment'); does NOT
+    change the todo's status. --reply-to nests it under an existing comment.
+    Reads the comment from stdin when --text is omitted.
     """
     if not args:
-        return c("Usage: comment <ref> --text <comment> [--session <who>]", Colors.RED)
+        return c("Usage: comment <ref> --text <comment> [--session <who>] [--reply-to <comment_id>]", Colors.RED)
     ref = args[0]
     text = ""
     session = ""
+    reply_to = ""
     i = 1
     while i < len(args):
         if args[i] == "--text" and i + 1 < len(args):
             text = args[i + 1]; i += 2
         elif args[i] == "--session" and i + 1 < len(args):
             session = args[i + 1]; i += 2
+        elif args[i] == "--reply-to" and i + 1 < len(args):
+            reply_to = args[i + 1]; i += 2
         else:
             i += 1
     if not text and not sys.stdin.isatty():
         text = sys.stdin.read()
-    result = ops_comment(ref, text, session)
+    result = ops_comment(ref, text, session, reply_to)
     if not result["success"]:
         return c(f"Error: {result['error']}", Colors.RED)
-    return c(f"Comment added to {result['todo_id']}", Colors.GREEN)
+    return c(f"Comment added to {result['todo_id']} ({result['comment_id']})", Colors.GREEN)
 
 
 # === notes.md convention migration (todo_0381) ===

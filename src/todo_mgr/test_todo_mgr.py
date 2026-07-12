@@ -209,16 +209,27 @@ def test_ops_comment(tm):
 
     r = tm.ops_comment(tid, "  first   comment   here  ")
     test("comment succeeds", r["success"])
+    test("comment returns an id", bool(r.get("comment_id")))
+    root_cid = r["comment_id"]
 
     hist = tm.ops_history(tid)["history"]
     comments = [h for h in hist if h["status"] == "comment"]
     test("comment recorded in history", len(comments) >= 1)
-    test("comment whitespace collapsed", any(h["note"] == "first comment here" for h in comments))
+    # Note is prefixed with [cid|parent]; the whitespace-collapsed text follows.
+    test("comment whitespace collapsed", any(h["note"].endswith("] first comment here") for h in comments))
+    test("top-level comment has empty parent", any(("[" + root_cid + "|]") in h["note"] for h in comments))
 
     # Newlines collapse so the one-line-per-entry log stays parseable.
     tm.ops_comment(tid, "line one\nline two")
     hist2 = tm.ops_history(tid)["history"]
-    test("comment newlines collapsed", any(h["note"] == "line one line two" for h in hist2 if h["status"] == "comment"))
+    test("comment newlines collapsed", any(h["note"].endswith("] line one line two") for h in hist2 if h["status"] == "comment"))
+
+    # A reply nests under the parent comment id.
+    rr = tm.ops_comment(tid, "a reply", reply_to=root_cid)
+    test("reply succeeds", rr["success"])
+    hist3 = tm.ops_history(tid)["history"]
+    test("reply encodes parent id", any(("|" + root_cid + "]") in h["note"] and h["note"].endswith("a reply") for h in hist3 if h["status"] == "comment"))
+
     after = next((t for t in tm.ops_list(include_all=True)["todos"] if t["id"] == tid), None)
     test("comment did NOT change status", after is not None and after["status"] == first["status"])
 
