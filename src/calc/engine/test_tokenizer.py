@@ -42,6 +42,22 @@ def test_digit_separators():
     assert tokenize("1_000.5")[0].value == 1000.5
 
 
+def test_thousands_commas():
+    assert tokenize("1,234")[0].value == 1234
+    assert tokenize("1,234,567")[0].value == 1234567
+    assert tokenize("12,345.67")[0].value == 12345.67
+    assert isinstance(tokenize("1,000,000")[0].value, int)
+
+
+def test_comma_not_grouping_stays_separator():
+    # comma followed by a space is an argument separator, not a thousands sep
+    assert types("f(1, 234)") == [
+        T.NAME, T.LPAREN, T.NUMBER, T.COMMA, T.NUMBER, T.RPAREN, T.EOF,
+    ]
+    # a non-3-digit group is not absorbed
+    assert types("1,23") == [T.NUMBER, T.COMMA, T.NUMBER, T.EOF]
+
+
 def test_hex_bin_oct():
     assert tokenize("0x1F")[0].value == 31
     assert tokenize("0b1010")[0].value == 10

@@ -193,6 +193,16 @@ def test_ans_chaining_via_scope():
 
 # --- comments --------------------------------------------------------------
 
+def test_thousands_commas():
+    assert t("1,234,567 + 1") == "1234568"
+    assert t("12,345.67 * 2") == "24691.34"
+    assert t("1,000 * 1,000") == "1000000"
+    # comma+3-digits is absorbed into the number; a space keeps it a separator
+    assert t("sqrt(1,024)") == "32"          # one arg: 1024
+    assert t("log(1,024, 2)") == "10"        # log(1024, 2): grouping + separator
+    assert t("gcd(24, 36)") == "12"
+
+
 def test_comment():
     assert t("5 # this is three") == "5"
     assert t("2 + 3 # add them") == "5"

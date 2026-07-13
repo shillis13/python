@@ -23,11 +23,18 @@ echo 40 | calc "ans/8"    # 5      (stdin value bound to ans/_)
 calc -o hex "255 + 1"     # 0x100
 calc --deg "sin(30)"      # 0.5
 calc                      # interactive REPL (at a terminal)
+calc --examples           # a full page of worked examples
+./calc/cli.py "2+2"       # runs directly (shebang; no install needed)
 ```
+
+Colorized `--help` and `--examples` (auto-plain when piped or under `NO_COLOR`).
 
 ### Expressions
 
 - Arithmetic `+ - * / // %`, power `^` (or `**`), factorial `!`.
+- Numbers accept thousands commas: `1,234,567`, `12,345.67`. (Inside a call,
+  a comma with no following space groups digits — `f(1,234)` is `f(1234)`;
+  write `f(1, 234)` for two arguments.)
 - Bitwise (integers) `& | ~ << >>` and the word `xor` (`^` is power).
 - Bases in: `0x1F 0b1010 0o17`; out: `255 as hex`, or `-o hex`, or `calc set base hex`.
 - Implicit multiplication: `2pi`, `2(3+4)`. Comments: `5 # note`.

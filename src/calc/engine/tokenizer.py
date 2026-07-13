@@ -238,6 +238,15 @@ def _read_number(source: str, i: int) -> "tuple[Token, int]":
 
     j = consume_digits(j)
 
+    # thousands separators: a comma is part of the number only when it is
+    # immediately followed by exactly three digits (e.g. 1,234,567). A comma
+    # followed by a space or by other than three digits stays an argument
+    # separator, so f(1, 234) is two arguments while f(1,234) is 1234.
+    while (j < n and source[j] == "," and j + 3 < n + 1
+           and source[j + 1:j + 4].isdigit() and len(source[j + 1:j + 4]) == 3
+           and (j + 4 >= n or not source[j + 4].isdigit())):
+        j += 4
+
     if j < n and source[j] == ".":
         is_float = True
         j = consume_digits(j + 1)
@@ -253,7 +262,7 @@ def _read_number(source: str, i: int) -> "tuple[Token, int]":
         # else: not an exponent (e.g. a trailing name like '2e'); leave 'e' for
         # the name/implicit-mult path by not consuming it here.
 
-    text = source[start:j].replace("_", "")
+    text = source[start:j].replace("_", "").replace(",", "")
     if is_float:
         value: Union[int, float] = float(text)
     else:

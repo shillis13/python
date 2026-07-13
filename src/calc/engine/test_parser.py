@@ -107,6 +107,13 @@ def test_chained_calls():
     assert p("f(x)(y)") == "(call (call f x) y)"
 
 
+def test_thousands_comma_vs_arg_comma():
+    # no space -> thousands separator (one argument); space -> two arguments
+    assert p("f(1,234)") == "(call f 1234)"
+    assert p("f(1, 234)") == "(call f 1 234)"
+    assert p("1,234 + 1") == "(+ 1234 1)"
+
+
 def test_number_number_adjacency_is_error():
     with pytest.raises(ParseError):
         parse("2 3")

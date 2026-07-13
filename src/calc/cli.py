@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Command-line entry point: parse argv, dispatch, and drive the frontends.
 
 Dispatch rule: the first non-flag token, if it is a management verb, runs a
@@ -9,6 +10,12 @@ from __future__ import annotations
 
 import sys
 from typing import List, Optional
+
+# Allow running this file directly (./cli.py) — put the package root (…/src) on
+# sys.path so `import calc` resolves even without an editable install.
+if __package__ in (None, ""):
+    import os
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from calc import __version__
 from calc.engine import evaluate, Scope, Settings, CalcError, NOTHING
@@ -28,6 +35,7 @@ class _Opts:
         self.repl: bool = False
         self.assume_yes: bool = False
         self.help: bool = False
+        self.examples: bool = False
         self.version: bool = False
 
 
@@ -46,6 +54,8 @@ def _parse_argv(argv: List[str]) -> "tuple[_Opts, List[str], Optional[str]]":
             rest_positional = True
         elif a in ("-h", "--help"):
             opts.help = True
+        elif a in ("--examples", "--help-examples"):
+            opts.examples = True
         elif a == "--version":
             opts.version = True
         elif a in ("-i", "--repl"):
@@ -119,6 +129,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 0
     if opts.help:
         print(help_text())
+        return 0
+    if opts.examples:
+        print(help_text("examples"))
         return 0
 
     store = Store()
