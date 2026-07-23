@@ -313,6 +313,12 @@ def load_todos(include_completed: bool = False, include_trash: bool = False) -> 
         if not created and origin.get("created_at"):
             created = str(origin["created_at"])
 
+        # todo_0607: `updated` was parsed only from a rare **Updated:** notes line, so
+        # it was almost always empty and "sort by last update" was a no-op. Fall back
+        # to history.log's last entry — the true last-activity timestamp.
+        if not updated:
+            updated = last_activity_ts(todo_dir)
+
         todos[todo_dir] = Todo(
             path=todo_dir,
             status=status,
@@ -378,6 +384,23 @@ def extract_notes_metadata(notes_path: Path) -> tuple[str, str, str, str]:
     
     summary = " ".join(summary_lines[:3])
     return title, summary, created, updated
+
+
+def last_activity_ts(todo_dir: Path) -> str:
+    """Most-recent activity timestamp for a todo, read from history.log's last line.
+
+    History lines look like: ``2026-07-23T01:49:04-04:00 | Status | actor | note``.
+    Returns the leading ISO timestamp of the final non-blank line, or '' when there's
+    no history (todo_0607 — the true "last updated" signal, since the notes
+    ``**Updated:**`` line is almost never present)."""
+    hist = todo_dir / "history.log"
+    try:
+        lines = [ln for ln in hist.read_text().splitlines() if ln.strip()]
+    except (FileNotFoundError, OSError):
+        return ""
+    if not lines:
+        return ""
+    return lines[-1].split("|", 1)[0].strip()
 
 
 def build_reference_map(todos: dict[Path, Todo]) -> dict[str, Path]:
