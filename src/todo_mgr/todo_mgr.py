@@ -1011,10 +1011,23 @@ def now_local_iso() -> str:
 
 
 def current_session() -> str:
-    """This session's tracking id from the environment, or 'unknown'."""
-    return (os.environ.get("AI_TRACKING_ID")
-            or os.environ.get("AI_CLI_SESSION_ID")
-            or "unknown")
+    """The actor to record in history — an explicit TODO_ACTOR override, else this
+    session's tracking id from the environment, else 'unknown'.
+
+    TODO_ACTOR lets a non-session caller attribute its edits to a real person
+    (todo_0638: the UAI app is not a CLI session, so without this its user's edits
+    recorded as 'unknown'; the app sets TODO_ACTOR=PianoMan). Attribution is
+    display metadata, not an authorization boundary.
+
+    Keep the actor one-line and pipe-free so an inherited/custom environment
+    cannot corrupt the append-only ``ts | status | actor | note`` format.
+    """
+    for key in ("TODO_ACTOR", "AI_TRACKING_ID", "AI_CLI_SESSION_ID"):
+        value = os.environ.get(key, "")
+        value = " ".join(value.replace("|", " ").split())
+        if value:
+            return value
+    return "unknown"
 
 
 # Preferred key order for origin.yml readability.
