@@ -15,7 +15,7 @@ Examples:
     todo_mgr list ready
     todo_mgr view IP2
     todo_mgr status IP2 reviewing
-    todo_mgr flag add IP2 high_priority
+    todo_mgr priority High IP2
 """
 
 from __future__ import annotations
@@ -183,6 +183,7 @@ class Todo:
     title: str = ""
     created: str = ""
     updated: str = ""
+    priority: str = "Normal"  # High | Normal | Low (todo_0652). Normal = no marker file.
     origin: dict = field(default_factory=dict)  # full origin.yml contents (provenance)
 
     @property
@@ -225,6 +226,7 @@ def todo_to_dict(todo: Todo, ref: str = "") -> dict:
         "path": str(todo.path),
         "rel_path": str(todo.rel_path),
         "status": todo.status,
+        "priority": todo.priority,
         "flags": todo.flags,
         "tags": todo.tags,
         "assigned": todo.assigned,
@@ -281,6 +283,16 @@ def load_todos(include_completed: bool = False, include_trash: bool = False) -> 
         status = status_file.stem
         flags = sorted(f.stem for f in todo_dir.glob("*.flag"))
         tags = sorted(t.stem for t in todo_dir.glob("*.tag"))
+        # Priority (todo_0652): one High/Low marker; absent = Normal. Preserve
+        # legacy high_priority.flag todos until their first explicit mutation.
+        priority_markers = sorted(p.stem for p in todo_dir.glob("*.priority"))
+        valid_priorities = [p for p in priority_markers if p in ("High", "Low")]
+        if len(priority_markers) == 1 and len(valid_priorities) == 1:
+            priority = valid_priorities[0]
+        elif "high_priority" in flags:
+            priority = "High"
+        else:
+            priority = "Normal"
 
         # Load assigned URIs
         assigned_file = todo_dir / "assigned.yml"
@@ -330,6 +342,7 @@ def load_todos(include_completed: bool = False, include_trash: bool = False) -> 
             title=title or todo_dir.name,
             created=created,
             updated=updated,
+            priority=priority,
             origin=origin,
         )
     
@@ -451,10 +464,12 @@ def render_kanban(todos: dict[Path, Todo], include_done: bool = False, include_c
             for todo in items:
                 ref = inverse_ref.get(todo.path, "??")
                 
-                # Flags with icons
+                # Priority + flags with icons
                 flag_icons = []
-                if "high_priority" in todo.flags:
+                if todo.priority == "High":
                     flag_icons.append(c("🔥", Colors.RED))
+                elif todo.priority == "Low":
+                    flag_icons.append(c("↓", Colors.BLUE))
                 if "needs_testing" in todo.flags:
                     flag_icons.append(c("⚠️", Colors.YELLOW))
                 if "blocked_by_other" in todo.flags:
@@ -514,10 +529,12 @@ def render_tree(todos: dict[Path, Todo], include_done: bool = False) -> str:
         todo_id = extract_id(todo.path)
         todo_id_colored = c(todo_id, Colors.DIM) if todo_id else ""
         
-        # Flags
+        # Priority + flags
         flag_str = ""
-        if "high_priority" in todo.flags:
+        if todo.priority == "High":
             flag_str += c("🔥", Colors.RED)
+        elif todo.priority == "Low":
+            flag_str += c("↓", Colors.BLUE)
         if "blocked_by_other" in todo.flags:
             flag_str += c("🚫", Colors.RED)
         
@@ -710,6 +727,8 @@ def view_todo_detail(todo: Todo, refs: dict[str, Path],
     # Metadata table
     lines.append(f"  {c('Reference:', Colors.DIM)}  {colored_ref(ref)}")
     lines.append(f"  {c('Status:', Colors.DIM)}     {colored_status(todo.status)}")
+    priority_color = {"High": Colors.RED, "Low": Colors.BLUE}.get(todo.priority, Colors.DIM)
+    lines.append(f"  {c('Priority:', Colors.DIM)}   {c(todo.priority, priority_color)}")
     lines.append(f"  {c('Path:', Colors.DIM)}       {c(str(todo.rel_path), Colors.BRIGHT_BLACK)}")
 
     if todo.created:
@@ -1418,6 +1437,33 @@ def ops_flag(action: str, identifier: str, flag_name: str) -> dict:
         return {"success": False, "error": str(e)}
 
 
+def ops_priority(level: str, identifier: str) -> dict:
+    """Set a todo's priority (todo_0652). level: High | Normal | Low.
+
+    Stored as a single <Level>.priority marker file (like <Status>.status);
+    Normal is the default and carries NO marker, so setting Normal just clears any
+    existing priority marker."""
+    norm = {"high": "High", "normal": "Normal", "low": "Low"}.get(level.strip().lower())
+    if not norm:
+        return {"success": False, "error": f"Invalid priority: {level}. Use High, Normal, or Low."}
+    todos = load_todos()
+    refs = build_reference_map(todos)
+    try:
+        path = resolve_target(identifier, todos, refs)
+        todo = todos.get(path)
+        if not todo:
+            return {"success": False, "error": f"Todo not found: {identifier}"}
+        for p in todo.path.glob("*.priority"):
+            p.unlink()
+        # The named priority field supersedes the legacy high_priority flag.
+        (todo.path / "high_priority.flag").unlink(missing_ok=True)
+        if norm != "Normal":
+            (todo.path / f"{norm}.priority").touch()
+        return {"success": True, "todo_id": todo.name, "priority": norm}
+    except (ValueError, subprocess.CalledProcessError) as e:
+        return {"success": False, "error": str(e)}
+
+
 def ops_tag(action: str, identifier: str, tag_name: str) -> dict:
     """Add or remove a tag. action: 'add' or 'remove'."""
     todos = load_todos()
@@ -1780,6 +1826,7 @@ def ops_validate() -> dict:
     - Duplicate todo IDs (same directory name under different parents)
     - Missing .status files
     - Multiple .status files
+    - Multiple or invalid .priority files
     - Completed todos still in the active directory tree
     - Orphaned children (parent dir doesn't exist or isn't a todo)
     """
@@ -1823,6 +1870,26 @@ def ops_validate() -> dict:
                 "path": rel,
                 "statuses": [f.stem for f in status_files],
                 "message": f"Multiple .status files in {rel}: {[f.stem for f in status_files]}",
+            })
+
+        # Priority is canonical as zero markers (Normal) or exactly one High/Low
+        # marker. Legacy high_priority.flag remains readable but new writes retire it.
+        priority_files = sorted(path.glob("*.priority"))
+        if len(priority_files) > 1:
+            issues.append({
+                "type": "multiple_priority",
+                "id": todo.name,
+                "path": rel,
+                "priorities": [f.stem for f in priority_files],
+                "message": f"Multiple .priority files in {rel}: {[f.stem for f in priority_files]}",
+            })
+        elif priority_files and priority_files[0].stem not in ("High", "Low"):
+            issues.append({
+                "type": "invalid_priority",
+                "id": todo.name,
+                "path": rel,
+                "priority": priority_files[0].stem,
+                "message": f"Invalid .priority file in {rel}: {priority_files[0].name}",
             })
 
         # Completed todo in active tree (not under completed/ or trash/)
@@ -2161,6 +2228,17 @@ def cmd_flag(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) ->
     if result.get("not_found"):
         return c(f"Flag not present: {result['flag']} on {result['todo_id']}", Colors.YELLOW)
     return c(f"Flag {action}ed: {result['flag']} on {result['todo_id']}", Colors.GREEN)
+
+
+def cmd_priority(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> str:
+    """Set a todo's priority. Usage: priority <High|Normal|Low> <ref>"""
+    if len(args) < 2:
+        return c("Usage: priority <High|Normal|Low> <ref>", Colors.RED)
+    level, ref = args[0], args[1]
+    result = ops_priority(level, ref)
+    if not result["success"]:
+        return c(f"Error: {result['error']}", Colors.RED)
+    return c(f"Priority set: {result['priority']} on {result['todo_id']}", Colors.GREEN)
 
 
 def cmd_tag(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> str:
@@ -3370,6 +3448,7 @@ HELP_OVERVIEW = """
     {cyan}view{reset} <ref>      Show todo details
     {cyan}create{reset} <name>   Create new todo
     {cyan}status{reset} <r> <s>  Change todo status
+    {cyan}priority{reset} <level> <ref>  Set High, Normal, or Low priority
     {cyan}edit{reset} <ref>      Interactive editor
     {cyan}move{reset} <target> <ref...>  Move todo(s) to target (or 'root')
     {cyan}assign{reset} <ref> <uri>  Assign a URI to a todo
@@ -3423,12 +3502,12 @@ HELP_EXAMPLES = """
     create fix_login_bug                    # Interactive creation
     create fix_login_bug --status ready     # Skip to Ready
     create subtask --parent IP2             # Create as child of IP2
-    create feature --tags api,backend --flags high_priority
+    create feature --tags api,backend
 
 {bold}Modifying:{reset}
     status IP2 reviewing           # Change status
     status IP2 RV                  # Same, using code
-    flag add IP2 high_priority     # Add flag
+    priority High IP2              # Set named priority (High/Normal/Low)
     flag remove IP2 needs_testing  # Remove flag
     tag add IP2 api                # Add tag
     edit IP2                       # Interactive editor
@@ -3509,9 +3588,12 @@ HELP_VERBOSE = """
              In_Progress, Reviewing, Accepting, Blocked, Done, Cancelled
       Codes: TR, NR, ND, RD, IP, RV, AC, BL, DN, CN
 
+  {cyan}priority{reset} <High|Normal|Low> <ref>
+      Set the todo priority. Normal is the default and stores no marker.
+
   {cyan}flag{reset} add|remove <ref> <flag_name>
       Add or remove a flag from a todo.
-      Common flags: high_priority, needs_testing, blocked_by_other, quick_win
+      Common flags: needs_testing, blocked_by_other, quick_win
 
   {cyan}tag{reset} add|remove <ref> <tag_name>
       Add or remove a tag from a todo.
@@ -3787,16 +3869,27 @@ Can be recovered from trash/ if needed.
     delete TR5 --force    # Skip confirmation
     rm 0038               # Alias for delete
 """,
+    "priority": """
+{bold}priority{reset} <High|Normal|Low> <ref>
+
+Set a todo's named priority. Normal is the default and removes any stored
+priority marker. Setting any level also retires the legacy high_priority flag.
+
+{bold}Examples:{reset}
+    priority High IP2
+    priority Normal 0038
+    priority Low todo_0652
+""",
     "flag": """
 {bold}flag{reset} add|remove <ref> <flag_name>
 
 Add or remove a flag from a todo.
 
 {bold}Common flags:{reset}
-    high_priority, needs_testing, blocked_by_other, quick_win
+    needs_testing, blocked_by_other, quick_win
 
 {bold}Examples:{reset}
-    flag add IP2 high_priority
+    flag add IP2 quick_win
     flag remove IP2 needs_testing
 """,
     "tag": """
@@ -3854,7 +3947,7 @@ To put a todo in a project, assign it: assign <ref> uai://project/<id>
 {bold}Examples:{reset}
     create fix_login_bug
     create api_refactor --status ready --tags api,backend
-    create subtask --parent IP2 --flags high_priority
+    create subtask --parent IP2 --flags needs_testing
 """,
 }
 
@@ -3936,6 +4029,7 @@ def run_command(line: str, interactive: bool = True) -> str | None:
         "list": lambda: cmd_list(args, todos, refs),
         "view": lambda: cmd_view(args, todos, refs),
         "status": lambda: cmd_status(args, todos, refs),
+        "priority": lambda: cmd_priority(args, todos, refs),
         "flag": lambda: cmd_flag(args, todos, refs),
         "tag": lambda: cmd_tag(args, todos, refs),
         "create": lambda: cmd_create(args, todos, refs, interactive),
