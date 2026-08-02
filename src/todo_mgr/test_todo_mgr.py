@@ -357,13 +357,22 @@ def test_ops_trash(tm):
 
 def run_cli(test_root: Path, *args: str) -> str:
     """Run todo_mgr as CLI subprocess."""
+    return run_cli_rc(test_root, *args)[1]
+
+
+def run_cli_rc(test_root: Path, *args: str) -> tuple[int, str]:
+    """Run todo_mgr as CLI subprocess, keeping the EXIT CODE.
+
+    run_cli() drops the return code, so a caller could not assert the exit-code
+    contract (todo_0740): 0 success, 1 failed operation, 2 bad arguments.
+    """
     env = os.environ.copy()
     env["TODO_ROOT"] = str(test_root)
     result = subprocess.run(
         [sys.executable, str(SCRIPT_DIR / "todo_mgr.py"), *args],
         capture_output=True, text=True, env=env
     )
-    return result.stdout + result.stderr
+    return result.returncode, result.stdout + result.stderr
 
 
 def test_cmd_layer():
@@ -468,10 +477,17 @@ def test_cmd_layer():
              "uai://project/hamilton" in assigned_text, assigned_text.strip()[:160])
         test("project NOT in origin.yml", "project:" not in origin_text, origin_text.strip()[:160])
 
-        # Regression (todo_0323): unknown flags are surfaced, not silently swallowed.
-        out = run_cli(test_root, "create", "bogus_flag_test", "--no-such-flag")
-        test("cmd create warns on unknown flag",
-             "Ignored unknown flags" in out and "--no-such-flag" in out, out.strip()[:160])
+        # Regression (todo_0323, contract updated by todo_0740): unknown flags are
+        # surfaced, not silently swallowed. todo_0323 settled for creating the todo
+        # and warning; todo_0740 REFUSES instead, because warning after the fact
+        # still hands back a todo built from a partial reading of the request and
+        # leaves the caller to clean it up. Same intent, stronger guarantee.
+        rc, out = run_cli_rc(test_root, "create", "bogus_flag_test", "--no-such-flag")
+        test("cmd create rejects an unknown flag with rc=2", rc == 2, f"rc={rc}: {out.strip()[:120]}")
+        test("cmd create names the offending flag", "--no-such-flag" in out, out.strip()[:160])
+        test("cmd create creates nothing when it refuses",
+             next(Path(test_root).glob("*bogus_flag_test*"), None) is None,
+             "a refused create must leave no directory behind")
 
     finally:
         teardown_test_root(test_root)

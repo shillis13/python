@@ -122,6 +122,71 @@ def c(text: str, *codes: str) -> str:
     return f"{code_str}{text}{Colors.RESET}"
 
 
+# ── Failure signalling (todo_0740) ────────────────────────────────────────────
+# Every command used to return its error as a red string and main() exited 0
+# regardless, so a failure read as SUCCESS to every caller — the exact shape
+# scripts/DESIGN.md calls out ("a script that logs an error but exits 0"). We
+# cannot infer failure from the text (the shapes vary: "Error:", "Usage:",
+# "Todo not found:", ...) nor from the color (RED is also a Blocked status and
+# the 🔥/🚫 flag icons), so commands RECORD failure here as they return it.
+#
+# Exit codes:
+#   0  success — including a filtered listing that legitimately matches nothing
+#   1  the operation failed, or a target named explicitly does not exist
+#   2  usage error — missing or malformed arguments
+_EXIT_CODE = 0
+
+
+def ops_failed(result: dict) -> str:
+    """Turn a failed ops_* result into the right failure, preserving its class.
+
+    The ops layer decides whether something was a bad ARGUMENT or a failed
+    OPERATION; every cmd_* used to flatten that back to fail() (exit 1), so JSON
+    mode honoured the classification and text mode silently discarded it. Routing
+    every ops result through one helper means a call site cannot forget.
+    (todo_0740 review 5)
+    """
+    text = f"Error: {result['error']}"
+    return bad_args(text) if result.get("argument_error") else fail(text)
+
+
+def mark_failed(code: int = 1) -> None:
+    """Record that the current command failed, without formatting anything."""
+    global _EXIT_CODE
+    _EXIT_CODE = code
+
+
+def fail(text: str, code: int = 1) -> str:
+    """Return a red error message AND record that this command FAILED (exit 1).
+
+    Use `bad_args()` instead when the caller's ARGUMENTS were wrong (exit 2).
+    """
+    mark_failed(code)
+    return c(text, Colors.RED)
+
+
+def bad_args(text: str) -> str:
+    """The caller's arguments were wrong — missing, malformed, or unrecognised.
+
+    Split from fail() because the classification must be a DECISION at each call
+    site, not a guess from the message text. Deriving it from a "Usage:" prefix
+    silently misfiled every argument error phrased differently — 'create --title'
+    says "Error: the first argument must be…", so the policy said 2 and the code
+    returned 1. (todo_0740 review)
+    """
+    return fail(text, 2)
+
+
+def reset_exit_code() -> None:
+    """Clear the failure flag before running a command (REPL runs many)."""
+    global _EXIT_CODE
+    _EXIT_CODE = 0
+
+
+def current_exit_code() -> int:
+    return _EXIT_CODE
+
+
 # Status colors
 STATUS_COLORS = {
     "Triaging": Colors.BRIGHT_BLACK,
@@ -1204,7 +1269,14 @@ def ops_create_light(
 ) -> dict:
     """Create a lightweight todo (summary + status + origin.yml). Returns dict."""
     if not name or not name.strip():
-        return {"success": False, "error": "Name required"}
+        return {"success": False, "error": "Name required", "argument_error": True}
+    # Validate the status BEFORE the filesystem mutation below, and classify it,
+    # so both modes agree and a rejected create leaves nothing behind.
+    # (todo_0740 review 4)
+    try:
+        resolve_status(status)
+    except ValueError as e:
+        return {"success": False, "error": str(e), "argument_error": True}
     try:
         resolved = resolve_status(status)
         new_path = create_lightweight_todo(name, CURRENT_ROOT, summary)
@@ -1372,7 +1444,10 @@ def ops_status(identifiers: list[str], new_status: str, note: str = "") -> dict:
     try:
         resolved = resolve_status(new_status)
     except ValueError as e:
-        return {"success": False, "error": str(e)}
+        # Classified in the SHARED ops layer, not in cmd_*: text mode validated
+        # this itself and JSON mode did not, so the same mistake exited 2 in one
+        # and 1 in the other. (todo_0740 review 4)
+        return {"success": False, "error": str(e), "argument_error": True}
 
     todos = load_todos()
     refs = build_reference_map(todos)
@@ -1409,6 +1484,11 @@ def ops_status(identifiers: list[str], new_status: str, note: str = "") -> dict:
 
 def ops_flag(action: str, identifier: str, flag_name: str) -> dict:
     """Add or remove a flag. action: 'add' or 'remove'."""
+    # Enumerated argument, validated in the SHARED ops layer so text mode, JSON
+    # mode and the workflow MCP all classify it identically. (todo_0740 review 4)
+    if str(action).lower() not in ("add", "remove"):
+        return {"success": False, "argument_error": True,
+                "error": f"Unknown action: {action}. Valid: add, remove"}
     todos = load_todos()
     refs = build_reference_map(todos)
     try:
@@ -1466,6 +1546,11 @@ def ops_priority(level: str, identifier: str) -> dict:
 
 def ops_tag(action: str, identifier: str, tag_name: str) -> dict:
     """Add or remove a tag. action: 'add' or 'remove'."""
+    # Enumerated argument, validated in the SHARED ops layer so text mode, JSON
+    # mode and the workflow MCP all classify it identically. (todo_0740 review 4)
+    if str(action).lower() not in ("add", "remove"):
+        return {"success": False, "argument_error": True,
+                "error": f"Unknown action: {action}. Valid: add, remove"}
     todos = load_todos()
     refs = build_reference_map(todos)
     try:
@@ -1612,6 +1697,16 @@ def ops_create(
     """
     if not name or not name.strip():
         return {"success": False, "error": "Name required"}
+
+    # VALIDATE BEFORE MUTATING. create_todo_from_template() below writes a real
+    # directory, and status was only resolved afterwards — so an unusable status
+    # left a newly created todo behind and then reported failure. Validating in
+    # the AUTHORITATIVE ops path (rather than in cmd_create) keeps text mode, JSON
+    # mode, and the workflow MCP all safe from one place. (todo_0740 review 3)
+    try:
+        resolve_status(status)
+    except ValueError as e:
+        return {"success": False, "error": str(e), "argument_error": True}
 
     try:
         todos = load_todos()
@@ -2050,7 +2145,7 @@ def cmd_list(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) ->
     if sort_key == "id":
         sort_key = "name"  # "id" and "name" both sort by todo directory name
     if sort_key not in valid_sorts:
-        return c(f"Unknown sort key: {sort_key}. Valid: {', '.join(valid_sorts)}", Colors.RED)
+        return bad_args(f"Unknown sort key: {sort_key}. Valid: {', '.join(valid_sorts)}")
 
     # Auto-show dates when sorting by date fields
     if sort_key in ("created", "updated"):
@@ -2139,7 +2234,7 @@ def _find_all_matches(token: str, todos: dict[Path, Todo], refs: dict[str, Path]
 def cmd_view(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> str:
     """View detailed info about a todo. Searches completed/trash if not found in active."""
     if not args:
-        return c("Usage: view <ref|path>", Colors.RED)
+        return bad_args("Usage: view <ref|path>")
 
     # Check for duplicates by finding all matches
     all_todos = load_todos(include_completed=True, include_trash=True)
@@ -2147,12 +2242,12 @@ def cmd_view(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) ->
     matches = _find_all_matches(args[0], all_todos, all_refs)
 
     if not matches:
-        return c(f"Todo not found: {args[0]}", Colors.RED)
+        return fail(f"Todo not found: {args[0]}")
 
     if len(matches) == 1:
         todo = all_todos.get(matches[0])
         if not todo:
-            return c(f"Todo not in cache: {args[0]}", Colors.RED)
+            return fail(f"Todo not in cache: {args[0]}")
         return view_todo_detail(todo, all_refs, all_todos)
 
     # Multiple matches — show all with duplicate warning
@@ -2177,7 +2272,7 @@ def cmd_status(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) 
         args = args[:i] + args[i + 2:]
 
     if len(args) < 2:
-        return c("Usage: status <new_status> <ref> [ref2 ...] [--note <text>]", Colors.RED)
+        return bad_args("Usage: status <new_status> <ref> [ref2 ...] [--note <text>]")
 
     # First arg is the status, remaining are identifiers
     new_status_input = args[0]
@@ -2186,7 +2281,11 @@ def cmd_status(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) 
     try:
         resolved = resolve_status(new_status_input)
     except ValueError as e:
-        return c(str(e), Colors.RED)
+        # An unusable status VALUE is a bad argument (2), not a failed operation.
+        # It is validated up front, before any todo is touched, and is distinct
+        # from a per-ref resolution failure inside the loop below (1).
+        # (todo_0740 review)
+        return bad_args(str(e))
 
     results = []
     for identifier in identifiers:
@@ -2207,7 +2306,11 @@ def cmd_status(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) 
 
             results.append(c(f"  ✓ {path.name} → {resolved}", Colors.GREEN))
         except (ValueError, subprocess.CalledProcessError) as e:
-            results.append(c(f"  ✗ {identifier}: {e}", Colors.RED))
+            # A per-item failure in a BATCH still has to move the exit code —
+            # these are appended rather than returned, so the fail() conversion
+            # of `return` sites did not cover them. If any item fails the command
+            # failed, even when other items succeeded. (todo_0740)
+            results.append(fail(f"  ✗ {identifier}: {e}"))
 
     if len(results) == 1:
         return results[0].strip()
@@ -2217,12 +2320,17 @@ def cmd_status(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) 
 def cmd_flag(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> str:
     """Add or remove flags. Usage: flag add|remove <ref> <flag_name>"""
     if len(args) < 3:
-        return c("Usage: flag add|remove <ref> <flag_name>", Colors.RED)
+        return bad_args("Usage: flag add|remove <ref> <flag_name>")
 
     action, ref, flag_name = args[0], args[1], args[2]
+    # Enumerated argument, validated where the caller's input is known — otherwise
+    # a bad action returns a generic failure (1) for an argument error (2).
+    # (todo_0740 review 2)
+    if action.lower() not in ("add", "remove"):
+        return bad_args(f"Unknown action: {action}. Valid: add, remove")
     result = ops_flag(action, ref, flag_name)
     if not result["success"]:
-        return c(f"Error: {result['error']}", Colors.RED)
+        return ops_failed(result)
     if result.get("already_exists"):
         return c(f"Flag already exists: {result['flag']} on {result['todo_id']}", Colors.YELLOW)
     if result.get("not_found"):
@@ -2233,23 +2341,33 @@ def cmd_flag(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) ->
 def cmd_priority(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> str:
     """Set a todo's priority. Usage: priority <High|Normal|Low> <ref>"""
     if len(args) < 2:
-        return c("Usage: priority <High|Normal|Low> <ref>", Colors.RED)
+        return bad_args("Usage: priority <High|Normal|Low> <ref>")
     level, ref = args[0], args[1]
+    # An enumerated argument is validated HERE, where the caller's input is known.
+    # Leaving it to ops_* returns a generic failure (1) for what is really a bad
+    # argument (2). (todo_0740 review 2)
+    if level.capitalize() not in ("High", "Normal", "Low"):
+        return bad_args(f"Unknown priority: {level}. Valid: High, Normal, Low")
     result = ops_priority(level, ref)
     if not result["success"]:
-        return c(f"Error: {result['error']}", Colors.RED)
+        return ops_failed(result)
     return c(f"Priority set: {result['priority']} on {result['todo_id']}", Colors.GREEN)
 
 
 def cmd_tag(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> str:
     """Add or remove tags. Usage: tag add|remove <ref> <tag_name>"""
     if len(args) < 3:
-        return c("Usage: tag add|remove <ref> <tag_name>", Colors.RED)
+        return bad_args("Usage: tag add|remove <ref> <tag_name>")
 
     action, ref, tag_name = args[0], args[1], args[2]
+    # Enumerated argument, validated where the caller's input is known — otherwise
+    # a bad action returns a generic failure (1) for an argument error (2).
+    # (todo_0740 review 2)
+    if action.lower() not in ("add", "remove"):
+        return bad_args(f"Unknown action: {action}. Valid: add, remove")
     result = ops_tag(action, ref, tag_name)
     if not result["success"]:
-        return c(f"Error: {result['error']}", Colors.RED)
+        return ops_failed(result)
     if result.get("already_exists"):
         return c(f"Tag already exists: {result['tag']} on {result['todo_id']}", Colors.YELLOW)
     if result.get("not_found"):
@@ -2260,10 +2378,10 @@ def cmd_tag(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> 
 def cmd_assign(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> str:
     """Assign a URI to a todo. Usage: assign <ref> <uri>"""
     if len(args) < 2:
-        return c("Usage: assign <ref> <uri>", Colors.RED)
+        return bad_args("Usage: assign <ref> <uri>")
     result = ops_assign(args[0], args[1])
     if not result["success"]:
-        return c(f"Error: {result['error']}", Colors.RED)
+        return ops_failed(result)
     if result.get("already_assigned"):
         return c(f"Already assigned: {result['uri']} on {result['todo_id']}", Colors.YELLOW)
     return c(f"Assigned: {result['uri']} to {result['todo_id']}", Colors.GREEN)
@@ -2272,10 +2390,10 @@ def cmd_assign(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) 
 def cmd_unassign(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> str:
     """Remove a URI assignment from a todo. Usage: unassign <ref> <uri>"""
     if len(args) < 2:
-        return c("Usage: unassign <ref> <uri>", Colors.RED)
+        return bad_args("Usage: unassign <ref> <uri>")
     result = ops_unassign(args[0], args[1])
     if not result["success"]:
-        return c(f"Error: {result['error']}", Colors.RED)
+        return ops_failed(result)
     if result.get("not_assigned"):
         return c(f"Not assigned: {result['uri']} on {result['todo_id']}", Colors.YELLOW)
     return c(f"Unassigned: {result['uri']} from {result['todo_id']}", Colors.GREEN)
@@ -2284,10 +2402,10 @@ def cmd_unassign(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]
 def cmd_assigned(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> str:
     """List current assignments for a todo. Usage: assigned <ref>"""
     if not args:
-        return c("Usage: assigned <ref>", Colors.RED)
+        return bad_args("Usage: assigned <ref>")
     result = ops_assigned(args[0])
     if not result["success"]:
-        return c(f"Error: {result['error']}", Colors.RED)
+        return ops_failed(result)
     assigned = result["assigned"]
     if not assigned:
         return c(f"No assignments for {result['todo_id']}", Colors.DIM)
@@ -2300,44 +2418,41 @@ def cmd_assigned(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]
 def cmd_create_light(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> str:
     """create-light <name> [--summary s] [--status s] [--source src]"""
     if not args:
-        return c("Usage: create-light <name> [--summary <s>] [--status <s>] "
-                 "[--source agent|backfill|manual]", Colors.RED)
+        return bad_args("Usage: create-light <name> [--summary <s>] [--status <s>] "
+                 "[--source agent|backfill|manual]")
     name = args[0]
     # Same positional-name guard as `create`: a flag is never a name. Without it
     # `create-light --title "Real Title"` silently makes a todo called "--title".
     # (todo_0739)
     if name.startswith("--"):
-        return c(f"Error: the first argument must be the todo NAME, but got the "
+        return bad_args(f"Error: the first argument must be the todo NAME, but got the "
                  f"flag '{name}'. The name is positional and there is no --title "
-                 f"option:\n  create-light \"My Todo Title\" [--summary <s>]",
-                 Colors.RED)
+                 f"option:\n  create-light \"My Todo Title\" [--summary <s>]")
     rest = list(args[1:])
     summary = _pop_flag(rest, "--summary") or ""
     status = _pop_flag(rest, "--status") or "triaging"
     source = _pop_flag(rest, "--source") or "agent"
     created_by = _pop_flag(rest, "--by") or ""
+    # Refuse before mutating, same reasoning as `create`. (todo_0740 review 2)
+    if rest:
+        dropped = " ".join(repr(a) for a in rest)
+        return bad_args(f"Error: unexpected extra argument(s): {dropped} — the name "
+                        f"is a SINGLE argument, so quote it if it contains spaces. "
+                        f"Nothing was created.")
     result = ops_create_light(name=name, summary=summary, status=status,
                               source=source, created_by=created_by)
     if result["success"]:
-        lines = [c(f"✓ {result['message']}", Colors.GREEN)]
-        # Anything left after the known flags were popped was dropped — say so,
-        # rather than repeat the silence that lost todo_0604/0674's titles.
-        if rest:
-            dropped = " ".join(repr(a) for a in rest)
-            lines.append(c(f"  ⚠ Ignored extra arguments: {dropped} — the name is "
-                           f"a SINGLE argument; quote it if it contains spaces.",
-                           Colors.YELLOW))
-        return "\n".join(lines)
-    return c(f"Error: {result['error']}", Colors.RED)
+        return c(f"✓ {result['message']}", Colors.GREEN)
+    return ops_failed(result)
 
 
 def cmd_history(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> str:
     """history <ref>  — show the append-only status trail."""
     if not args:
-        return c("Usage: history <ref>", Colors.RED)
+        return bad_args("Usage: history <ref>")
     result = ops_history(args[0])
     if not result["success"]:
-        return c(f"Error: {result['error']}", Colors.RED)
+        return ops_failed(result)
     entries = result["history"]
     if not entries:
         return c(f"No history for {result['todo_id']}", Colors.DIM)
@@ -2357,7 +2472,7 @@ def cmd_comment(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path])
     Reads the comment from stdin when --text is omitted.
     """
     if not args:
-        return c("Usage: comment <ref> --text <comment> [--session <who>] [--reply-to <comment_id>]", Colors.RED)
+        return bad_args("Usage: comment <ref> --text <comment> [--session <who>] [--reply-to <comment_id>]")
     ref = args[0]
     text = ""
     session = ""
@@ -2376,7 +2491,7 @@ def cmd_comment(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path])
         text = sys.stdin.read()
     result = ops_comment(ref, text, session, reply_to)
     if not result["success"]:
-        return c(f"Error: {result['error']}", Colors.RED)
+        return ops_failed(result)
     return c(f"Comment added to {result['todo_id']} ({result['comment_id']})", Colors.GREEN)
 
 
@@ -2541,9 +2656,9 @@ def cmd_migrate(args: list[str], todos: dict[Path, Todo],
         try:
             targets = [resolve_target(positional[0], todos, refs)]
         except ValueError as e:
-            return c(str(e), Colors.RED)
+            return fail(str(e))
     else:
-        return c("Usage: migrate <ref> | migrate --all  [--dry-run]", Colors.RED)
+        return bad_args("Usage: migrate <ref> | migrate --all  [--dry-run]")
 
     migrated = skipped = errors = origin_actions = 0
     flagged: list[str] = []
@@ -2625,6 +2740,13 @@ def cmd_migrate(args: list[str], todos: dict[Path, Todo],
         lines.append(c("Flagged for manual review:", Colors.YELLOW))
         for f in flagged:
             lines.append(c(f"  - {f}", Colors.YELLOW))
+    # Aggregate failures: migrate counts errors and defers flagged items instead of
+    # returning them, so converting return-sites never touched this path — a run
+    # that failed on every todo still exited 0. A transform error or a failed
+    # content-preservation check means this command did not do what was asked.
+    # (todo_0740 review)
+    if errors or flagged:
+        mark_failed(1)
     return "\n".join(lines)
 
 
@@ -2638,8 +2760,7 @@ def cmd_set_notes(args: list[str], todos: dict[Path, Todo],
     """
     positional = [a for a in args if not a.startswith('--')]
     if not positional:
-        return c("Usage: set-notes <ref> [--content <text>]  (else reads stdin)",
-                 Colors.RED)
+        return bad_args("Usage: set-notes <ref> [--content <text>]  (else reads stdin)")
     content: str | None = None
     if '--content' in args:
         i = args.index('--content')
@@ -2650,7 +2771,7 @@ def cmd_set_notes(args: list[str], todos: dict[Path, Todo],
     try:
         path = resolve_target(positional[0], todos, refs)
     except ValueError as e:
-        return c(str(e), Colors.RED)
+        return fail(str(e))
     notes_path = path / 'notes.md'
     if not content.endswith('\n'):
         content += '\n'
@@ -2778,7 +2899,7 @@ def cmd_create(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path], 
     """Create a new todo. Usage: create <name> [--parent <ref>] [--status <status>] [--tags t1,t2] [--flags f1,f2]"""
     if not args:
         if not interactive:
-            return c("Usage: create <name> [--parent <ref>] [--status <status>] [--tags t1,t2] [--flags f1,f2]", Colors.RED)
+            return bad_args("Usage: create <name> [--parent <ref>] [--status <status>] [--tags t1,t2] [--flags f1,f2]")
         return create_todo_interactive()
     
     name = args[0]
@@ -2790,10 +2911,9 @@ def cmd_create(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path], 
     # reported success; todo_0604 and todo_0674 lost their titles that way.
     # Refuse rather than invent a name out of a flag. (todo_0739)
     if name.startswith("--"):
-        return c(f"Error: the first argument must be the todo NAME, but got the "
+        return bad_args(f"Error: the first argument must be the todo NAME, but got the "
                  f"flag '{name}'. The name is positional and there is no --title "
-                 f"option:\n  create \"My Todo Title\" [--status <s>] [--tags a,b]",
-                 Colors.RED)
+                 f"option:\n  create \"My Todo Title\" [--status <s>] [--tags a,b]")
     parent = "."
     status = "triaging"
     tags = []
@@ -2830,17 +2950,25 @@ def cmd_create(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path], 
             extra_positionals.append(args[i])
             i += 1
 
+    # REFUSE BEFORE MUTATING. Warning about ignored arguments *after* creating the
+    # todo still leaves the caller a wrongly-named todo to clean up, and a typo'd
+    # flag (--stat Done) silently not applying is the same class of bug todo_0739
+    # was about: acting on a partial reading of what was asked. Rejecting costs one
+    # retry and loses nothing. (todo_0740 review 2)
+    if unknown or extra_positionals:
+        problems = []
+        if unknown:
+            problems.append(f"unrecognised flag(s): {' '.join(unknown)}")
+        if extra_positionals:
+            dropped = " ".join(repr(a) for a in extra_positionals)
+            problems.append(f"unexpected extra text: {dropped} — the name is a "
+                            f"SINGLE argument, so quote it if it contains spaces")
+        return bad_args("Error: " + "; ".join(problems) + ". Nothing was created.")
+
     result = ops_create(name=name, parent=parent, status=status,
                         tags=tags, flags=flags, description=description)
     if result["success"]:
         lines = [c(f"✓ {result['message']}", Colors.GREEN)]
-        if unknown:
-            lines.append(c(f"  ⚠ Ignored unknown flags: {' '.join(unknown)}", Colors.YELLOW))
-        if extra_positionals:
-            dropped = " ".join(repr(a) for a in extra_positionals)
-            lines.append(c(f"  ⚠ Ignored extra text: {dropped} — the name is a "
-                           f"SINGLE argument; quote it if it contains spaces.",
-                           Colors.YELLOW))
         v = result.get("verification", {})
         if v.get("verified"):
             lines.append(c("  ✓ Verified: all fields match", Colors.DIM))
@@ -2849,7 +2977,7 @@ def cmd_create(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path], 
             for m in v["mismatches"]:
                 lines.append(c(f"    - {m}", Colors.YELLOW))
         return "\n".join(lines)
-    return c(f"Error: {result['error']}", Colors.RED)
+    return ops_failed(result)
 
 
 def create_todo_interactive() -> str:
@@ -2901,7 +3029,7 @@ def cmd_move(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) ->
     Use 'root', '.', or '/' as target to move to root level (unparent).
     """
     if len(args) < 2:
-        return c("Usage: move <target|root> <ref1> [ref2...]", Colors.RED)
+        return bad_args("Usage: move <target|root> <ref1> [ref2...]")
 
     target = args[0]
     sources = args[1:]
@@ -2911,6 +3039,9 @@ def cmd_move(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) ->
         if result["success"]:
             lines.append(c(f"Moved: {result['todo_id']} → {result['new_location']}", Colors.GREEN))
         else:
+            # Appended, not returned — the return-site conversion missed it.
+            # One failed source means the command failed. (todo_0740 review)
+            mark_failed(1)
             lines.append(c(f"Error ({src}): {result['error']}", Colors.RED))
     return "\n".join(lines)
 
@@ -2922,7 +3053,7 @@ def cmd_link(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) ->
     Unlike move, this creates a relationship without changing hierarchy.
     """
     if len(args) < 2:
-        return c("Usage: link <source> <target> [label]", Colors.RED)
+        return bad_args("Usage: link <source> <target> [label]")
     
     try:
         source = resolve_target(args[0], todos, refs)
@@ -2947,7 +3078,7 @@ def cmd_link(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) ->
         return c(f"Linked: {source.name} → {target.name}", Colors.GREEN)
     
     except (ValueError, OSError) as e:
-        return c(f"Error: {e}", Colors.RED)
+        return fail(f"Error: {e}")
 
 
 def append_note(notes_path: Path, note: str) -> None:
@@ -2964,13 +3095,13 @@ def cmd_edit(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) ->
     Fields: title, description, status, tags, flags, requirements, done_when, notes
     """
     if not args:
-        return c("Usage: edit <ref> [field]", Colors.RED)
+        return bad_args("Usage: edit <ref> [field]")
     
     try:
         path = resolve_target(args[0], todos, refs)
         todo = todos.get(path)
         if not todo:
-            return c(f"Todo not found: {args[0]}", Colors.RED)
+            return fail(f"Todo not found: {args[0]}")
 
         notes_path = path / "notes.md"
 
@@ -2986,7 +3117,7 @@ def cmd_edit(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) ->
         return edit_menu(todo, notes_path)
     
     except ValueError as e:
-        return c(str(e), Colors.RED)
+        return fail(str(e))
 
 
 def edit_menu(todo: Todo, notes_path: Path) -> str:
@@ -3154,8 +3285,7 @@ def edit_field(todo: Todo, field: str, notes_path: Path,
             valid_statuses = {s.lower() for s, _ in STATUS_ORDER}
             if new_val.lower() not in valid_statuses:
                 valid_list = ", ".join(s for s, _ in STATUS_ORDER)
-                return c(f"Unknown status: {new_val}. Valid: {valid_list}",
-                         Colors.RED)
+                return bad_args(f"Unknown status: {new_val}. Valid: {valid_list}")
             run_script("set_status", new_val.lower(), str(todo.path))
             return c(f"Status updated to {new_val}", Colors.GREEN)
 
@@ -3245,14 +3375,14 @@ def edit_child(todo: Todo, todos: dict[Path, Todo],
         try:
             child_path = resolve_target(inline_value, todos, refs)
             if child_path == todo.path:
-                return c("Cannot make a todo its own child", Colors.RED)
+                return fail("Cannot make a todo its own child")
             dest = todo.path / child_path.name
             if dest.exists():
-                return c(f"Already exists: {child_path.name}", Colors.RED)
+                return fail(f"Already exists: {child_path.name}")
             shutil.move(str(child_path), str(dest))
             return c(f"Moved {child_path.name} as child of {todo.name}", Colors.GREEN)
         except ValueError as e:
-            return c(str(e), Colors.RED)
+            return fail(str(e))
 
     # No inline value — prompt for action
     print(f"  {c('[m]', Colors.CYAN)} Move existing todo as child")
@@ -3266,14 +3396,14 @@ def edit_child(todo: Todo, todos: dict[Path, Todo],
         try:
             child_path = resolve_target(ref_input, todos, refs)
             if child_path == todo.path:
-                return c("Cannot make a todo its own child", Colors.RED)
+                return fail("Cannot make a todo its own child")
             dest = todo.path / child_path.name
             if dest.exists():
-                return c(f"Already exists: {child_path.name}", Colors.RED)
+                return fail(f"Already exists: {child_path.name}")
             shutil.move(str(child_path), str(dest))
             return c(f"Moved {child_path.name} as child of {todo.name}", Colors.GREEN)
         except ValueError as e:
-            return c(str(e), Colors.RED)
+            return fail(str(e))
 
     elif action in ("n", "new", "create"):
         child_name = input("  New child name: ").strip()
@@ -3283,7 +3413,7 @@ def edit_child(todo: Todo, todos: dict[Path, Todo],
             new_path = create_todo_from_template(child_name, todo.path)
             return c(f"Created child: {new_path.name}", Colors.GREEN)
         except (ValueError, OSError) as e:
-            return c(f"Error: {e}", Colors.RED)
+            return fail(f"Error: {e}")
 
     return c("Cancelled", Colors.YELLOW)
 
@@ -3362,18 +3492,24 @@ def cmd_validate(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]
                 "multiple_status": "MULTI_STATUS", "completed_in_active": "MISPLACED"
                 }.get(issue["type"], issue["type"])
         lines.append(f"  [{c(icon, Colors.RED)}] {issue['message']}")
+    # DECIDED (todo_0740 review asked): findings make validate exit nonzero, like a
+    # linter. Its whole purpose is to answer "is the tree healthy?", and a caller
+    # gating on that — a hook, a scheduled check, a pre-commit — needs the answer in
+    # the exit code, not only in text it would have to parse. "No issues found."
+    # stays 0. Nothing can regress from this: every path exited 0 before today.
+    mark_failed(1)
     return "\n".join(lines)
 
 
 def cmd_complete(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> str:
     """Mark todo as Done and move to completed/. Usage: complete <ref>"""
     if not args:
-        return c("Usage: complete <ref>", Colors.RED)
+        return bad_args("Usage: complete <ref>")
 
     result = ops_complete(args[0])
     if result["success"]:
         return c(f"Completed: {result['todo_id']} → completed/", Colors.GREEN)
-    return c(f"Error: {result['error']}", Colors.RED)
+    return ops_failed(result)
 
 
 def cmd_delete(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path], interactive: bool = True) -> str:
@@ -3383,7 +3519,7 @@ def cmd_delete(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path], 
     Use 'purge' for permanent deletion.
     """
     if not args:
-        return c("Usage: delete <ref> [--force]", Colors.RED)
+        return bad_args("Usage: delete <ref> [--force]")
 
     force = "--force" in args or "-f" in args
     ref_arg = [a for a in args if not a.startswith("-")][0]
@@ -3396,12 +3532,12 @@ def cmd_delete(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path], 
             if confirm not in ("y", "yes"):
                 return c("Cancelled", Colors.DIM)
         except ValueError as e:
-            return c(f"Error: {e}", Colors.RED)
+            return fail(f"Error: {e}")
 
     result = ops_trash(ref_arg)
     if result["success"]:
         return c(f"Deleted: {result['todo_id']} → trash/", Colors.YELLOW)
-    return c(f"Error: {result['error']}", Colors.RED)
+    return ops_failed(result)
 
 
 def cmd_purge(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path], interactive: bool = True) -> str:
@@ -3410,7 +3546,7 @@ def cmd_purge(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path], i
     WARNING: This cannot be undone. Use 'delete' for soft delete to trash/.
     """
     if not args:
-        return c("Usage: purge <ref> [--force]", Colors.RED)
+        return bad_args("Usage: purge <ref> [--force]")
     
     force = "--force" in args or "-f" in args
     ref_arg = [a for a in args if not a.startswith("-")][0]
@@ -3431,31 +3567,36 @@ def cmd_purge(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path], i
                 return c("Cancelled - confirmation did not match", Colors.DIM)
         
         shutil.rmtree(str(path))
+        # Red here means DANGER, not failure — the purge SUCCEEDED. Marking it as
+        # a failure made a completed permanent delete exit 1, inviting a
+        # destructive retry of something already done. Semantics, not syntax.
+        # (todo_0740 review)
         return c(f"Purged: {todo_name} (permanently deleted)", Colors.RED)
-    
+
+
     except (ValueError, OSError) as e:
-        return c(f"Error: {e}", Colors.RED)
+        return fail(f"Error: {e}")
 
 
 def cmd_duplicate(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path], interactive: bool = True) -> str:
     """Duplicate a todo. Usage: duplicate <ref> [new_name]"""
     if not args:
-        return c("Usage: duplicate <ref> [new_name]", Colors.RED)
+        return bad_args("Usage: duplicate <ref> [new_name]")
 
     if len(args) > 1:
         new_name = args[1]
     elif interactive:
         new_name = input("New name (without prefix): ").strip()
     else:
-        return c("New name required in non-interactive mode", Colors.RED)
+        return bad_args("New name required in non-interactive mode")
 
     if not new_name:
-        return c("Name required", Colors.YELLOW)
+        return bad_args("Name required")
 
     result = ops_duplicate(args[0], new_name)
     if result["success"]:
         return c(f"Duplicated: {result['message']}", Colors.GREEN)
-    return c(f"Error: {result['error']}", Colors.RED)
+    return ops_failed(result)
 
 
 def cmd_json(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> str:
@@ -4020,17 +4161,26 @@ def cmd_help(args: list[str]) -> str:
         for cmd, help_text in COMMAND_HELP.items():
             if cmd.startswith(topic):
                 return format_help(help_text)
+        # An unrecognised help topic is a caller argument error, not a
+        # silent success. (todo_0740 review 2)
+        mark_failed(2)
         return c(f"No help for: {topic}. Try 'help verbose' for all commands.", Colors.YELLOW)
 
 
 # === REPL ===
 
+
 def run_command(line: str, interactive: bool = True) -> str | None:
     """Parse and run a command, returning output string."""
+    # Reset HERE rather than in main(), so the flag is per-command for every
+    # caller. main() runs one command, but the REPL runs many in one process and
+    # never reset — one failed command would have made every later command in
+    # that session report failure too. (todo_0740 review)
+    reset_exit_code()
     try:
         parts = shlex.split(line)
     except ValueError as e:
-        return c(f"Parse error: {e}", Colors.RED)
+        return bad_args(f"Parse error: {e}")
     
     if not parts:
         return None
@@ -4106,7 +4256,7 @@ def run_command(line: str, interactive: bool = True) -> str | None:
                     _ref_cache["refs"] = None
                     return c(f"Switched to: {CURRENT_ROOT}", Colors.GREEN)
                 except Exception as e:
-                    return c(f"Error: {e}", Colors.RED)
+                    return fail(f"Error: {e}")
             else:
                 return f"Current root: {CURRENT_ROOT}"
         elif cmd == "reload":
@@ -4116,6 +4266,11 @@ def run_command(line: str, interactive: bool = True) -> str | None:
         elif cmd in ("quit", "exit", "q"):
             return None  # Signal to exit
     
+    # An unrecognised command is a caller error (exit 2), not a no-op. It stays
+    # yellow rather than red because the REPL treats it as a hint, so mark the
+    # failure without recolouring — the CLI must not report it as success.
+    # (todo_0740)
+    mark_failed(2)
     return c(f"Unknown command: {cmd}. Try 'help' for options.", Colors.YELLOW)
 
 
@@ -4153,11 +4308,36 @@ def repl() -> None:
             print(result)
 
 
+def _json_leftovers(cmd_args: list[str], positional_name: str | None) -> dict | None:
+    """Reject anything the JSON parser did not consume, BEFORE any mutation.
+
+    JSON mode pops the flags it knows and silently ignored the rest, so
+    `--json create Name extra` and `--json create N --bogus x` both CREATED a todo
+    and exited 0 — the exact partial-read the text path refuses. Same rule, same
+    classification, enforced for both. (todo_0740 review 4)
+    """
+    left = list(cmd_args)
+    if positional_name is not None and left and left[0] == positional_name:
+        left = left[1:]                      # the name was taken positionally
+    if not left:
+        return None
+    unknown = [a for a in left if a.startswith("--")]
+    extra = [a for a in left if not a.startswith("--")]
+    parts = []
+    if unknown:
+        parts.append(f"unrecognised flag(s): {' '.join(unknown)}")
+    if extra:
+        parts.append("unexpected extra argument(s): "
+                     + " ".join(repr(a) for a in extra))
+    return {"success": False, "argument_error": True,
+            "error": "Error: " + "; ".join(parts) + ". Nothing was created."}
+
+
 def run_json_command(args: list[str]) -> None:
     """Run a command in JSON mode — calls ops_* functions and prints JSON to stdout."""
     if not args:
         print(json.dumps({"error": "No command provided"}))
-        sys.exit(1)
+        sys.exit(2)   # missing argument (todo_0740 review)
 
     cmd = args[0].lower()
     cmd_args = args[1:]
@@ -4178,15 +4358,22 @@ def run_json_command(args: list[str]) -> None:
         elif cmd == "create":
             name = _pop_flag(cmd_args, "--name") or (cmd_args[0] if cmd_args else None)
             if not name:
-                result = {"error": "Usage: create --name <name>"}
+                result = {"error": "Usage: create --name <name>", "argument_error": True}
             else:
-                result = ops_create(
+                # Pop every flag we understand FIRST, then refuse anything left
+                # over — before ops_create touches the filesystem.
+                _desc = _pop_flag(cmd_args, "--description") or ""
+                _tags = _pop_flag_list(cmd_args, "--tags")
+                _status = _pop_flag(cmd_args, "--status") or "triaging"
+                _source = _pop_flag(cmd_args, "--source") or "agent"
+                _by = _pop_flag(cmd_args, "--by") or ""
+                result = _json_leftovers(cmd_args, name) or ops_create(
                     name=name,
-                    description=_pop_flag(cmd_args, "--description") or "",
-                    tags=_pop_flag_list(cmd_args, "--tags"),
-                    status=_pop_flag(cmd_args, "--status") or "triaging",
-                    source=_pop_flag(cmd_args, "--source") or "agent",
-                    created_by=_pop_flag(cmd_args, "--by") or "",
+                    description=_desc,
+                    tags=_tags,
+                    status=_status,
+                    source=_source,
+                    created_by=_by,
                 )
         elif cmd == "update":
             identifier = _pop_flag(cmd_args, "--id") or (cmd_args[0] if cmd_args else None)
@@ -4204,12 +4391,15 @@ def run_json_command(args: list[str]) -> None:
                                    "[--status <s>] "
                                    "[--source agent|backfill|manual] [--by <session>]"}
             else:
-                result = ops_create_light(
+                _status = _pop_flag(cmd_args, "--status") or "triaging"
+                _source = _pop_flag(cmd_args, "--source") or "agent"
+                _by = _pop_flag(cmd_args, "--by") or ""
+                result = _json_leftovers(cmd_args, name) or ops_create_light(
                     name=name,
                     summary=note_text,
-                    status=_pop_flag(cmd_args, "--status") or "triaging",
-                    source=_pop_flag(cmd_args, "--source") or "agent",
-                    created_by=_pop_flag(cmd_args, "--by") or "",
+                    status=_status,
+                    source=_source,
+                    created_by=_by,
                 )
         elif cmd == "history":
             identifier = _pop_flag(cmd_args, "--id") or (cmd_args[0] if cmd_args else None)
@@ -4292,6 +4482,25 @@ def run_json_command(args: list[str]) -> None:
             result = {"error": f"Unknown JSON command: {cmd}"}
 
         print(json.dumps(result, indent=2, default=str))
+        # JSON mode had the same defect as the text path: an {"error": ...} or
+        # success=False payload printed fine and the process still exited 0, so
+        # every caller (the workflow MCP server included) read a failure as a
+        # success. The payload is the evidence; this is the indicator. (todo_0740)
+        if isinstance(result, dict):
+            failed = (bool(result.get("error"))
+                      or result.get("success") is False
+                      or result.get("valid") is False)
+            if failed:
+                # Same classification as text mode, and stated the same way rather
+                # than sniffed: an argument problem is 2 wherever it happens. An
+                # unknown command was exiting 1 here and 2 in text mode for the
+                # identical mistake. (todo_0740 review 2)
+                err = str(result.get("error", ""))
+                argument_error = (result.get("argument_error") is True
+                                  or err.lstrip().startswith("Usage:")
+                                  or err.startswith("Unknown JSON command:")
+                                  or err.startswith("No command provided"))
+                sys.exit(2 if argument_error else 1)
     except Exception as e:
         print(json.dumps({"error": str(e)}))
         sys.exit(1)
@@ -4332,11 +4541,11 @@ def main() -> None:
                     set_current_root(Path(args[i + 1]))
                 except Exception as e:
                     print(c(f"Error setting root: {e}", Colors.RED), file=sys.stderr)
-                    sys.exit(1)
+                    sys.exit(2)   # bad argument value (todo_0740 review)
                 args = args[:i] + args[i+2:]
             else:
                 print(c("Missing value for --root", Colors.RED), file=sys.stderr)
-                sys.exit(1)
+                sys.exit(2)   # missing argument value (todo_0740 review)
         elif args[i] == "--json":
             json_mode = True
             args = args[:i] + args[i+1:]
@@ -4365,10 +4574,16 @@ def main() -> None:
 
     # Otherwise, run single command (CLI mode)
     command_line = " ".join(shlex.quote(a) for a in args)
+    reset_exit_code()
     result = run_command(command_line, interactive=False)
 
     if result:
-        print(result)
+        # Errors belong on stderr so a caller can separate them from output
+        # (scripts/DESIGN.md: the log is the evidence channel, the exit code the
+        # indicator). Both are required; neither substitutes for the other.
+        print(result, file=sys.stderr if current_exit_code() else sys.stdout)
+
+    sys.exit(current_exit_code())
 
 
 if __name__ == "__main__":
