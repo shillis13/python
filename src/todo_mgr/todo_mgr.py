@@ -2303,6 +2303,14 @@ def cmd_create_light(args: list[str], todos: dict[Path, Todo], refs: dict[str, P
         return c("Usage: create-light <name> [--summary <s>] [--status <s>] "
                  "[--source agent|backfill|manual]", Colors.RED)
     name = args[0]
+    # Same positional-name guard as `create`: a flag is never a name. Without it
+    # `create-light --title "Real Title"` silently makes a todo called "--title".
+    # (todo_0739)
+    if name.startswith("--"):
+        return c(f"Error: the first argument must be the todo NAME, but got the "
+                 f"flag '{name}'. The name is positional and there is no --title "
+                 f"option:\n  create-light \"My Todo Title\" [--summary <s>]",
+                 Colors.RED)
     rest = list(args[1:])
     summary = _pop_flag(rest, "--summary") or ""
     status = _pop_flag(rest, "--status") or "triaging"
@@ -2311,7 +2319,15 @@ def cmd_create_light(args: list[str], todos: dict[Path, Todo], refs: dict[str, P
     result = ops_create_light(name=name, summary=summary, status=status,
                               source=source, created_by=created_by)
     if result["success"]:
-        return c(f"✓ {result['message']}", Colors.GREEN)
+        lines = [c(f"✓ {result['message']}", Colors.GREEN)]
+        # Anything left after the known flags were popped was dropped — say so,
+        # rather than repeat the silence that lost todo_0604/0674's titles.
+        if rest:
+            dropped = " ".join(repr(a) for a in rest)
+            lines.append(c(f"  ⚠ Ignored extra arguments: {dropped} — the name is "
+                           f"a SINGLE argument; quote it if it contains spaces.",
+                           Colors.YELLOW))
+        return "\n".join(lines)
     return c(f"Error: {result['error']}", Colors.RED)
 
 
@@ -2766,12 +2782,25 @@ def cmd_create(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path], 
         return create_todo_interactive()
     
     name = args[0]
+    # The name is POSITIONAL and there is no --title option. A caller writing
+    # `create --title "Real Title"` used to get a todo literally named "--title"
+    # (slug "title") while the real title landed in a trailing positional that the
+    # loop below dropped through a bare `else` — silently, even though unknown
+    # --flags were reported. The title was never stored anywhere and create still
+    # reported success; todo_0604 and todo_0674 lost their titles that way.
+    # Refuse rather than invent a name out of a flag. (todo_0739)
+    if name.startswith("--"):
+        return c(f"Error: the first argument must be the todo NAME, but got the "
+                 f"flag '{name}'. The name is positional and there is no --title "
+                 f"option:\n  create \"My Todo Title\" [--status <s>] [--tags a,b]",
+                 Colors.RED)
     parent = "."
     status = "triaging"
     tags = []
     flags = []
     description = ""
     unknown = []
+    extra_positionals = []
 
     # Parse optional args
     i = 1
@@ -2795,6 +2824,10 @@ def cmd_create(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path], 
             unknown.append(args[i])
             i += 1
         else:
+            # A leftover positional is dropped, so say so. Staying silent here is
+            # what turned a mistyped title into data loss: unknown --flags were
+            # reported but stray text was not, and that asymmetry hid it. (todo_0739)
+            extra_positionals.append(args[i])
             i += 1
 
     result = ops_create(name=name, parent=parent, status=status,
@@ -2803,6 +2836,11 @@ def cmd_create(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path], 
         lines = [c(f"✓ {result['message']}", Colors.GREEN)]
         if unknown:
             lines.append(c(f"  ⚠ Ignored unknown flags: {' '.join(unknown)}", Colors.YELLOW))
+        if extra_positionals:
+            dropped = " ".join(repr(a) for a in extra_positionals)
+            lines.append(c(f"  ⚠ Ignored extra text: {dropped} — the name is a "
+                           f"SINGLE argument; quote it if it contains spaces.",
+                           Colors.YELLOW))
         v = result.get("verification", {})
         if v.get("verified"):
             lines.append(c("  ✓ Verified: all fields match", Colors.DIM))
