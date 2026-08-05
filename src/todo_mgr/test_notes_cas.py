@@ -127,28 +127,61 @@ class TwoProcesses(unittest.TestCase):
                                 text=True, env={**os.environ, "PYTHONPATH": PY_SRC})
 
     def test_the_lock_actually_blocks_another_process(self):
-        """Deterministic proof that the lock is exclusive ACROSS processes.
+        """Deterministic cross-process exclusion — a yes/no observation, no clock.
 
-        The racing test below can pass by luck of scheduling; this one cannot.
-        A holds the lock for 0.8s and B measures how long it waits to get it.
+        Two earlier versions measured how LONG a second process waited. The first
+        timed from a sequential spawn, so interpreter startup ate the window (the
+        companion port-lock test failed that way on a loaded host at 0.116s, which
+        reads as a broken flock when the instrument was broken). The second added
+        a READY handshake, which only shrank the window: a waiter descheduled just
+        after READY can resume once the holder has been released and acquire a free
+        lock, failing a CORRECT implementation.
+
+        No duration decides anything here. The waiter calls the real production
+        `notes_lock` with `fcntl.flock` wrapped to add `LOCK_NB`, so contention
+        raises `BlockingIOError` immediately: either the lock was held against it
+        or it was not.
         """
-        holder = self._run("""
-            with notes_lock(d):
-                print("HELD", flush=True)
-                time.sleep(0.8)
-        """)
+        preamble = ("import sys,time\n"
+                    "sys.path.insert(0, %r)\n"
+                    "sys.path.insert(0, %r)\n"
+                    "from todo_mgr import notes_lock\n"
+                    "from pathlib import Path\n"
+                    "d = Path(%r)\n") % (PY_SRC, HERE, str(self.dir))
+        env = {**os.environ, "PYTHONPATH": PY_SRC}
+
+        holder = subprocess.Popen(
+            [sys.executable, "-c", preamble +
+             "with notes_lock(d):\n"
+             "    print('HELD', flush=True)\n"
+             "    sys.stdin.readline()\n"],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, text=True, env=env)
+        self.addCleanup(holder.kill)
         self.assertEqual(holder.stdout.readline().strip(), "HELD")
-        waiter = self._run("""
-            t = time.monotonic()
-            with notes_lock(d):
-                pass
-            print("%.3f" % (time.monotonic() - t))
-        """)
-        waited = float(waiter.communicate()[0].strip())
-        holder.wait()
-        self.assertGreater(waited, 0.4,
-                           "the second process took the lock immediately (%.3fs) — "
-                           "it is not exclusive" % waited)
+
+        waiter = subprocess.Popen(
+            [sys.executable, "-c", preamble +
+             "import fcntl\n"
+             "_real = fcntl.flock\n"
+             "fcntl.flock = lambda fd, op: _real(fd, op | fcntl.LOCK_NB)\n"
+             "try:\n"
+             "    with notes_lock(d):\n"
+             "        print('ENTERED', flush=True)\n"
+             "except BlockingIOError:\n"
+             "    print('BLOCKED', flush=True)\n"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
+        self.addCleanup(waiter.kill)
+        verdict = waiter.stdout.readline().strip()
+
+        holder.stdin.write("go\n")            # only now may the holder let go
+        holder.stdin.flush()
+        _o, werr = waiter.communicate(timeout=30)
+        holder.wait(timeout=30)
+
+        self.assertEqual(verdict, "BLOCKED",
+                         "a second process entered the lock while another held it "
+                         "(waiter said %r; stderr: %s)" % (verdict, werr[-300:]))
 
     def test_racing_writers_never_both_win(self):
         """Both processes start together, no staggering, repeated.
