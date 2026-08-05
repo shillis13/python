@@ -21,7 +21,10 @@ Examples:
 from __future__ import annotations
 
 import atexit
+import contextlib
+import fcntl
 import fnmatch
+import hashlib
 import json
 import os
 import re
@@ -30,6 +33,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import threading
 import uuid
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -1810,6 +1814,8 @@ def ops_update(
         if not notes_path.exists():
             return {"success": False, "error": f"No notes.md found at {target}"}
 
+        # update_notes_section takes the lock itself — the rule lives at the
+        # primitive so no caller can route around it.
         update_notes_section(notes_path, section, content)
 
         return {
@@ -2051,12 +2057,17 @@ def ops_duplicate(identifier: str, new_name: str) -> dict:
         # Update notes.md
         notes_path = new_dir / "notes.md"
         if notes_path.exists():
-            text = notes_path.read_text()
-            today = datetime.now().strftime("%Y-%m-%d")
-            text = text.replace(path.name, new_name, 1)
-            text = re.sub(r'\*\*Created:\*\* .+', f'**Created:** {today}', text)
-            text = re.sub(r'\*\*Updated:\*\* .+', f'**Updated:** {today}', text)
-            notes_path.write_text(text)
+            # Whole read-modify-write under the lock. This one writes into a dir
+            # that was just created, so nothing else can hold it — but locking
+            # only the write is the shape that caused the migrate bug, and it is
+            # not worth leaving around to be copied.
+            with notes_lock(notes_path.parent):
+                text = notes_path.read_text()
+                today = datetime.now().strftime("%Y-%m-%d")
+                text = text.replace(path.name, new_name, 1)
+                text = re.sub(r'\*\*Created:\*\* .+', f'**Created:** {today}', text)
+                text = re.sub(r'\*\*Updated:\*\* .+', f'**Updated:** {today}', text)
+                notes_path.write_text(text)
 
         run_script("set_status", "triaging", str(new_dir), quiet=True)
 
@@ -2726,7 +2737,30 @@ def cmd_migrate(args: list[str], todos: dict[Path, Todo],
             lines.append(c("    --- AFTER ---", Colors.DIM))
             lines.append(indent(new.strip(), "    "))
         else:
-            notes_path.write_text(new)
+            # Re-read and re-derive INSIDE the lock. `old` was read before the
+            # origin backfill ran, so a sibling writer (append_note, set-notes,
+            # an interactive edit) can land in between — and writing a transform
+            # of stale text erases them. Review reproduced exactly that: a
+            # concurrent append vanished under a migrate that had already read.
+            with notes_lock(notes_path.parent):
+                current = notes_path.read_text()
+                fresh, fresh_changed = migrate_notes_content(current)
+                if not fresh_changed:
+                    skipped += 1
+                    lines.append(c(f"  skip {name}: changed under us, already "
+                                   f"structured", Colors.DIM))
+                    continue
+                still_missing = [b for b in _migrate_real_bodies(current)
+                                 if b not in fresh]
+                if still_missing:
+                    errors += 1
+                    flagged.append(f"{name}: content-preservation check failed on "
+                                   f"re-read ({len(still_missing)} block(s) missing) "
+                                   f"— manual review")
+                    lines.append(c(f"  FLAG {name}: preservation check failed on "
+                                   f"re-read, skipped", Colors.RED))
+                    continue
+                notes_path.write_text(fresh)
             migrated += 1
             lines.append(c(f"  migrated {name}", Colors.GREEN)
                          + (f"  [{origin_note}]" if origin_note else ""))
@@ -2750,9 +2784,183 @@ def cmd_migrate(args: list[str], todos: dict[Path, Todo],
     return "\n".join(lines)
 
 
+# === notes.md compare-and-swap (todo_0768) ===
+#
+# set-notes replaces the WHOLE file. Without a condition, a writer that read the
+# file, thought about it, and wrote it back erases anything that landed in
+# between — and that is not hypothetical: the UAI todo editor reads notes.md,
+# splices one section in the renderer, and writes the whole file back in a
+# separate call, so a concurrent edit was silently lost with no error.
+#
+# The guard is a compare-and-swap, and it has to live HERE rather than in a
+# caller: a caller can only check-then-write, which leaves a window between the
+# check and the write. Holding the lock across read-hash / compare / replace is
+# what makes it a decision no other todo_mgr process can slip past.
+
+# EVERY authority-owned writer of notes.md takes this lock. That is not a style
+# preference: a compare-and-swap only means something if the writes it is racing
+# against are serialised by the same rule. An earlier version of this comment
+# claimed the other writers could not collide, and that was simply false —
+# append_note (used by `link` and `edit`), update_notes_field, update_notes_section
+# and the migration rewrite all mutate EXISTING todos, and review reproduced real
+# data loss by appending while a CAS held the lock.
+#
+# The one bypass that remains, stated rather than hidden: the interactive
+# `edit … open` path hands notes.md to $EDITOR. The lock is held for the duration
+# of that edit, so a concurrent agent write blocks until the human is done — which
+# is the correct trade, but it CAN block for a long time.
+NOTES_CONFLICT = "conflict"
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+
+# flock is per open-file-description, so a second os.open in the SAME process
+# would deadlock against itself. Nested acquisition is real (a caller locks, then
+# calls a primitive that locks), so recursion has to be allowed — but ONLY for the
+# holder. Keying the recursion on the path alone was not reentrancy, it was a
+# bypass: review measured a second THREAD entering in 0.00004s while another held
+# it. A per-path RLock serialises threads; the depth counter under it owns the flock.
+_notes_rlocks: dict[str, threading.RLock] = {}
+_notes_rlocks_guard = threading.Lock()
+_notes_locks: dict[str, list] = {}
+# Bumped by the at-fork handler. A context entered before a fork carries the
+# generation it was entered in; in the child that no longer matches, and the
+# context must NOT try to release a lock the parent still owns.
+_fork_generation = 0
+
+
+def _notes_rlock(key: str) -> threading.RLock:
+    with _notes_rlocks_guard:
+        rl = _notes_rlocks.get(key)
+        if rl is None:
+            rl = _notes_rlocks[key] = threading.RLock()
+        return rl
+
+
+def notes_sha256(notes_path: Path) -> str:
+    """sha256 of notes.md BYTES, or '' if it does not exist.
+
+    Bytes, not decoded text: a caller that hashed a decoded string would disagree
+    with this over encoding or line endings and reject writes that are fine.
+    """
+    try:
+        return hashlib.sha256(notes_path.read_bytes()).hexdigest()
+    except OSError:
+        return ""
+
+
+def _reset_notes_locks_after_fork():
+    """A fork inherits our lock fds AND the registry that says we hold them.
+
+    The child would then see depth 1, skip the flock entirely, and enter — a
+    second PROCESS inside a boundary that claims to be exclusive. Closing the
+    inherited fds drops the child's reference (the parent's still holds the lock),
+    and clearing the registry makes the child's next acquire open its own fd and
+    block properly. The RLocks are replaced because an inherited RLock looks
+    recursively owned by a thread that does not exist in the child.
+    """
+    global _fork_generation
+    for entry in list(_notes_locks.values()):
+        try:
+            os.close(entry[0])
+        except OSError:
+            pass
+    _notes_locks.clear()
+    _notes_rlocks.clear()
+    globals()["_notes_rlocks_guard"] = threading.Lock()
+    _fork_generation += 1
+
+
+os.register_at_fork(after_in_child=_reset_notes_locks_after_fork)
+
+
+@contextlib.contextmanager
+def notes_lock(todo_path: Path):
+    """Exclusive lock on one todo's notes.md — across PROCESSES and THREADS.
+
+    flock gives cross-process exclusion; the per-path RLock gives cross-thread
+    exclusion and makes recursion belong to the holder rather than to anyone who
+    happens to share the process. The lock file lives beside notes.md and is never
+    deleted — unlinking it would let another process create a fresh inode and lock
+    something nobody else is holding.
+    """
+    key = str(todo_path.resolve())
+    rl = _notes_rlock(key)
+    rl.acquire()                      # same thread recurses; other threads BLOCK
+    gen = _fork_generation
+    try:
+        entry = _notes_locks.get(key)
+        if entry is None:
+            lock_path = todo_path / ".notes.lock"
+            fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o644)
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX)
+            except OSError:
+                os.close(fd)
+                raise
+            _notes_locks[key] = [fd, 1]
+        else:
+            entry[1] += 1
+        try:
+            yield
+        finally:
+            # In a forked CHILD leaving a context its PARENT entered, there is
+            # nothing of ours to release: the registry was cleared at fork and the
+            # parent still holds the flock. Unwinding it here raised KeyError, and
+            # releasing it would release someone else's lock.
+            if _fork_generation == gen:
+                e = _notes_locks.get(key)
+                if e is not None:
+                    e[1] -= 1
+                    if e[1] == 0:
+                        _notes_locks.pop(key, None)
+                        try:
+                            fcntl.flock(e[0], fcntl.LOCK_UN)
+                        finally:
+                            os.close(e[0])
+    finally:
+        if _fork_generation == gen:
+            rl.release()
+
+
+def write_notes_cas(todo_path: Path, content: str, expect: str | None) -> dict:
+    """Replace notes.md, refusing if it no longer hashes to `expect`.
+
+    `expect` is optional so existing callers keep working; when it is None this
+    is the old unconditional replace and the caller owns the race. When it is
+    given, the read-compare-write happens under the lock and the replacement is
+    atomic (tmp + os.replace), so a reader never sees a half-written file.
+    """
+    notes_path = todo_path / "notes.md"
+    if not content.endswith("\n"):
+        content += "\n"
+    with notes_lock(todo_path):
+        if expect is not None:
+            current = notes_sha256(notes_path)
+            if current != expect:
+                return {
+                    "success": False,
+                    "code": NOTES_CONFLICT,
+                    "error": ("notes.md changed on disk since it was read "
+                              "(expected %s, found %s) - nothing was written"
+                              % (expect[:12] or "<missing>", current[:12] or "<missing>")),
+                    "expected": expect,
+                    "actual": current,
+                }
+        tmp = notes_path.with_suffix(".md.tmp")
+        tmp.write_text(content)
+        os.replace(str(tmp), str(notes_path))
+        # Derive the reported revision from the bytes we INSTALLED, not by
+        # re-reading: a re-read after unlock could hash somebody else's write and
+        # report it as the revision this command produced.
+        revision = hashlib.sha256(content.encode("utf-8")).hexdigest()
+    return {"success": True, "todo_id": todo_path.name, "bytes": len(content),
+            "revision": revision}
+
+
 def cmd_set_notes(args: list[str], todos: dict[Path, Todo],
                   refs: dict[str, Path]) -> str:
-    """Replace a todo's whole notes.md. Usage: set-notes <ref> [--content <text>]
+    """Replace a todo's whole notes.md.
+
+    Usage: set-notes <ref> [--content <text>] [--expect-sha256 <hex>]
 
     Without --content, the new body is read from stdin. This routes ALL notes
     writes through todo_mgr (the data authority) so the UI/scripts never write
@@ -2760,7 +2968,8 @@ def cmd_set_notes(args: list[str], todos: dict[Path, Todo],
     """
     positional = [a for a in args if not a.startswith('--')]
     if not positional:
-        return bad_args("Usage: set-notes <ref> [--content <text>]  (else reads stdin)")
+        return bad_args("Usage: set-notes <ref> [--content <text>] "
+                        "[--expect-sha256 <hex>]  (content else read from stdin)")
     content: str | None = None
     if '--content' in args:
         i = args.index('--content')
@@ -2768,16 +2977,37 @@ def cmd_set_notes(args: list[str], todos: dict[Path, Todo],
             content = args[i + 1]
     if content is None:
         content = sys.stdin.read()
+    # The caller's expected revision. When given, the write is a compare-and-swap
+    # under a lock; when absent, behaviour is unchanged for existing callers.
+    #
+    # A MALFORMED flag must never degrade to the unconditional write. `--expect-sha256`
+    # with no value left this None, which silently turned the safety flag into a
+    # destructive whole-file replace — the caller asked for a conditional write and
+    # got the opposite. Same for a value that is not a hash (e.g. the next flag
+    # slurped as the argument).
+    expect: str | None = None
+    if '--expect-sha256' in args:
+        i = args.index('--expect-sha256')
+        if i + 1 >= len(args):
+            return bad_args("set-notes: --expect-sha256 requires a 64-character "
+                            "hex value; refusing to write unconditionally")
+        expect = args[i + 1].strip().lower()
+        if not _SHA256_RE.match(expect):
+            return bad_args("set-notes: --expect-sha256 must be 64 hex characters, "
+                            "got %r; refusing to write unconditionally"
+                            % (args[i + 1][:80],))
     try:
         path = resolve_target(positional[0], todos, refs)
     except ValueError as e:
         return fail(str(e))
-    notes_path = path / 'notes.md'
-    if not content.endswith('\n'):
-        content += '\n'
-    notes_path.write_text(content)
-    return c(f"notes.md replaced ({len(content)} bytes) for {path.name}",
-             Colors.GREEN)
+    result = write_notes_cas(path, content, expect)
+    if not result["success"]:
+        # A conflict is a DISTINCT failure, not a generic error: the app keeps the
+        # user's draft on screen and tells them to reload, which it cannot do if
+        # this is indistinguishable from "todo not found".
+        return fail("%s: %s" % (result.get("code", "error"), result["error"]))
+    return c(f"notes.md replaced ({result['bytes']} bytes) for {path.name} "
+             f"[{result['revision'][:12]}]", Colors.GREEN)
 
 
 def get_next_todo_number() -> int:
@@ -3082,11 +3312,16 @@ def cmd_link(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) ->
 
 
 def append_note(notes_path: Path, note: str) -> None:
-    """Append a timestamped note to notes.md."""
+    """Append a timestamped note to notes.md, under the per-todo lock.
+
+    An append is a mutation like any other. Review reproduced the loss: append
+    while a compare-and-swap held the lock, and the CAS replace erased it.
+    """
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
     entry = f"{timestamp}: {note}\n"
-    with notes_path.open("a") as fh:
-        fh.write(entry)
+    with notes_lock(notes_path.parent):
+        with notes_path.open("a") as fh:
+            fh.write(entry)
 
 
 def cmd_edit(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> str:
@@ -3182,7 +3417,12 @@ def edit_menu(todo: Todo, notes_path: Path) -> str:
             if choice == key or choice == name:
                 if name == "open":
                     editor = os.environ.get("EDITOR", "nano")
-                    subprocess.run([editor, str(notes_path)])
+                    # Hold the per-todo lock for the whole edit: $EDITOR writes
+                    # notes.md directly, so this is the only way that write
+                    # participates in the same serialisation as everything else.
+                    # It CAN block another writer for as long as the human takes.
+                    with notes_lock(todo.path):
+                        subprocess.run([editor, str(notes_path)])
                     print(c("Opened in editor", Colors.GREEN))
                     # Reload todo after editor closes
                     todos = load_todos()
@@ -3419,14 +3659,15 @@ def edit_child(todo: Todo, todos: dict[Path, Todo],
 
 
 def update_notes_field(notes_path: Path, field: str, value: str) -> None:
-    """Update a field in notes.md."""
-    content = notes_path.read_text()
-    
-    if field == "title":
-        # Replace first # heading
-        content = re.sub(r'^# .+$', f'# {value}', content, count=1, flags=re.MULTILINE)
-    
-    notes_path.write_text(content)
+    """Update a field in notes.md. Read-modify-write, so it takes the lock."""
+    with notes_lock(notes_path.parent):
+        content = notes_path.read_text()
+
+        if field == "title":
+            # Replace first # heading
+            content = re.sub(r'^# .+$', f'# {value}', content, count=1, flags=re.MULTILINE)
+
+        notes_path.write_text(content)
 
 
 def update_notes_section(notes_path: Path, section: str, new_content: str) -> None:
@@ -3443,42 +3684,44 @@ def update_notes_section(notes_path: Path, section: str, new_content: str) -> No
         section: Section heading (without leading #'s) to update.
         new_content: New content for the section.
     """
-    lines = notes_path.read_text().splitlines()
+    # Read-modify-write, so it serialises with the CAS (todo_0768).
+    with notes_lock(notes_path.parent):
+        lines = notes_path.read_text().splitlines()
 
-    new_lines: list[str] = []
-    in_section = False
-    section_written = False
-    section_level = 0
-    has_contents = any(l.strip().lower() == "## contents" for l in lines)
+        new_lines: list[str] = []
+        in_section = False
+        section_written = False
+        section_level = 0
+        has_contents = any(l.strip().lower() == "## contents" for l in lines)
 
-    for line in lines:
-        m = re.match(r'^(#{2,3})\s+(.*)$', line.strip())
-        if m and m.group(2).strip() == section and not section_written:
-            new_lines.append(line)
+        for line in lines:
+            m = re.match(r'^(#{2,3})\s+(.*)$', line.strip())
+            if m and m.group(2).strip() == section and not section_written:
+                new_lines.append(line)
+                new_lines.append("")
+                new_lines.append(new_content)
+                new_lines.append("")
+                in_section = True
+                section_written = True
+                section_level = len(m.group(1))
+                continue
+
+            # A heading of same-or-higher level closes the current section.
+            if in_section and m and len(m.group(1)) <= section_level:
+                in_section = False
+
+            if not in_section:
+                new_lines.append(line)
+
+        # If section didn't exist, append it (under Contents when present).
+        if not section_written:
+            new_lines.append("")
+            new_lines.append(f"### {section}" if has_contents else f"## {section}")
             new_lines.append("")
             new_lines.append(new_content)
             new_lines.append("")
-            in_section = True
-            section_written = True
-            section_level = len(m.group(1))
-            continue
 
-        # A heading of same-or-higher level closes the current section.
-        if in_section and m and len(m.group(1)) <= section_level:
-            in_section = False
-
-        if not in_section:
-            new_lines.append(line)
-
-    # If section didn't exist, append it (under Contents when present).
-    if not section_written:
-        new_lines.append("")
-        new_lines.append(f"### {section}" if has_contents else f"## {section}")
-        new_lines.append("")
-        new_lines.append(new_content)
-        new_lines.append("")
-
-    notes_path.write_text("\n".join(new_lines))
+        notes_path.write_text("\n".join(new_lines))
 
 
 def cmd_validate(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> str:
