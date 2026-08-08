@@ -1316,6 +1316,236 @@ def ops_history(identifier: str) -> dict:
     return {"success": True, "todo_id": path.name, "history": read_history(path)}
 
 
+def _comment_recipients(todo, commenter: str) -> list[str]:
+    """Assignee URIs that should hear about a new comment, minus the commenter.
+
+    Someone does not need to be told about their own comment, and the actor may
+    be either a tracking id or a display name (the UAI app sets TODO_ACTOR, e.g.
+    PianoMan), so compare against both forms.
+    """
+    actor_ids = _identity_aliases(commenter)
+    out: list[str] = []
+    for raw in (getattr(todo, "assigned", None) or []):
+        uri = str(raw).strip()
+        if not uri:
+            continue
+        if actor_ids & _identity_aliases(uri):
+            continue        # the commenter — do not notify someone of their own comment
+        out.append(uri)
+    return out
+
+
+def _identity_aliases(value: str) -> set[str]:
+    """Every form one identity is written in, lowercased, for comparison.
+
+    Self-exclusion must bind to CANONICAL identity, not a raw URI tail. Real
+    assigned.yml holds `uai://session/<tracking_id>`, so comparing the tail to a
+    display name never matched: commenting as Fathom on a todo assigned to
+    Fathom's own tracking id notified Fathom. Equally `PianoMan` never matched
+    `uai://user/piano_man`. So resolve a session id to its display name (and the
+    reverse) and compare the whole alias set. (todo_0738, review 4)
+    """
+    v = str(value or "").strip()
+    if not v:
+        return set()
+    aliases = {v.lower()}
+    tail = v.rsplit("/", 1)[-1].strip() if v.startswith("uai://") else v
+    if tail:
+        aliases.add(tail.lower())
+        # A display name may be written PianoMan / piano_man / Piano Man.
+        aliases.add(tail.lower().replace(" ", "_"))
+        # CamelCase -> snake_case. Registered user ids are snake ('piano_man')
+        # while the actor arrives as a display name ('PianoMan'), and lowercasing
+        # alone gives 'pianoman', which matches neither. Without this, commenting
+        # on a todo assigned to uai://user/piano_man notified the commenter about
+        # their own comment.
+        #
+        # This mapping was originally added for SENDER minting, and I deleted it
+        # along with that vulnerability — but comparison and authentication are
+        # different concerns and only one of them was unsafe. It is used here for
+        # read-only comparison and is NEVER fed into AI_TRACKING_ID: _notify_env
+        # takes a fixed service identity and ignores the actor entirely.
+        # (todo_0799, review 3)
+        aliases.add(_snake(tail))
+    for a in list(aliases):
+        for other in _session_identity_aliases(a):
+            aliases.add(other.lower())
+    return aliases
+
+
+# The sanctioned service identity these notifications are sent as. A system
+# identity is accepted by comms without a live session (lib_identity_resolve:
+# _is_system_identity) and — crucially — it can never be mistaken for a person.
+NOTIFY_SENDER = "system:todo-comment"
+
+
+def _notify_env(actor: str) -> dict:
+    """Environment for the notify subprocess. NEVER derived from the actor.
+
+    An earlier version resolved the actor label into the child's trusted
+    AI_TRACKING_ID so the app could authenticate as PianoMan. That was an
+    IMPERSONATION VECTOR, not authentication: `session`/TODO_ACTOR is a string the
+    caller asserts, so anyone able to run todo_mgr could set TODO_ACTOR=PianoMan
+    and have comms accept the message as the registered user. Looking a name up
+    in the registry proves the name EXISTS; it proves nothing about whether this
+    caller is allowed to speak as it. My own "app-shaped verification" was the
+    reproduction of the exploit. (todo_0738, review 2 — caught by Git Guardian.)
+
+    So the sender is a fixed service identity that cannot be steered by any
+    caller-supplied value, and the commenter is carried as ATTRIBUTION only, in
+    the subject and body. A real session that already owns this process keeps its
+    own authenticated identity — that one was never self-asserted.
+    """
+    env = dict(os.environ)
+    if env.get("AI_TRACKING_ID", "").strip():
+        return env          # a genuine session credential, not a caller's claim
+    env["AI_TRACKING_ID"] = NOTIFY_SENDER
+    return env
+
+
+def _snake(name: str) -> str:
+    """PianoMan -> piano_man. COMPARISON ONLY — never a credential.
+
+    Registered user ids are snake_case; display names are CamelCase. Used solely
+    by _identity_aliases to decide whether two labels are the same person. It
+    must never reach _notify_env: deriving a trusted sender from a caller-supplied
+    label is the impersonation vector that was removed. (todo_0799)
+    """
+    out = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", str(name or "").strip())
+    return out.lower().replace(" ", "_").replace("-", "_")
+
+
+_IDENTITY_ALIAS_CACHE: dict[str, list[str]] = {}
+
+
+def _session_identity_aliases(ident: str) -> list[str]:
+    """A session's other names: tracking id <-> display name. Never raises.
+
+    Asks the AUTHORITATIVE store (session_store.py, the same seam the comms
+    identity resolver uses) rather than reading a file directly. Re-deriving
+    identity here would be a second copy of that boundary, and a second copy
+    reproduces the original's blind spots instead of testing them. Cached per
+    process because a comment resolves the same actor for every assignee.
+    """
+    key = (ident or "").strip().lower()
+    if not key:
+        return []
+    if key in _IDENTITY_ALIAS_CACHE:
+        return _IDENTITY_ALIAS_CACHE[key]
+    out: list[str] = []
+    store = _AI_ROOT / "ai_general" / "scripts" / "session_mgmt" / "session_store.py"
+    try:
+        if store.exists():
+            proc = subprocess.run(
+                [sys.executable, str(store), "search", ident, "--json"],
+                capture_output=True, text=True, timeout=15,
+            )
+            if proc.returncode == 0:
+                for rec in (json.loads(proc.stdout or "[]") or []):
+                    if not isinstance(rec, dict):
+                        continue
+                    tid = str(rec.get("tracking_id") or "").strip()
+                    name = str(rec.get("display_name") or rec.get("name") or "").strip()
+                    if key in (tid.lower(), name.lower()):
+                        out.extend([x for x in (tid, name) if x])
+    except Exception:  # noqa: BLE001 - identity lookup must never break commenting
+        out = []
+    _IDENTITY_ALIAS_CACHE[key] = out
+    return out
+
+
+def _notify_comment(todo_id: str, recipients: list[str], text: str,
+                    commenter: str, comment_id: str) -> dict:
+    """Tell each assignee a comment landed on their todo. Never raises.
+
+    todo_0738: comments notified nobody, so PianoMan used them to REJECT work and
+    the assignee never learned — items sat at In_Progress looking healthy for
+    eight days. Sent at `prompt` urgency because a rejection the owner does not
+    see is the whole defect.
+
+    Shelled out rather than importing the comms package: todo_mgr ships as a
+    portable package (see uai_toolkit/DESIGN.md) and must not hard-depend on
+    ai_general. A missing CLI degrades to "not notified" — REPORTED, never
+    silent, because a notification that quietly fails is the bug we are fixing.
+    """
+    outcome: dict = {"recipients": list(recipients), "sent": [], "failed": []}
+    if not recipients:
+        return outcome
+    cli = _AI_ROOT / "ai_general" / "scripts" / "messages" / "messaging.py"
+    if not cli.exists():
+        outcome["failed"] = [{"to": r, "error": f"messaging CLI not found at {cli}"}
+                             for r in recipients]
+        return outcome
+    who = commenter or "someone"
+    body = (f"New comment on {todo_id} from {who}:\n\n{text}\n\n"
+            f"(comment {comment_id} — read the full thread with: "
+            f"todos-mgr history {todo_id})")
+    for to in recipients:
+        try:
+            # The commenter is named in the SUBJECT and BODY, not via a sender flag:
+            # comms stamps the real calling identity, which is right — a forgeable
+            # sender is worse than an indirect one.
+            #
+            # --reply-to none satisfies the required nullable contract (omitting it
+            # emits a deprecation warning on stderr). --format json because the exit
+            # code CANNOT be trusted here: comms returns 0 while reporting
+            # {"success": false, "error_type": "SenderUnresolved"}, so an rc check
+            # reports a message nobody received as sent — the very defect this todo
+            # exists to remove. Parse stdout JSON first, even on nonzero.
+            # (todo_0738, review 1)
+            proc = subprocess.run(
+                [sys.executable, str(cli), "send", "--to", to,
+                 "--subject", f"Comment on {todo_id} from {who}",
+                 "--urgency", "prompt", "--content", body,
+                 "--reply-to", "none", "--format", "json"],
+                capture_output=True, text=True, timeout=30, env=_notify_env(who),
+            )
+            ok, detail = _parse_send_result(proc)
+            if ok:
+                outcome["sent"].append(to)
+            else:
+                outcome["failed"].append({"to": to, "error": detail})
+        except Exception as e:  # noqa: BLE001 - a failed notify must not lose the comment
+            outcome["failed"].append({"to": to, "error": str(e)[:200]})
+    return outcome
+
+
+def _parse_send_result(proc) -> tuple[bool, str]:
+    """Did comms actually deliver to somebody? (ok, detail)
+
+    Only CONCRETE delivery counts. A send to a team/project endpoint with zero
+    live holders succeeds and delivers to no one, so claiming "notified" from a
+    success flag tells the commenter a person was told when nobody was. Require
+    at least one delivery entry that reports delivered. (todo_0738, review 3)
+    """
+    raw = (proc.stdout or "").strip()
+    payload = None
+    if raw:
+        try:
+            payload = json.loads(raw)
+        except (ValueError, TypeError):
+            payload = None
+    if not isinstance(payload, dict):
+        # No parseable answer — say what we saw rather than assume either way.
+        detail = (raw or (proc.stderr or "").strip() or
+                  f"no output (exit {proc.returncode})")
+        return False, detail[:200]
+    if payload.get("success") is False or payload.get("error"):
+        err = str(payload.get("error") or "send reported failure")
+        etype = payload.get("error_type")
+        return False, (f"{etype}: {err}" if etype else err)[:200]
+    deliveries = payload.get("delivery")
+    if isinstance(deliveries, list):
+        landed = [d for d in deliveries
+                  if isinstance(d, dict) and d.get("delivered")]
+        if not landed:
+            return False, ("accepted but delivered to nobody "
+                           "(no live recipient behind that endpoint)")
+        return True, ""
+    # Delivered-to-whom not reported: do not upgrade silence into a claim.
+    return False, "send gave no delivery detail, so nobody can be confirmed notified"
+
+
 def ops_comment(identifier: str, text: str, session: str = "",
                 reply_to: str = "") -> dict:
     """Append a free-text comment to a todo (optionally as a reply).
@@ -1341,7 +1571,16 @@ def ops_comment(identifier: str, text: str, session: str = "",
     parent = " ".join((reply_to or "").split())
     note = "[{}|{}] {}".format(cid, parent, text)
     append_history(path, "comment", session=session, note=note)
-    return {"success": True, "todo_id": path.name, "comment_id": cid}
+    # Notify the assignee(s). Done HERE, in the single authoritative writer, so
+    # the CLI, the workflow MCP and the UAI app all inherit it — a per-caller
+    # hook is how half the callers end up silently not notifying (todo_0740's
+    # lesson). The comment is already recorded above: a notification failure must
+    # never lose the comment, only be reported. (todo_0738)
+    actor = session or current_session()
+    notify = _notify_comment(path.name, _comment_recipients(todos.get(path), actor),
+                             text, actor, cid)
+    return {"success": True, "todo_id": path.name, "comment_id": cid,
+            "notify": notify}
 
 
 # === Operations Layer ===
@@ -2503,7 +2742,24 @@ def cmd_comment(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path])
     result = ops_comment(ref, text, session, reply_to)
     if not result["success"]:
         return ops_failed(result)
-    return c(f"Comment added to {result['todo_id']} ({result['comment_id']})", Colors.GREEN)
+    lines = [c(f"Comment added to {result['todo_id']} ({result['comment_id']})", Colors.GREEN)]
+    # Say WHO was told, every time. The defect this fixes is a comment that looks
+    # delivered and reaches nobody, so "added" on its own is exactly the reassuring
+    # half-truth to avoid: a rejection nobody was told about must not read as done.
+    # (todo_0738)
+    n = result.get("notify") or {}
+    if n.get("sent"):
+        lines.append(c(f"  → notified: {', '.join(n['sent'])}", Colors.DIM))
+    if n.get("failed"):
+        for f in n["failed"]:
+            lines.append(c(f"  ⚠ NOT notified: {f['to']} — {f['error']}", Colors.YELLOW))
+        lines.append(c("  The comment was saved, but the assignee was not told. "
+                       "Tell them directly.", Colors.YELLOW))
+    if not n.get("recipients"):
+        lines.append(c("  ⚠ Nobody was notified — this todo has no assignee "
+                       "(or you are its only assignee). If this was a rejection, "
+                       "assign it or tell them directly.", Colors.YELLOW))
+    return "\n".join(lines)
 
 
 # === notes.md convention migration (todo_0381) ===
