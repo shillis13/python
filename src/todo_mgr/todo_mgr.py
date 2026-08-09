@@ -55,7 +55,17 @@ DEFAULT_APPLESCRIPT = APPLE_SCRIPT_DIR / "todo_mgr_demo.applescript"
 # layouts; when it's unset (e.g. MCP servers don't inherit it) we fall back to
 # the AI_ROOT-derived location.
 _AI_ROOT = Path(os.environ.get("AI_ROOT") or (Path.home() / "AI" / "ai_root"))
-_FALLBACK_ROOT = _AI_ROOT / "ai_general" / "work" / "todos"
+def _canonical_todo_root(ai_root: "Path | None" = None) -> "Path":
+    """The canonical todo store for an AI_ROOT.
+
+    ONE definition, called both at import (below) and at notification time
+    (_notify_root_ok), so a caller that patches _AI_ROOT moves the boundary with
+    it instead of leaving the guard comparing against a stale import-time value.
+    """
+    return (ai_root or _AI_ROOT) / "ai_general" / "work" / "todos"
+
+
+_FALLBACK_ROOT = _canonical_todo_root()
 DEFAULT_ROOT = Path(os.environ.get("TODO_ROOT") or _FALLBACK_ROOT).resolve()
 CURRENT_ROOT = DEFAULT_ROOT
 
@@ -1454,6 +1464,43 @@ def _session_identity_aliases(ident: str) -> list[str]:
     return out
 
 
+def _notify_root_ok() -> tuple[bool, str]:
+    """Whether this run's todo store is the canonical one, so notifications may leave.
+
+    todo_0798: a test fixture root sent 20 real prompt-urgency messages into a live
+    session's inbox in 26 minutes. The DATA isolation was correct — TODO_ROOT and
+    --root both redirected every read and write into the fixture. Nothing isolated
+    the SIDE EFFECT: _notify_comment resolves the messaging CLI from _AI_ROOT, which
+    is independent of the todo root, so a comment written into /tmp notified a real
+    person. The recipient could not filter it: the sender identity varied and the
+    body was indistinguishable from real traffic, so their only defence was muting
+    the entire fleet.
+
+    Keyed on CURRENT_ROOT — the root this run is ACTUALLY using, after both the
+    import-time environment selection and any --root / REPL override. Keying on the
+    TODO_ROOT environment variable alone would have missed the observed harness
+    path, which used --root.
+
+    Compared against _canonical_todo_root(), the single definition that also
+    produces _FALLBACK_ROOT at import, rather than
+    a second spelling of the same path that could drift from it. NOT against
+    DEFAULT_ROOT: an environment override makes DEFAULT_ROOT the fixture itself, so
+    the fixture would become its own authority and the defect would reopen.
+
+    This is an accidental-side-effect policy, not an authentication boundary — code
+    that can run arbitrary Python can invoke comms directly. It stops a test from
+    waking a colleague, which is what actually happened.
+    """
+    try:
+        root = Path(CURRENT_ROOT).resolve()
+        real = _canonical_todo_root().resolve()
+    except OSError as e:
+        return False, f"could not resolve the todo root: {e}"
+    if root == real or real in root.parents:
+        return True, ""
+    return False, f"todo root {root} is outside the canonical store {real}"
+
+
 def _notify_comment(todo_id: str, recipients: list[str], text: str,
                     commenter: str, comment_id: str) -> dict:
     """Tell each assignee a comment landed on their todo. Never raises.
@@ -1470,6 +1517,14 @@ def _notify_comment(todo_id: str, recipients: list[str], text: str,
     """
     outcome: dict = {"recipients": list(recipients), "sent": [], "failed": []}
     if not recipients:
+        return outcome
+    # A fixture store must not be able to message live sessions (todo_0798).
+    # REPORTED per recipient, never silent: the comment is already written, and
+    # "saved but nobody told" is exactly the contract todo_0738 established.
+    root_ok, why = _notify_root_ok()
+    if not root_ok:
+        outcome["failed"] = [{"to": r, "error": f"not notified: {why}"}
+                             for r in recipients]
         return outcome
     cli = _AI_ROOT / "ai_general" / "scripts" / "messages" / "messaging.py"
     if not cli.exists():

@@ -118,12 +118,19 @@ class NotifyFailureTests(unittest.TestCase):
         original = tm._AI_ROOT
         try:
             tm._AI_ROOT = Path(tempfile.mkdtemp(prefix="t0738_noroot_"))
+            # Reach the missing-CLI branch: the root guard (todo_0798) runs first
+            # and would otherwise refuse before the CLI is ever looked for. Point
+            # CURRENT_ROOT at this fake AI_ROOT's canonical store so the ONLY thing
+            # wrong is the absent messaging.py, which is what this test is about.
+            original_root = tm.CURRENT_ROOT
+            tm.CURRENT_ROOT = tm._canonical_todo_root()
             out = tm._notify_comment("todo_0001", [f"uai://session/{OTHER}"],
                                      "text", "PianoMan", "abc123")
             self.assertEqual(out["sent"], [])
             self.assertEqual(len(out["failed"]), 1)
             self.assertIn("not found", out["failed"][0]["error"])
         finally:
+            tm.CURRENT_ROOT = original_root
             shutil.rmtree(tm._AI_ROOT, ignore_errors=True)
             tm._AI_ROOT = original
 
@@ -175,6 +182,39 @@ class SendResultParsingTests(unittest.TestCase):
         self.assertTrue(ok, "structured stdout must win over a stderr warning")
 
 
+
+# ── hermetic notification environment (todo_0798) ─────────────────────────────
+# The two tests below used `--root <tmp fixture>` with AI_ROOT pointing at the
+# REAL ai_root, so every run executed the real messaging CLI and delivered a real
+# prompt-urgency message to OTHER — a live session. That produced 20 real
+# interruptions on 2026-08-07 before it was traced.
+#
+# They now run against a fake AI_ROOT with its own canonical todo tree and a
+# recording messaging.py. The assertions are unchanged; only the blast radius is.
+# Deliberately NOT "fixed" by pointing them at the live canonical store, which
+# would trade a live inbox mutation for a live todo mutation.
+_FAKE_CLI = """#!/usr/bin/env python3
+import json, os, sys
+from pathlib import Path
+Path(os.environ["T0798_SENTINEL"]).open("a").write(json.dumps(sys.argv[1:]) + "\\n")
+print(json.dumps({"success": True, "message_id": "fake",
+                  "delivery": [{"to": sys.argv[sys.argv.index("--to") + 1]
+                                if "--to" in sys.argv else "unknown",
+                                "delivered": True, "mode": "fake"}]}))
+"""
+
+
+def _hermetic_ai_root(tmp: Path) -> tuple[Path, Path, Path]:
+    """Return (ai_root, canonical_todos, sentinel) for a self-contained run."""
+    ai_root = tmp / "ai_root"
+    canonical = ai_root / "ai_general" / "work" / "todos"
+    canonical.mkdir(parents=True, exist_ok=True)
+    cli_dir = ai_root / "ai_general" / "scripts" / "messages"
+    cli_dir.mkdir(parents=True, exist_ok=True)
+    (cli_dir / "messaging.py").write_text(_FAKE_CLI)
+    return ai_root, canonical, tmp / "messaging_invoked.log"
+
+
 class CommentCliTests(unittest.TestCase):
     """End-to-end through the real CLI."""
 
@@ -211,15 +251,16 @@ class CommentCliTests(unittest.TestCase):
         rather than deleted: the no-false-success intent it protected lives on in
         test_unresolvable_actor_reports_not_notified below.
         """
-        self.todo("create", "Work")
-        self.todo("assign", "todo_0001", f"uai://session/{OTHER}")
+        ai_root, canonical, sentinel = _hermetic_ai_root(self.root)
         env = {"PYTHONPATH": str(PYLIB), "PATH": "/usr/bin:/bin",
-               "HOME": str(Path.home()), "TODO_ACTOR": "PianoMan",
-               "AI_ROOT": os.environ.get("AI_ROOT", str(Path.home() / "AI/ai_root"))}
-        r = subprocess.run(
-            [sys.executable, str(SCRIPT), "--root", str(self.root),
-             "comment", "todo_0001", "--text", "sending this back"],
+               "HOME": str(self.root), "TODO_ACTOR": "PianoMan",
+               "AI_ROOT": str(ai_root), "T0798_SENTINEL": str(sentinel)}
+        run = lambda *a: subprocess.run(
+            [sys.executable, str(SCRIPT), "--root", str(canonical), *a],
             capture_output=True, text=True, env=env)
+        run("create", "Work")
+        run("assign", "todo_0001", f"uai://session/{OTHER}")
+        r = run("comment", "todo_0001", "--text", "sending this back")
         out = r.stdout + r.stderr
         self.assertIn("Comment added", out)
         self.assertIn("notified", out)
@@ -237,15 +278,16 @@ class CommentCliTests(unittest.TestCase):
         was protecting is covered by the zero-holder, SenderUnresolved and
         missing-CLI cases, which test the delivery evidence itself.
         """
-        self.todo("create", "Work")
-        self.todo("assign", "todo_0001", f"uai://session/{OTHER}")
+        ai_root, canonical, sentinel = _hermetic_ai_root(self.root)
         env = {"PYTHONPATH": str(PYLIB), "PATH": "/usr/bin:/bin",
-               "HOME": str(Path.home()), "TODO_ACTOR": "NotARealPerson12345",
-               "AI_ROOT": os.environ.get("AI_ROOT", str(Path.home() / "AI/ai_root"))}
-        r = subprocess.run(
-            [sys.executable, str(SCRIPT), "--root", str(self.root),
-             "comment", "todo_0001", "--text", "x"],
+               "HOME": str(self.root), "TODO_ACTOR": "NotARealPerson12345",
+               "AI_ROOT": str(ai_root), "T0798_SENTINEL": str(sentinel)}
+        run = lambda *a: subprocess.run(
+            [sys.executable, str(SCRIPT), "--root", str(canonical), *a],
             capture_output=True, text=True, env=env)
+        run("create", "Work")
+        run("assign", "todo_0001", f"uai://session/{OTHER}")
+        r = run("comment", "todo_0001", "--text", "x")
         out = r.stdout + r.stderr
         self.assertIn("Comment added", out)
         self.assertIn("notified", out)
