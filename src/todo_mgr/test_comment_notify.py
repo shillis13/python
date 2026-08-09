@@ -31,8 +31,22 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(PYLIB))
 import todo_mgr as tm  # noqa: E402
 
+# ME is real ON PURPOSE and stays: the display-name test below asserts that
+# "Fathom" resolves to this tracking id through the authoritative store, which is
+# the whole point of that case — a fake id would make it vacuous. It is my own
+# session, and it is never used as a notification RECIPIENT here. Only
+# recipient-selection / environment-construction assertions reference it; none
+# invokes _notify_comment or the messaging CLI, so no message is addressed to it.
 ME = "20260702_133334_a1f1f89d_cla"
-OTHER = "20260610_003447_a91cb496_cla"
+
+# OTHER is the fixture's stand-in recipient, so it MUST NOT be a live session.
+# It used to be Anvil's real tracking id: between 19:39 and 20:05 on 2026-08-07
+# these tests delivered 20 real prompt-urgency messages into his inbox, and he
+# spent time believing a fix of his own had regressed before tracing them here.
+# Anvil closed the code path (todo_0798, a fixture root can no longer notify);
+# this removes the live identifier itself, because a real id sitting in a
+# throwaway fixture is a hazard broader than the one path that was closed.
+OTHER = "00000000_000000_dead_tst"
 
 
 class CommentRecipientTests(unittest.TestCase):
@@ -301,8 +315,12 @@ class CommentCliTests(unittest.TestCase):
     # called an app-shaped verification WAS the exploit reproduction — it asserted
     # the vulnerable behaviour and passed. (review 2, found by Git Guardian)
 
+    # Keeps its teeth without a live session id: "piano_man" and
+    # "uai://user/piano_man" ARE registered and resolvable, so this still proves
+    # the sender cannot be steered by a genuinely valid identity — not merely by
+    # one that fails to resolve.
     FORGERY_ATTEMPTS = ["PianoMan", "piano_man", "uai://user/piano_man", "Fathom",
-                        "20260610_003447_a91cb496_cla", "system:something-else"]
+                        OTHER, "system:something-else"]
 
     def test_no_caller_supplied_actor_can_become_the_sender(self):
         prev = os.environ.pop("AI_TRACKING_ID", None)
