@@ -2319,6 +2319,20 @@ def ops_move(identifier: str, new_parent: str) -> dict:
             new_parent_path = resolve_target(new_parent, todos, refs)
 
         dest = new_parent_path / source.name
+
+        # Re-parenting an item onto the parent it ALREADY has is a no-op, not a failure.
+        # It reported "Destination already exists", which reads like a name collision with
+        # a DIFFERENT todo, so the message named the item's own home as an obstacle
+        # (todo_0785, reported by PianoMan). Compare resolved paths: `source` and `dest`
+        # are both built from CURRENT_ROOT, and samefile() would raise on a missing dest.
+        if dest.resolve() == source.resolve():
+            return {
+                "success": True,
+                "todo_id": source.name,
+                "new_location": str(source.relative_to(CURRENT_ROOT)),
+                "unchanged": True,
+            }
+
         if dest.exists():
             return {"success": False, "error": f"Destination already exists: {dest.relative_to(CURRENT_ROOT)}"}
 
