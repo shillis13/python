@@ -65,9 +65,28 @@ def test_a_REAL_collision_still_fails(tree):
     """
     import shutil; shutil.copytree(tree / "todo_0001_parent" / "todo_0003_child",
                                   tree / "todo_0002_other" / "todo_0003_child")
-    res = tm.ops_move("todo_0003", "todo_0002")
+    # SOURCE NAMED BY ITS FULL DIRECTORY, not the bare id. Placing a second todo_0003 in the
+    # tree is exactly the duplicate-id condition, so a BARE id now refuses as ambiguous
+    # before reaching this check (todo_0952) — correctly, since with two todo_0003 on disk
+    # "move todo_0003" genuinely does not name one. The destination-collision guard this
+    # test exists for is still reachable, and still required, via an unambiguous source.
+    res = tm.ops_move("todo_0003_child", "todo_0002")
     assert res["success"] is False
     assert "already exists" in res["error"]
+
+
+def test_an_ambiguous_source_refuses_BEFORE_the_collision_check(tree):
+    """The interaction, pinned: a duplicated id must not reach the collision message.
+
+    "already exists" names the DESTINATION as the problem. When the id itself is
+    duplicated, that sends the reader to the wrong place — the problem is that their
+    token does not identify one todo.
+    """
+    import shutil; shutil.copytree(tree / "todo_0001_parent" / "todo_0003_child",
+                                  tree / "todo_0002_other" / "todo_0003_child")
+    res = tm.ops_move("todo_0003", "todo_0002")
+    assert res["success"] is False
+    assert "ambiguous" in res["error"].lower(), res["error"]
 
 
 def test_a_genuine_move_still_moves(tree):

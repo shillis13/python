@@ -973,12 +973,35 @@ def resolve_target(token: str, todos: dict[Path, Todo], refs: dict[str, Path]) -
         if m:
             num_str = m.group(1).zfill(4)
     if num_str is not None:
+        # COLLECT, then decide. This used to `return path` on the first hit in dict
+        # iteration order, which is a SILENT PICK when an id is duplicated — and ids DO
+        # duplicate: 12 of 950 in the live store, because a hand-created todo directory
+        # never consults the allocator. Noctis was assigned "todo_0937", resolved it, and
+        # got a DIFFERENT session's active work; accepting it the obvious way would have
+        # silently taken that work over, with nothing warning either of them.
+        #
+        # A bare canonical id is a claim of uniqueness. When the store cannot honour that
+        # claim the honest answer is to refuse and name the candidates, not to pick one and
+        # look confident. A silent wrong answer is worse than an error because the caller
+        # has no way to notice it.
+        id_matches = []
         for path in todos:
             name = path.name
             # Exact bare-number dir (todo_0038) or slugged dir (todo_0038_*).
             if (name == f"todo_{num_str}" or name == f"task_{num_str}"
                     or name.startswith(f"todo_{num_str}_") or name.startswith(f"task_{num_str}_")):
-                return path
+                id_matches.append(path)
+        if len(id_matches) == 1:
+            return id_matches[0]
+        if len(id_matches) > 1:
+            try:
+                shown = sorted(str(p.relative_to(CURRENT_ROOT)) for p in id_matches)
+            except ValueError:
+                shown = sorted(str(p) for p in id_matches)
+            raise ValueError(
+                "ambiguous: %r matches %d todos. Pass a full directory name or path:\n  %s"
+                % (token, len(id_matches), "\n  ".join(shown))
+            )
     
     # 7. Try partial/substring match on directory name
     token_lower = token.lower()
