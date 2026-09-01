@@ -80,6 +80,11 @@ def build_parser() -> argparse.ArgumentParser:
     go_parser = subparsers.add_parser("go", help="Navigate to a bookmark, path, or history entry")
     go_parser.add_argument("selector", help="Keyword, index, directory path, or #N for history entry N")
 
+    resolve_parser = subparsers.add_parser(
+        "resolve", help="Resolve one exact bookmark keyword without path fallback"
+    )
+    resolve_parser.add_argument("key", help="Exact bookmark keyword")
+
     back_parser = subparsers.add_parser("back", help="Go back N steps in navigation history")
     back_parser.add_argument("steps", nargs="?", type=int, default=1, help="Number of steps (default: 1)")
 
@@ -152,7 +157,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             argv_list = ["fwd", arg[1:]]
 
     # Check if first argument is not a recognized command and not a flag
-    valid_commands = {"list", "add", "edit", "repath", "rename", "rm", "clear", "go", "back", "fwd", "hist",
+    valid_commands = {"list", "add", "edit", "repath", "rename", "rm", "clear", "go", "resolve", "back", "fwd", "hist",
                       "env", "save", "load", "import", "pick", "record", "doctor", "init", "help"}
 
     if argv_list and not argv_list[0].startswith("-") and argv_list[0] not in valid_commands:
@@ -196,6 +201,8 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             return cmd_clear(store, args.yes)
         if args.command == "go":
             return cmd_go(store, history, args.selector)
+        if args.command == "resolve":
+            return cmd_resolve(store, args.key)
         if args.command == "back":
             return cmd_back(history, args.steps)
         if args.command == "fwd":
@@ -253,6 +260,19 @@ def cmd_list(store: MappingStore) -> int:
             f"{_sc(entry.key.ljust(key_width), 'cyan', 'bold')}  "
             f"{path_str}"
         )
+    return 0
+
+
+def cmd_resolve(store: MappingStore, key: str) -> int:
+    """Print one exact bookmark target or fail without path/index fallback."""
+    entry = next((entry for entry in store.entries if entry.key == key), None)
+    if entry is None:
+        return EXIT_INVALID
+    path = Path(entry.path)
+    if not path.is_dir():
+        print("Target directory does not exist.", file=sys.stderr)
+        return EXIT_INVALID
+    print(str(resolve_path(path)))
     return 0
 
 
@@ -786,7 +806,7 @@ gdir() {
 
     case "$1" in
         go|back|fwd|pick) _gdir_nav=true ;;
-        list|add|edit|repath|rename|rm|clear|hist|env|save|load|import|record|doctor|init|help) ;;
+        list|add|edit|repath|rename|rm|clear|hist|env|save|load|import|record|resolve|doctor|init|help) ;;
         "") _gdir_nav=true ;;
         \\#*) _gdir_nav=true ;;
         [-+][0-9]*) _gdir_nav=true ;;
@@ -810,6 +830,71 @@ gdir() {
     else
         "$_GDIR_BIN" "$@"
     fi
+}
+_gdir_after_cd() {
+    "$_GDIR_BIN" record "$(pwd)" 2>/dev/null
+    command zoxide add "$(pwd)" >/dev/null 2>&1 || true
+    eval "$("$_GDIR_BIN" env --format sh --all 2>/dev/null || true)"
+}
+cd() {
+    local target
+
+    # 1. An existing directory always wins, even when its basename is also a
+    #    bookmark (for example "data") or a gdir command (for example "list").
+    if [[ $# -eq 1 && -d "$1" ]]; then
+        \\builtin cd -- "$1" || return $?
+        _gdir_after_cd
+        return 0
+    fi
+    if [[ $# -eq 2 && "$1" == "--" && -d "$2" ]]; then
+        \\builtin cd -- "$2" || return $?
+        _gdir_after_cd
+        return 0
+    fi
+    if [[ $# -ge 1 && ( "$1" == "-L" || "$1" == "-P" || "$1" == "-e" ) ]]; then
+        \\builtin cd "$@" || return $?
+        _gdir_after_cd
+        return 0
+    fi
+
+    # No parameter retains normal `cd` behavior (home).
+    if [[ $# -eq 0 ]]; then
+        \\builtin cd || return $?
+        _gdir_after_cd
+        return 0
+    fi
+
+    # 2. Resolve an exact saved gdir keyword before interpreting command names.
+    if [[ $# -eq 1 ]]; then
+        target="$("$_GDIR_BIN" resolve "$1" 2>/dev/null)"
+        if [[ $? -eq 0 && -n "$target" ]]; then
+            \\builtin cd -- "$target" || return $?
+            _gdir_after_cd
+            return 0
+        fi
+    fi
+
+    # 3. Only now interpret param0 as a gdir command.
+    case "$1" in
+        go|back|fwd|pick|list|add|edit|repath|rename|rm|clear|hist|env|save|load|import|record|resolve|doctor|init|help|\\#*|[-+]|[-+][0-9]*)
+            gdir "$@"
+            return $?
+            ;;
+    esac
+
+    # 4. Fall back to zoxide fuzzy resolution.
+    if declare -f __zoxide_z &>/dev/null; then
+        __zoxide_z "$@" || {
+            printf 'cd: no directory, gdir bookmark/command, or zoxide match: %s\\n' "$*" >&2
+            return 1
+        }
+        _gdir_after_cd
+        return 0
+    fi
+
+    # 5. Nothing resolved.
+    printf 'cd: no directory or gdir bookmark/command, and zoxide is unavailable: %s\\n' "$*" >&2
+    return 1
 }
 trap '"$_GDIR_BIN" save >/dev/null 2>&1' EXIT
 # --- gdir wrapper (END MANAGED BLOCK) ---
