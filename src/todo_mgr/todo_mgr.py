@@ -1451,10 +1451,28 @@ def _snake(name: str) -> str:
 _IDENTITY_ALIAS_CACHE: dict[str, list[str]] = {}
 
 
+_IDENTITY_STORE_WARNED = False
+
+
+def _warn_once_identity_store_missing(candidates) -> None:
+    """Say so ONCE when the identity store cannot be found.
+
+    Returning [] was indistinguishable from "this identity genuinely has no other
+    names". A guard that CANNOT RESOLVE must not look like a guard that found
+    nothing to exclude. (todo_1111)
+    """
+    global _IDENTITY_STORE_WARNED
+    if _IDENTITY_STORE_WARNED:
+        return
+    _IDENTITY_STORE_WARNED = True
+    print("todo_mgr: identity store not found at any of {} — self-notification "
+          "exclusion is DEGRADED".format([str(c) for c in candidates]), file=sys.stderr)
+
+
 def _session_identity_aliases(ident: str) -> list[str]:
     """A session's other names: tracking id <-> display name. Never raises.
 
-    Asks the AUTHORITATIVE store (session_store.py, the same seam the comms
+    Asks the AUTHORITATIVE store (session_registry.py, the same seam the comms
     identity resolver uses) rather than reading a file directly. Re-deriving
     identity here would be a second copy of that boundary, and a second copy
     reproduces the original's blind spots instead of testing them. Cached per
@@ -1466,7 +1484,25 @@ def _session_identity_aliases(ident: str) -> list[str]:
     if key in _IDENTITY_ALIAS_CACHE:
         return _IDENTITY_ALIAS_CACHE[key]
     out: list[str] = []
-    store = _AI_ROOT / "ai_general" / "scripts" / "session_mgmt" / "session_store.py"
+    # session_store.py was RENAMED to session_registry.py in 85ce11973. This path
+    # stopped existing, store.exists() went False, and resolution silently returned []
+    # — so self-exclusion compared a display name against a raw tracking id, never
+    # matched, and a session was notified of its OWN comments at prompt urgency.
+    # MEASURED: 4 self-notifications in one afternoon, 1:1 with comments written.
+    #
+    # THE SAME RENAME BROKE getSession IN THE APP (todo_0928), where a swallowed ENOENT
+    # reported as "Session not found" and cost a morning of debugging. One rename, two
+    # subsystems, both failing SILENTLY because both treated "file absent" as "nothing
+    # to say" rather than "I cannot answer".
+    #
+    # Both names are tried, and a total miss is now LOUD. (todo_1111)
+    _candidates = [
+        _AI_ROOT / "ai_general" / "scripts" / "session_mgmt" / "session_registry.py",
+        _AI_ROOT / "ai_general" / "scripts" / "session_mgmt" / "session_store.py",
+    ]
+    store = next((c for c in _candidates if c.exists()), _candidates[0])
+    if not store.exists():
+        _warn_once_identity_store_missing(_candidates)
     try:
         if store.exists():
             proc = subprocess.run(
@@ -2237,6 +2273,43 @@ def ops_kanban(include_done: bool = False, include_cancelled: bool = False) -> d
     return {"columns": columns, "summary": summary, "total_active": sum(summary.values())}
 
 
+def _candidate_todo_dirs() -> list[Path]:
+    """Every directory that IS a todo, decided without consulting `*.status`.
+
+    todo_1056. This exists so a missing-status check has a domain that can contain
+    the thing it looks for. `load_todos()` cannot supply one: it enumerates status
+    files and returns their parents, so "todo" and "has a status file" are the same
+    proposition there, and no caller of it can ever observe a todo lacking one.
+
+    The membership rules are load_todos' rules with the status glob removed, and are
+    deliberately a copy of that logic rather than a fresh judgement about what counts
+    as a todo — a second definition would drift, and the two would disagree about the
+    same directory. If load_todos' floor changes, this must change with it.
+
+    Scope note: trash/ and completed/ are NOT excluded, matching ops_validate's own
+    `load_todos(include_completed=True, include_trash=True)`. A trashed todo with no
+    status is still reported; suppressing it here would be this function inventing a
+    policy its only caller did not ask for.
+    """
+    template_names = {tpl.name for tpl in get_template_dirs() if tpl.exists()}
+    excluded_dirs = {"incoming", "groups", "__pycache__"}
+
+    found: list[Path] = []
+    for candidate in CURRENT_ROOT.rglob("*"):
+        if not candidate.is_dir():
+            continue
+        if candidate.name in template_names:
+            continue
+        rel_parts = candidate.relative_to(CURRENT_ROOT).parts
+        if any(part in excluded_dirs for part in rel_parts):
+            continue
+        # Unified Work Tracking floor: rich notes.md OR one-line summary.
+        if not ((candidate / "notes.md").exists() or (candidate / "summary").exists()):
+            continue
+        found.append(candidate)
+    return found
+
+
 def ops_validate() -> dict:
     """Validate the todo tree. Returns issues found.
 
@@ -2268,20 +2341,43 @@ def ops_validate() -> dict:
                 "message": f"Duplicate todo ID '{name}' found in {len(paths)} locations",
             })
 
+    # Missing status — DIRECTORY-DOMAIN, deliberately NOT driven by `todos`.
+    #
+    # todo_1056. `load_todos()` discovers todos by `rglob("*.status")` and takes the
+    # status file's PARENT, so every key it returns is by construction a directory
+    # that HAS a status file. A missing-status check that iterates `todos` therefore
+    # tests a condition its own domain has already excluded: the branch is not merely
+    # unexercised, it is unreachable. Measured 2026-09-02 against a scratch TODO_ROOT
+    # holding one two-status dir and one zero-status dir side by side — MULTI_STATUS
+    # fired, NO_STATUS did not. That pairing is the evidence; a bare "0 reported" is
+    # equally consistent with there being nothing to report.
+    #
+    # Seven live todos (eight including trash) were invisible to it. The prior filing,
+    # todo_0382 "add status markers to 7 orphan todos invisible to todo_mgr", is marked
+    # Done — the same count is back, which is what an unfirable check buys you: the
+    # data gets repaired and the detector that should catch the next one still cannot.
+    #
+    # The domain below is the project's OWN definition of a todo, taken from
+    # load_todos: not a template, no excluded ancestor, and satisfying the Unified
+    # Work Tracking floor of `notes.md` OR `summary`. Everything except the status
+    # glob. A name-pattern scan would have been a second, competing definition.
+    for todo_dir in _candidate_todo_dirs():
+        if list(todo_dir.glob("*.status")):
+            continue
+        rel = str(todo_dir.relative_to(CURRENT_ROOT))
+        issues.append({
+            "type": "missing_status",
+            "id": todo_dir.name,
+            "path": rel,
+            "message": f"No .status file in {rel}",
+        })
+
     # Per-todo checks
     for path, todo in todos.items():
         rel = str(path.relative_to(CURRENT_ROOT))
 
-        # Missing status
         status_files = list(path.glob("*.status"))
-        if not status_files:
-            issues.append({
-                "type": "missing_status",
-                "id": todo.name,
-                "path": rel,
-                "message": f"No .status file in {rel}",
-            })
-        elif len(status_files) > 1:
+        if len(status_files) > 1:
             issues.append({
                 "type": "multiple_status",
                 "id": todo.name,
