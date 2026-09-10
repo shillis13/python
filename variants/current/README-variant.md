@@ -1,0 +1,3 @@
+gdir keeps a single JSON state file under ~/.config/gdir/ that stores both keyword mappings and navigation history. The CLI uses subcommands (add, list, go, back, etc.) and prints absolute paths for movement commands so it can be wrapped by any shell. History persists across processes, with the pointer updated whenever go/back/fwd run. The env command emits simple PREV/NEXT exports suitable for eval.
+
+Trade-offs: storing everything in one JSON file is straightforward but offers limited concurrent safety; for this scope the simplicity outweighs potential race concerns. Confirming clear with a prompt avoids accidental wipes while still allowing automation via --yes.
