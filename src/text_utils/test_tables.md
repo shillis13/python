@@ -163,3 +163,28 @@ And here is trailing text after the last table. This paragraph should survive in
 | **knowledge / instructions** | Authored, edited, versioned. Relatively static. | Full CRUD + version history + convention lint. The "library" core. |
 | **briefs** | *Generated* (condense/auto-brief), superseded/refreshed, freshness-tracked, **referenceable** by roles/profiles, archived-when-stale. | Must show provenance (generated-by session, source, generated-at), support supersede/regenerate (delegating to the condense pipeline), and appear as link *targets* in the reference graph. |
 | **memories** | Continuously *appended* (slots), tiered load (AUTO/TOPIC/DEMAND), pruned/condensed, **shared** across sessions. | The Mgr edits slot *definitions* (manifest + tiers) and supports prune/condense of contents — not a plain file editor. |
+
+## 16. Prose Description starved by proportional shrink (regression)
+
+# Regression fixture: wrap-friendly Description must stay the widest column under -w 150.
+# (Proportional natural-width shrink + reclaim-from-flex previously collapsed it to ~17.)
+
+| # | Capability | Description | Walker | Claude | Codex | OMP |
+|---|---|---|---|---|---|---|
+| 1 | `context_stats` | Report Context size: on-chain Records, estimated tokens, per-category bytes | entrance→claude+codex | ✅ | ✅ | ⚠️ Claude-shaped error |
+| 1b | `context_stats --mode histo` | Same, rendered as a per-Turn histogram | entrance→claude+codex | ✅ | ✅ | ⚠️ Claude-shaped error |
+| 2 | `offload_cycle` | Stop → back up → Offload → verify → restart, for one session | entrance→claude+codex | ✅ | ✅ | ✅ refuses by name |
+| 3 | `summarize_turns` | Produce summary TEXT for a named Turn range | claude | ✅ | ✅ refuses by name | ✅ refuses by name |
+| 4 | `plan_summary` | Stage a Summary Plan — choose spans and record intent, write nothing | claude | ✅ | ✅ refuses by name | ✅ refuses by name |
+| 4b | `{add,append}_summary_plan` | Add a further span to an existing staged Plan | claude | ❌ **does not exist** | — | — |
+| 4c | `create_archive_plan` | As 4, but remove the span rather than replace it with a summary | claude | ❌ **does not exist** | — | — |
+| 5 | `apply_summary` | Execute a staged Summary Plan against the transcript | none (consumes plan) | ✅ | ✅ refuses by name | ✅ refuses by name |
+| 6 | **rehydrate Offloads** | Undo Rung-1 Offload from `OFFLOAD_PLAN` provenance; length-preserving | none (consumes plan) | ✅ `jsonl/rehydrate.py` | ✅ `codex_offload --restore` | ✅ refuses by name |
+| 6b | `rehydrate_summary` | Restore Turns replaced by an applied Summary | claude | ✅ | ✅ refuses by name | ✅ refuses by name |
+| 6c | `rehydrate_archive` | Restore an archived span | claude | ✅ | ✅ refuses by name | ✅ refuses by name |
+| 7 | `recall_summary` | Append offloaded content as NEW Turns; does not un-skip | claude | ✅ | ✅ refuses by name | ✅ refuses by name |
+| 8 | `thinking_by_turns` | Extract plain-text thinking content for a Turn range | claude | ✅ | ✅ refuses by name | ✅ refuses by name |
+| 9 | **self**_offload_cycle | A session arms its own offload for after it stops | entrance→claude+codex | ✅ `declare_stop(offload=1)` | ⚠️ untested | ⚠️ untested |
+| 10 | **self**_add_summary_plan | A session stages its own Summary Plan | — | ❌ **does not exist** | — | — |
+| 11 | **self**_summarize | A session summarizes its own Turns | — | ❌ **does not exist** | — | — |
+| 12 | **self**_archive | A session archives its own Turns | — | ❌ **does not exist** | — | — |

@@ -21,8 +21,9 @@ if str(AI_UTILS) not in sys.path:
 from standard_colors import c, command_style, error, format_help, value
 
 from md_table_reformat_shared import (
-    cell_natural_width, is_bold_cell, bold_cell_width, header_content_width,
-    min_rendered_cell_width, wrap_cell
+    cell_natural_width, is_bold_cell, bold_cell_width,
+    min_rendered_cell_width, wrap_cell, column_content_mass,
+    allocate_column_widths, pad_to_display_width,
 )
 
 def print_help() -> None:
@@ -245,19 +246,18 @@ def render_table(headers, data_rows, max_width, separator_after):
 
     all_rows = [pad(headers)] + [pad(r) for r in data_rows]
 
-    # Calculate natural column widths (max content width per column)
-    # Headers get bold markers added, so account for that extra width
-    col_widths = []
+    # Natural column widths (max content width per column).
+    # Headers get bold markers added, so account for that extra width.
+    natural = []
     for c in range(num_cols):
         data_max = max((cell_natural_width(all_rows[r][c]) for r in range(1, len(all_rows))), default=0)
         header_text = all_rows[0][c].strip()
         header_w = bold_cell_width(header_text)  # accounts for ** markers if not already bold
-        col_widths.append(max(data_max, header_w, 3))
+        natural.append(max(data_max, header_w, 3))
 
-    # Calculate minimum column widths (widest rendered atomic/unsplittable token
-    # per column).  Headers are rendered with **bold markers**, so their minimum
-    # widths must include those markers too; otherwise shrink-to-max-width can make
-    # columns narrower than the actual header text and the box borders drift.
+    # Minimum column widths (widest rendered atomic/unsplittable token per column).
+    # Headers are rendered with **bold markers**, so their minimum widths must
+    # include those markers too.
     min_widths = []
     for c in range(num_cols):
         min_w = 3
@@ -266,36 +266,34 @@ def render_table(headers, data_rows, max_width, separator_after):
             min_w = max(min_w, min_rendered_cell_width(cell, bold=(r == 0)))
         min_widths.append(min_w)
 
-    # Shrink columns if total exceeds max_width
-    overhead = 3 * num_cols + 1
-    total_content = sum(col_widths)
-    if total_content + overhead > max_width and max_width > overhead + num_cols:
-        available = max_width - overhead
-        # Proportional shrink, but never below minimum atomic width
-        ratio = available / total_content
-        col_widths = [max(int(w * ratio), min_widths[i]) for i, w in enumerate(col_widths)]
-        # Proportional shrink plus min-width clamping can overshoot the target
-        # when one or more columns have large atomic rendered tokens (notably
-        # markdown-bold data cells: each wrapped line gets ** markers).  Pull
-        # that excess back out of columns that are still above their minimums
-        # so the rendered table honors max_width whenever the atomic minima
-        # make that possible.
-        excess = sum(col_widths) - available
-        while excess > 0:
-            shrinkable = [i for i, w in enumerate(col_widths) if w > min_widths[i]]
-            if not shrinkable:
-                break
-            # Prefer shrinking the widest / most flexible column first.
-            i = max(shrinkable, key=lambda idx: (col_widths[idx] - min_widths[idx], col_widths[idx]))
-            col_widths[i] -= 1
-            excess -= 1
+    # Content mass steers leftover budget toward prose-heavy columns.
+    masses = [
+        column_content_mass([all_rows[r][c] for r in range(len(all_rows))])
+        for c in range(num_cols)
+    ]
 
-        # Distribute rounding remainder to widest columns
-        diff = available - sum(col_widths)
-        if diff > 0:
-            sorted_cols = sorted(range(num_cols), key=lambda i: -col_widths[i])
-            for i in range(diff):
-                col_widths[sorted_cols[i % num_cols]] += 1
+    # Soft minima: header / typical cell width.  Used only when hard (atomic)
+    # minima overshoot the budget, so a rare long code token does not permanently
+    # starve a prose column.
+    soft_mins = []
+    for c in range(num_cols):
+        header_min = min_rendered_cell_width(all_rows[0][c], bold=True)
+        data_mins = sorted(
+            min_rendered_cell_width(all_rows[r][c]) for r in range(1, len(all_rows))
+        ) or [3]
+        median_data = data_mins[len(data_mins) // 2]
+        # Keep enough width to avoid mid-splitting short identity tokens
+        # (e.g. bold ``**instructions**``), while still allowing rare long
+        # code tokens (hard min ≫ 16) to yield budget to prose.
+        soft_mins.append(
+            max(3, header_min, median_data, min(min_widths[c], 16))
+        )
+
+    # 3 chars per column for "│ " + " ", plus the final "│"
+    overhead = 3 * num_cols + 1
+    col_widths = allocate_column_widths(
+        natural, min_widths, masses, max_width, overhead, soft_mins=soft_mins
+    )
 
     def hline(left, mid, right, fill='─'):
         segs = [fill * (w + 2) for w in col_widths]
@@ -311,7 +309,7 @@ def render_table(headers, data_rows, max_width, separator_after):
             for c in range(num_cols):
                 cell_lines = wrapped[c]
                 text = cell_lines[ln] if ln < len(cell_lines) else ''
-                parts.append(text.ljust(col_widths[c]))
+                parts.append(pad_to_display_width(text, col_widths[c]))
             lines.append('│ ' + ' │ '.join(parts) + ' │')
         return lines
 
