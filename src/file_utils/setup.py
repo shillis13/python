@@ -28,6 +28,7 @@ setup(
             'renameFiles=file_utils.renameFiles:main',
             'fsFilters=file_utils.fsFilters:main',
             'pygrep=file_utils.pygrep:main',
+            'mingrep=file_utils.mingrep:main',
             'treePrint=file_utils.treePrint:main',
             'fsActions=file_utils.fsActions:main',
         ],

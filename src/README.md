@@ -116,7 +116,8 @@ After installing packages, these command-line tools become available:
 - `fsfind` - Advanced file finding
 - `fsformat` - File formatting utilities
 - `gen-random-files-dirs` - Generate test files/directories
-- `pygrep` - Python-based grep
+- `pygrep` - Content search with pattern boundaries: `-A`/`-B`/`-C` take patterns, not just line counts
+- `mingrep` - Minimal grep supporting POSIX BRE/ERE translation
 - `rename-files` - Batch file renaming
 - `treeprint` - Tree-style directory printing
 
