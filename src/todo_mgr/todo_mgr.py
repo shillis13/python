@@ -90,6 +90,7 @@ STATUS_ORDER = [
     ("Ready", "RD"),
     ("In_Progress", "IP"),
     ("Reviewing", "RV"),
+    ("Testing", "TS"),
     ("Accepting", "AC"),
     ("Blocked", "BL"),
     ("Done", "DN"),
@@ -98,7 +99,7 @@ STATUS_ORDER = [
 STATUS_CODES = {code: status for status, code in STATUS_ORDER}
 STATUS_TO_CODE = {status: code for status, code in STATUS_ORDER}
 ACTIVE_STATUSES = {"Triaging", "Needs_Research", "Needs_Derivation", "Ready",
-                   "In_Progress", "Reviewing", "Accepting", "Blocked"}
+                   "In_Progress", "Reviewing", "Testing", "Accepting", "Blocked"}
 
 
 def resolve_status(status_input: str) -> str:
@@ -123,6 +124,87 @@ def resolve_status(status_input: str) -> str:
         f"Invalid status: '{status_input}'. "
         f"Valid: {', '.join(f'{s} ({c})' for s, c in STATUS_ORDER)}"
     )
+
+
+# === todo_0718 transition policy (Hamilton design table, notes.md §"The states" / §Enforcement) ===
+# Allowed OUT-moves per state. to-Blocked / to-Cancelled are ALWAYS allowed (handled in
+# check_transition) and so are not listed here; Blocked's only non-global target is its prior state
+# (restore). Done/Cancelled are terminal. Any BACKWARD move (earlier on the ladder) additionally needs
+# a non-empty note. `--override "<reason>"` bypasses all of this (the callers log it loudly to history).
+ALLOWED_TRANSITIONS: dict[str, set[str]] = {
+    "Triaging":         {"Ready", "Needs_Research", "Needs_Derivation"},
+    "Needs_Research":   {"Ready"},
+    "Needs_Derivation": {"Ready"},
+    "Ready":            {"In_Progress"},
+    "In_Progress":      {"Reviewing"},
+    "Reviewing":        {"Testing", "In_Progress", "Accepting"},  # Testing=pass, In_Progress=findings, Accepting=small-work skip
+    "Testing":          {"Accepting", "In_Progress"},             # Accepting=pass, In_Progress=fail
+    "Accepting":        {"Done", "In_Progress"},                  # Done=accepted, In_Progress=sent back with a reason
+    "Blocked":          set(),   # leaving Blocked = restore to prior_status (special-cased below)
+    "Done":             set(),   # terminal
+    "Cancelled":        set(),   # terminal
+}
+_ALWAYS_ALLOWED_TO = {"Blocked", "Cancelled"}
+# Terminal states (Hamilton 2026-10-30): the table WINS over the global ->Blocked/Cancelled allow — a
+# Done/Cancelled todo has NO out-moves; reopening (even to Blocked/Cancelled) needs --override.
+_TERMINAL = {"Done", "Cancelled"}
+# Forward vs backward is judged on this linear ladder; the off-ladder specials
+# (Blocked / to-Blocked / to-Cancelled) are decided before _is_backward is consulted.
+_LADDER = ["Triaging", "Needs_Research", "Needs_Derivation", "Ready", "In_Progress",
+           "Reviewing", "Testing", "Accepting", "Done"]
+_LADDER_INDEX = {name: i for i, name in enumerate(_LADDER)}
+
+
+def _is_backward(from_status: str, to_status: str) -> bool:
+    """True if to_status is earlier on the ladder than from_status (a demotion / reopen)."""
+    if from_status in _LADDER_INDEX and to_status in _LADDER_INDEX:
+        return _LADDER_INDEX[to_status] < _LADDER_INDEX[from_status]
+    return False
+
+
+def check_transition(from_status, to_status, *, note: str = "",
+                     override: bool = False, prior_status=None) -> tuple[bool, str]:
+    """Pure todo_0718 transition policy. Returns (ok, reason). No I/O.
+
+    from_status: current canonical status, or None/unknown (legacy or uninitialized → NOT enforced:
+        an origin that isn't on the ladder can't be judged).
+    to_status:   resolved canonical target status.
+    note:        --note text; a backward move needs a non-empty one.
+    override:    --override given → bypass every rule (callers record it loudly).
+    prior_status: for from_status == "Blocked", the state to restore to (callers read it from history).
+    """
+    if override:
+        return True, ""
+    if from_status is None or from_status not in ALLOWED_TRANSITIONS:
+        return True, ""                                  # unplaceable origin — not enforced
+    if to_status == from_status:
+        return True, ""                                  # no-op
+    # Terminal origin wins over the global allow (Hamilton): reopening Done/Cancelled needs --override.
+    if from_status in _TERMINAL:
+        return False, (f"{from_status} is terminal; reopening to {to_status} needs "
+                       f"--override \"<reason>\"")
+    if to_status in _ALWAYS_ALLOWED_TO:
+        return True, ""                                  # ->Blocked / ->Cancelled from a non-terminal state
+    if from_status == "Blocked":
+        if prior_status is not None and to_status == prior_status:
+            return True, ""                              # restore to prior
+        hint = f" ({prior_status})" if prior_status else ""
+        return False, (f"Blocked can only return to its prior state{hint}; "
+                       f"use --override \"<reason>\" to force")
+    allowed = ALLOWED_TRANSITIONS.get(from_status, set())
+    if to_status not in allowed:
+        pretty = ", ".join(sorted(allowed)) if allowed else "none (terminal)"
+        return False, (f"{from_status} → {to_status} is not an allowed transition "
+                       f"(allowed: {pretty}; or Blocked/Cancelled); use --override \"<reason>\" to force")
+    # Small-work skip Reviewing->Accepting (skips the Testing/verify gate) needs an explicit testing
+    # waiver note (Hamilton 2026-10-30 spec answer 2). Checked here so both set-paths get it.
+    if from_status == "Reviewing" and to_status == "Accepting" and not (note and note.strip()):
+        return False, ('Reviewing → Accepting skips Testing and needs '
+                       '--note "testing: n/a — <why>" (or go Reviewing → Testing → Accepting)')
+    if _is_backward(from_status, to_status) and not (note and note.strip()):
+        return False, (f"{from_status} → {to_status} is a backward move and needs "
+                       f"--note \"<why>\" (or --override)")
+    return True, ""
 
 
 # === Colors (imported from common_utils) ===
@@ -209,6 +291,7 @@ STATUS_COLORS = {
     "Ready": Colors.GREEN,
     "In_Progress": Colors.CYAN,
     "Reviewing": Colors.MAGENTA,
+    "Testing": Colors.BLUE,
     "Accepting": Colors.MAGENTA,
     "Blocked": Colors.RED,
     "Done": Colors.BRIGHT_BLACK,
@@ -487,8 +570,13 @@ def last_activity_ts(todo_dir: Path) -> str:
     ``**Updated:**`` line is almost never present)."""
     hist = todo_dir / "history.log"
     try:
-        lines = [ln for ln in hist.read_text().splitlines() if ln.strip()]
-    except (FileNotFoundError, OSError):
+        # errors="replace" + broad except: a non-UTF-8 / unreadable history.log must not crash load_todos
+        # (todo_0718 fail-open — every todo op calls this).
+        # split("\n") NOT splitlines() (todo_0821): the writer only emits \n as the physical record
+        # boundary; splitlines() would also break on VT/FF/NEL/U+2028/U+2029 etc. (unencoded, so inline
+        # in a note) and re-introduce the phantom-split bug. The app's JS parsers also split on \n.
+        lines = [ln for ln in hist.read_text(errors="replace").split("\n") if ln.strip()]
+    except Exception:
         return ""
     if not lines:
         return ""
@@ -925,9 +1013,14 @@ def tail_notes(notes_path: Path, num_lines: int = 8) -> str:
 
 # === Resolution & Scripts ===
 
-def resolve_target(token: str, todos: dict[Path, Todo], refs: dict[str, Path]) -> Path:
+# Max candidate names a strict (destructive-op) refusal lists before summarising "… and N more" — keeps a
+# broad-token refusal from dumping ~1k names into an MCP caller's context (todo_1347, Prism 2026-10-30).
+_STRICT_CANDIDATE_CAP = 10
+
+
+def resolve_target(token: str, todos: dict[Path, Todo], refs: dict[str, Path], *, strict: bool = False) -> Path:
     """Resolve a token (ref, path, name, or number) to a todo path.
-    
+
     Resolution order:
     1. Reference code (IP2, RD1, TR3, etc.)
     2. Absolute path
@@ -936,6 +1029,11 @@ def resolve_target(token: str, todos: dict[Path, Todo], refs: dict[str, Path]) -
     5. With todo_/task_ prefix added
     6. By todo number (0038 -> todo_0038_*)
     7. Partial match on directory name
+
+    `strict=True` (todo_1347) DISABLES step 7 (the substring fallback): only an exact ref/path/dir-name/
+    number resolves, and anything else RAISES. Destructive operations (move) pass strict=True so a fuzzy
+    token like "to" — a substring of every todo_* name — cannot silently reparent an unrelated todo. Every
+    other caller keeps the default (strict=False) substring convenience unchanged.
     """
     if not token:
         raise ValueError("Empty reference/path")
@@ -1003,7 +1101,29 @@ def resolve_target(token: str, todos: dict[Path, Todo], refs: dict[str, Path]) -
                 % (token, len(id_matches), "\n  ".join(shown))
             )
     
-    # 7. Try partial/substring match on directory name
+    # 7. Try partial/substring match on directory name.
+    #    Refused under strict (destructive ops): a fuzzy/substring token must not resolve, so a bare word
+    #    like "to" (a substring of every todo_* name) cannot silently select a todo (todo_1347 defect #2).
+    if strict:
+        # A destructive op refuses a fuzzy/substring match — but NAME the candidates so the caller can pick
+        # the exact one (Hamilton 2026-10-30), rather than a bare "could not resolve". CAP the list: a broad
+        # token (e.g. "to" matches every todo_*) would otherwise dump ~1k names / ~80KB into an MCP caller's
+        # context (Prism verify 2026-10-30), so show at most _STRICT_CANDIDATE_CAP and summarise the rest.
+        token_lower = token.lower()
+        candidates = sorted(p.name for p in todos if token_lower in p.name.lower())
+        if candidates:
+            shown = candidates[:_STRICT_CANDIDATE_CAP]
+            extra = len(candidates) - len(shown)
+            tail = ("\n  … and %d more; narrow the token" % extra) if extra else ""
+            raise ValueError(
+                "%r is not an exact reference — a destructive operation refuses fuzzy/substring matches. "
+                "Did you mean one of:\n  %s%s\nPass an exact reference code, id/number, or full directory name."
+                % (token, "\n  ".join(shown), tail)
+            )
+        raise ValueError(
+            "Could not resolve %r — no todo matches. A destructive operation requires an exact reference "
+            "code, id/number, or full directory name." % token
+        )
     token_lower = token.lower()
     matches = []
     for path in todos:
@@ -1052,6 +1172,7 @@ _STATUS_ALIASES: dict[str, str] = {
     "in_progress": "In_Progress", "inprogress": "In_Progress", "in-progress": "In_Progress",
     "blocked": "Blocked",
     "reviewing": "Reviewing", "review": "Reviewing",
+    "testing": "Testing", "test": "Testing",
     "accepting": "Accepting", "acceptance": "Accepting",
     "done": "Done", "completed": "Done",
     "cancelled": "Cancelled", "canceled": "Cancelled",
@@ -1209,33 +1330,274 @@ def init_origin(todo_dir: Path, *, created_by: str = "", source: str = "agent") 
     return origin
 
 
+# A visible, rare marker that stands in for a line break inside one history.log field (todo_0821 option c,
+# Hamilton 2026-10-30). U+23CE ⏎ RETURN SYMBOL is printable and — crucially — is NOT a str.splitlines()
+# boundary (unlike U+2028/U+2029), so a record carrying it stays one physical line. Chosen over escaping
+# so that backslashes and Windows paths (C:\Users\name, C:\new) round-trip EXACTLY.
+_HIST_NL = "\u23ce"
+
+
+def _hist_escape(s: str) -> str:
+    """Make one history.log field safe to write on a single physical line (todo_0821, option c).
+
+    history.log is line-oriented (one record per line); a newline in a --note used to split one logical record
+    across several physical lines → read_history returned phantom entries, the note was truncated at the first
+    newline, and last_activity_ts read a fragment. We replace any line break (``\\r\\n``/``\\n``/``\\r``) with
+    the RETURN SYMBOL marker ``_HIST_NL`` (U+23CE), which splitlines() does not treat as a boundary.
+
+    BACKSLASH IS UNTOUCHED, so backslashes and Windows paths (``C:\\Users\\name``, ``C:\\new``) round-trip
+    EXACTLY and the UAI app's naive (non-unescaping) reader shows them correctly (no doubling). The ONLY
+    collision is a note that literally contains the U+23CE symbol — on read that one char becomes a newline
+    (astronomically rare in todo notes). Line breaks normalize to ``\\n`` on the round-trip.
+    """
+    return str(s).replace("\r\n", _HIST_NL).replace("\n", _HIST_NL).replace("\r", _HIST_NL)
+
+
+def _hist_unescape(s: str) -> str:
+    """Reverse _hist_escape: turn the RETURN SYMBOL marker (U+23CE) back into a newline.
+
+    Backslash is NOT an escape char here (option c, Hamilton 2026-10-30), so backslashes / Windows paths /
+    literal ``\\n`` text round-trip exactly. The only lossy case is a field that literally contained the
+    U+23CE symbol, which becomes a newline (see _hist_escape).
+    """
+    return s.replace(_HIST_NL, "\n")
+
+
 def append_history(todo_dir: Path, status: str, *,
-                   session: str = "", note: str = "") -> None:
+                   session: str = "", note: str = "") -> bool:
     """Append one line to the append-only history.log:
         <local-ts> | <status> | <session> | <note>
+
+    Best-effort (todo_0718 fail-open, Hamilton 2026-10-30): a history-write failure (unwritable dir,
+    current_session() raising, etc.) returns False rather than crashing a status change that already
+    happened. Callers may ignore the result. Fields are escaped (todo_0821) so a newline in the note can't
+    split the record across lines.
     """
-    line = "{} | {} | {} | {}".format(
-        now_local_iso(), status, session or current_session(), note
-    ).rstrip()
-    with (Path(todo_dir) / "history.log").open("a") as fh:
-        fh.write(line + "\n")
+    try:
+        line = "{} | {} | {} | {}".format(
+            now_local_iso(), _hist_escape(status), _hist_escape(session or current_session()),
+            _hist_escape(note)
+        ).rstrip()
+        with (Path(todo_dir) / "history.log").open("a") as fh:
+            fh.write(line + "\n")
+        return True
+    except Exception:
+        return False
 
 
 def read_history(todo_dir: Path) -> list[dict]:
-    """Parse history.log into [{ts, status, session, note}, ...]."""
-    hist = Path(todo_dir) / "history.log"
-    if not hist.exists():
+    """Parse history.log into [{ts, status, session, note}, ...].
+
+    Never raises (todo_0718 fail-open): an unreadable, non-UTF-8, permission-denied, or directory
+    history.log degrades to [] so the transition gate fails open instead of blocking on a corrupt file.
+    Degrading is LOGGED (HISTORY-ERROR) so fail-open never hides corruption (Prism 2026-10-30) — the
+    gate would otherwise see nothing to log and a corrupt log would be invisible to the evidence review.
+
+    Fields are unescaped via _hist_unescape (todo_0821, option c): the RETURN SYMBOL marker U+23CE decodes
+    back to a newline. Backslashes and Windows paths (``C:\\Users\\name``, ``C:\\new``) round-trip EXACTLY —
+    they are not escaped. The ONLY lossy case (accepted, Hamilton 2026-10-30) is a field that literally
+    contains the U+23CE symbol, which becomes a newline. Pre-0821 raw multiline records (already split on disk)
+    still read as phantom lines — no worse than before 0821.
+    """
+    try:
+        hist = Path(todo_dir) / "history.log"
+        if not hist.exists():
+            return []
+        text = hist.read_text(errors="replace")   # tolerate non-UTF-8 bytes rather than raise
+    except Exception as e:
+        _log_history_error(todo_dir, f"unreadable ({type(e).__name__})")
         return []
+    if "�" in text:                          # errors="replace" substituted non-UTF-8 bytes
+        _log_history_error(todo_dir, "non-UTF-8 bytes replaced")
     entries = []
-    for raw in hist.read_text().splitlines():
+    # split("\n") NOT splitlines() (todo_0821): the writer emits only \n as the physical boundary and
+    # encodes real line breaks as U+23CE; splitlines() would additionally break on VT/FF/FS/GS/RS/NEL/
+    # U+2028/U+2029 (which appear in pasted web/JS text, are left inline, and would re-split the record).
+    for raw in text.split("\n"):
         if not raw.strip():
             continue
         parts = [p.strip() for p in raw.split("|", 3)]
         while len(parts) < 4:
             parts.append("")
-        entries.append({"ts": parts[0], "status": parts[1],
-                        "session": parts[2], "note": parts[3]})
+        # Unescape the fields written by _hist_escape (todo_0821) so multiline notes round-trip.
+        # ts has no escapes; status/session carry none in practice but unescape is a safe no-op there.
+        entries.append({"ts": parts[0], "status": _hist_unescape(parts[1]),
+                        "session": _hist_unescape(parts[2]), "note": _hist_unescape(parts[3])})
     return entries
+
+
+def _prior_status_before_blocked(todo_dir) -> "str | None":
+    """The most recent non-Blocked status in history.log — the state a Blocked todo restores to (todo_0718)."""
+    for entry in reversed(read_history(todo_dir)):
+        st = entry.get("status")
+        if st and st != "Blocked":
+            return st
+    return None
+
+
+def _actors_who_moved(todo_dir, from_status: str, to_status: str) -> set:
+    """ALL sessions that performed the `from_status`→`to_status` transition (per history.log).
+
+    A transition is an entry whose status is to_status and whose IMMEDIATELY PRECEDING entry's status is
+    from_status. Using the SPECIFIC edge (not just "moved into to_status") is what distinguishes the
+    IMPLEMENTER (In_Progress→Reviewing) from someone who merely RESTORED a Blocked todo (Blocked→Reviewing),
+    so a Blocked round-trip neither drops the original implementer's lock (Prism false-allow) nor wrongly
+    locks the restorer (over-lock). A SET so multiple cycles all count. Empty/'unknown' sessions are
+    excluded — not attributable identities (Prism unknown-collision).
+    """
+    hist = read_history(todo_dir)
+    actors = set()
+    for i in range(1, len(hist)):
+        if hist[i].get("status") == to_status and hist[i - 1].get("status") == from_status:
+            s = (hist[i].get("session") or "").strip()
+            if s and s.lower() != "unknown":
+                actors.add(s)
+    return actors
+
+
+def _check_separation_of_duties(todo_dir, from_status, to_status, actor) -> tuple[bool, str]:
+    """todo_0718 req 4 — a mover can't advance their own work past the review/verify gates.
+
+    Implementer = any session that did In_Progress→Reviewing (the implementation handoff); reviewer = any
+    that did Reviewing→Testing (the peer-review pass). The implementer may not leave Reviewing OR Testing;
+    the reviewer may not leave Testing. An unattributable actor (empty / 'unknown') is NOT enforced (no
+    false refusal). Caller reaches this only for enforced, non-Blocked/Cancelled, non-override transitions.
+    """
+    actor = (actor or "").strip()
+    if not actor or actor.lower() == "unknown":
+        return True, ""                                  # can't attribute → don't enforce (no false refusal)
+    implementers = _actors_who_moved(todo_dir, "In_Progress", "Reviewing")
+    if from_status == "Reviewing" and to_status != "Reviewing":
+        if actor in implementers:
+            return False, ("separation of duties: the implementer who moved this INTO Reviewing may not "
+                           "move it out — a different session must review (or use --override)")
+    if from_status == "Testing" and to_status != "Testing":
+        reviewers = _actors_who_moved(todo_dir, "Reviewing", "Testing")
+        if actor in implementers:
+            return False, ("separation of duties: the implementer may not move this out of Testing — "
+                           "a different session must verify (or use --override)")
+        if actor in reviewers:
+            return False, ("separation of duties: the reviewer who moved this out of Reviewing may not "
+                           "move it out of Testing — a different session must verify (or use --override)")
+    return True, ""
+
+
+def _enforcement_enabled() -> bool:
+    """Whether todo_0718 transition enforcement ACTUALLY REFUSES (enforce mode) vs WARN-ONLY (default).
+
+    todo_mgr is LIVE-ON-SAVE and fleet-shared, so enforcement must NOT refuse anyone before a planned
+    rollout (it would e.g. block the common In_Progress→Done shortcut and PianoMan's app "Mark Done").
+    Default (flag unset/off) = WARN-ONLY: a would-be refusal is LOGGED and ALLOWED. Set TODO_0718_ENFORCE=1
+    (or true/yes/on) to switch to ENFORCE mode. Read per-call so it can be toggled without reimport.
+    Activation is Hamilton/PianoMan's call after the rollout conditions are met (todo_0718).
+    """
+    return os.environ.get("TODO_0718_ENFORCE", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _would_refuse_log_path() -> Path:
+    """Central log of warn-mode would-be refusals (co-located with the todos root, never a todo dir)."""
+    return Path(CURRENT_ROOT) / ".todo_0718_would_refuse.log"
+
+
+def _log_would_refuse(todo_dir, from_status, to_status, reason: str) -> None:
+    """Append one WOULD-REFUSE line for the warn-mode evidence window (Hamilton 2026-10-30).
+
+    Goes to a log FILE, never stdout/stderr, and must NEVER raise — warn-mode logging may not affect a
+    transition. Format: <ts> | WOULD-REFUSE | <from>→<to> | <todo> | <actor> | <rule/reason>.
+    """
+    try:
+        name = Path(todo_dir).name
+        line = (f"{now_local_iso()} | WOULD-REFUSE | {from_status}→{to_status} | "
+                f"{name} | {current_session()} | {reason}")
+        with _would_refuse_log_path().open("a") as fh:
+            fh.write(line + "\n")
+    except Exception:
+        pass
+
+
+def _log_history_error(todo_dir, what: str) -> None:
+    """Record a DEGRADED history.log read so fail-open never silently hides corruption (Prism 2026-10-30).
+
+    read_history absorbs damage (replaced bytes / [] on error) before the gate sees it, so without this a
+    corrupt history.log would be invisible. Goes to the never-raise log; never raises itself.
+    Format: <ts> | HISTORY-ERROR | <todo> | <what>.
+    """
+    try:
+        name = Path(todo_dir).name
+        line = f"{now_local_iso()} | HISTORY-ERROR | {name} | {what}"
+        with _would_refuse_log_path().open("a") as fh:
+            fh.write(line + "\n")
+    except Exception:
+        pass
+
+
+def _log_gate_error(todo_dir, what: str, exc: Exception) -> None:
+    """Record a gate-internal error (unreadable history, actor resolution, etc.). Never raises.
+
+    todo_0718 fail-open (Hamilton 2026-10-30): the gate must never block a transition because of its own
+    read/compute failure. Such failures are logged as GATE-ERROR and the move is allowed (warn) / the
+    table still applies with SoD skipped (enforce).
+    """
+    try:
+        name = Path(todo_dir).name
+        line = f"{now_local_iso()} | GATE-ERROR | {name} | {what}: {type(exc).__name__}: {exc}"
+        with _would_refuse_log_path().open("a") as fh:
+            fh.write(line + "\n")
+    except Exception:
+        pass
+
+
+def enforce_transition(todo_dir, from_status, to_status, *,
+                       note: str = "", override: str = "") -> tuple[bool, str, str]:
+    """todo_0718 transition gate shared by BOTH status set-paths (cmd_status + ops_status).
+
+    Keeping the policy in ONE place is the todo_1347 dual-path lesson: the plain CLI and the --json/MCP
+    path must decide identically. Returns (ok, reason, history_note). When ok, history_note is what the
+    caller passes to append_history — the plain note, or a loud OVERRIDE-tagged note when --override was
+    given, so a bypass is always visible in the trail.
+
+    Two modes (see _enforcement_enabled): ENFORCE (flag on) returns a refusal; WARN-ONLY (default) LOGS the
+    would-be refusal to a file and ALLOWS the move, so the live-on-save CLI never blocks the fleet before a
+    planned rollout. --override bypasses the policy in both modes (and is never a would-refuse).
+
+    FAIL-OPEN (Hamilton 2026-10-30): the gate must never raise into the caller. The pure table check always
+    applies (it does no I/O); the separation-of-duties check and the Blocked-prior lookup do read history,
+    so any failure there is logged as GATE-ERROR and SKIPPED (SoD) / treated as no-prior — enforce mode
+    still applies the table, warn mode still allows. history read/write are themselves hardened to not raise.
+    """
+    enforce = _enforcement_enabled()
+    ovr = bool(override and str(override).strip())
+
+    # Blocked-restore prior (reads history): robust — a read failure just means "no prior known".
+    prior = None
+    if from_status == "Blocked":
+        try:
+            prior = _prior_status_before_blocked(todo_dir)
+        except Exception as e:   # pragma: no cover - read_history is already hardened; belt-and-suspenders
+            _log_gate_error(todo_dir, "prior-status read failed", e)
+
+    # Pure table check — NO I/O, so it always applies (even when history is unreadable).
+    ok, reason = check_transition(from_status, to_status, note=note, override=ovr, prior_status=prior)
+
+    # Separation of duties (reads history + the actor): skipped by --override and the global
+    # ->Blocked/->Cancelled allows; and skipped WITH A LOUD LOG if history or the actor can't be read.
+    if ok and not ovr and to_status not in _ALWAYS_ALLOWED_TO:
+        try:
+            sod_ok, sod_reason = _check_separation_of_duties(
+                todo_dir, from_status, to_status, current_session())
+            if not sod_ok:
+                ok, reason = False, sod_reason
+        except Exception as e:
+            _log_gate_error(todo_dir, "separation-of-duties skipped (history/actor unreadable)", e)
+
+    if not ok:
+        if enforce:
+            return False, reason, note                    # enforce: refuse
+        _log_would_refuse(todo_dir, from_status, to_status, reason)   # warn-only: record (best-effort), then allow
+    if ovr:
+        hist = f"OVERRIDE: {str(override).strip()}" + (f" | {note}" if note else "")
+        return True, "", hist
+    return True, "", note
 
 
 # A todo title is a short one-line handle, not a place to dump a paragraph.
@@ -1796,8 +2158,13 @@ def ops_get(identifier: str) -> dict:
         return {"success": False, "error": str(e)}
 
 
-def ops_status(identifiers: list[str], new_status: str, note: str = "") -> dict:
-    """Change status for one or more todos. Appends to each todo's history.log."""
+def ops_status(identifiers: list[str], new_status: str, note: str = "", override: str = "") -> dict:
+    """Change status for one or more todos. Appends to each todo's history.log.
+
+    Enforces the todo_0718 transition policy via the shared `enforce_transition` gate — the SAME gate the
+    plain-CLI `cmd_status` uses (todo_1347 dual-path lesson). A refused transition is an operational
+    failure (success:false, no argument_error → exit 1), and the stored status is left unchanged.
+    """
     try:
         resolved = resolve_status(new_status)
     except ValueError as e:
@@ -1818,6 +2185,15 @@ def ops_status(identifiers: list[str], new_status: str, note: str = "") -> dict:
                 results.append({"id": identifier, "success": False, "error": "Not found"})
                 continue
             old_status = todo.status
+
+            # todo_0718: gate the transition BEFORE touching the marker (same gate as cmd_status).
+            ok, reason, hist_note = enforce_transition(
+                todo.path, old_status, resolved, note=note, override=override)
+            if not ok:
+                results.append({"id": todo.name, "success": False, "error": reason,
+                                "old_status": old_status, "new_status": resolved})
+                continue
+
             run_script("set_status", resolved.lower(), str(todo.path), quiet=True)
 
             # Clear flags when completing or cancelling
@@ -1827,7 +2203,7 @@ def ops_status(identifiers: list[str], new_status: str, note: str = "") -> dict:
 
             # Append-only status trail (only when the status actually changed)
             if old_status != resolved:
-                append_history(path, resolved, note=note)
+                append_history(path, resolved, note=hist_note)
 
             results.append({
                 "id": todo.name, "success": True,
@@ -2181,21 +2557,30 @@ def ops_update(
         return {"success": False, "error": str(e)}
 
 
-def ops_complete(identifier: str) -> dict:
+def ops_complete(identifier: str, override: str = "") -> dict:
     """Mark todo Done and move to completed/."""
     todos = load_todos()
     refs = build_reference_map(todos)
     try:
-        path = resolve_target(identifier, todos, refs)
+        # complete is destructive (moves to completed/): refuse a fuzzy target (todo_1347), names candidates.
+        path = resolve_target(identifier, todos, refs, strict=True)
         todo = todos.get(path)
         if not todo:
             return {"success": False, "error": f"Todo not found: {identifier}"}
+
+        # todo_0718: `complete` is an X→Done move, so it must pass the SAME transition gate as set_status —
+        # otherwise it's a trivial ladder bypass (any state straight to Done). Warn-only by default; refuses
+        # only in enforce mode; --override forces (Prism inc-2 (A), Hamilton rollout cond. 1).
+        ok, reason, hist_note = enforce_transition(todo.path, todo.status, "Done",
+                                                   note="completed", override=override)
+        if not ok:
+            return {"success": False, "error": reason, "old_status": todo.status, "new_status": "Done"}
 
         run_script("set_status", "done", str(todo.path), quiet=True)
 
         # Append history before moving so the trail travels with the dir.
         if todo.status != "Done":
-            append_history(path, "Done", note="completed")
+            append_history(path, "Done", note=hist_note)
 
         # Clear flags
         for flag_file in path.glob("*.flag"):
@@ -2220,7 +2605,8 @@ def ops_trash(identifier: str) -> dict:
     todos = load_todos()
     refs = build_reference_map(todos)
     try:
-        path = resolve_target(identifier, todos, refs)
+        # trash is destructive (soft delete): refuse a fuzzy target (todo_1347), names candidates.
+        path = resolve_target(identifier, todos, refs, strict=True)
         todo = todos.get(path)
         if not todo:
             return {"success": False, "error": f"Todo not found: {identifier}"}
@@ -2430,12 +2816,14 @@ def ops_move(identifier: str, new_parent: str) -> dict:
     todos = load_todos()
     refs = build_reference_map(todos)
     try:
-        source = resolve_target(identifier, todos, refs)
+        # Move is destructive: resolve BOTH ends strictly so a fuzzy/substring token (e.g. "to") cannot
+        # silently select a todo to move or a parent to move it under (todo_1347 defect #2).
+        source = resolve_target(identifier, todos, refs, strict=True)
 
         if new_parent.lower() in ("root", ".", "/"):
             new_parent_path = CURRENT_ROOT
         else:
-            new_parent_path = resolve_target(new_parent, todos, refs)
+            new_parent_path = resolve_target(new_parent, todos, refs, strict=True)
 
         dest = new_parent_path / source.name
 
@@ -2455,7 +2843,19 @@ def ops_move(identifier: str, new_parent: str) -> dict:
         if dest.exists():
             return {"success": False, "error": f"Destination already exists: {dest.relative_to(CURRENT_ROOT)}"}
 
+        # Record the ORIGIN before the move so a mis-move is recoverable (todo_1347 defect #3): moves
+        # previously wrote nothing, leaving the original parent discoverable only by forensics.
+        def _rel(p: Path) -> str:
+            try:
+                return str(p.relative_to(CURRENT_ROOT))
+            except ValueError:
+                return str(p)
+        old_parent = _rel(source.parent) if source.parent != CURRENT_ROOT else "root"
+        new_parent = _rel(new_parent_path) if new_parent_path != CURRENT_ROOT else "root"
+
         shutil.move(str(source), str(dest))
+        # history.log moved with the dir; append the move event at the NEW location (append-only).
+        append_history(dest, "move", note=f"from {old_parent} to {new_parent}")
         return {
             "success": True,
             "todo_id": source.name,
@@ -2709,8 +3109,15 @@ def cmd_status(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) 
         note = args[i + 1] if i + 1 < len(args) else ""
         args = args[:i] + args[i + 2:]
 
+    # todo_0718: --override "<reason>" bypasses the transition policy (logged loudly to history).
+    override = ""
+    if "--override" in args:
+        i = args.index("--override")
+        override = args[i + 1] if i + 1 < len(args) else ""
+        args = args[:i] + args[i + 2:]
+
     if len(args) < 2:
-        return bad_args("Usage: status <new_status> <ref> [ref2 ...] [--note <text>]")
+        return bad_args("Usage: status <new_status> <ref> [ref2 ...] [--note <text>] [--override <reason>]")
 
     # First arg is the status, remaining are identifiers
     new_status_input = args[0]
@@ -2731,11 +3138,19 @@ def cmd_status(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) 
             path = resolve_target(identifier, todos, refs)
             # Capture the prior status so we only record a history entry on a real change
             existing_status = next((p.stem for p in path.glob("*.status")), None)
+
+            # todo_0718: gate the transition BEFORE touching the marker (same gate as ops_status).
+            ok, reason, hist_note = enforce_transition(
+                path, existing_status, resolved, note=note, override=override)
+            if not ok:
+                results.append(fail(f"  ✗ {path.name}: {reason}"))
+                continue
+
             run_script("set_status", resolved.lower(), str(path))
 
             # Append-only history on an actual transition
             if existing_status != resolved:
-                append_history(path, resolved, note=note)
+                append_history(path, resolved, note=hist_note)
 
             # Clear flags when completing or cancelling
             if resolved in ("Done", "Cancelled"):
@@ -3697,16 +4112,70 @@ def create_todo_interactive() -> str:
     return cmd_create(args, todos, refs, interactive=False)
 
 
-def cmd_move(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> str:
-    """Move todo(s) to target. Usage: move <target|root> <ref1> [ref2...]
+def _parse_move_args(args: list[str]) -> tuple[list[str], str]:
+    """Parse `move` arguments into (sources, target) — todo_1347 #1.
 
-    Use 'root', '.', or '/' as target to move to root level (unparent).
+    Three accepted forms (shared by the plain CLI and the --json path so both behave identically):
+      - named:       move --id <ref> [--id <ref>...] --parent <target|root>   (also the MCP dispatcher form)
+      - positional:  move <ref> [ref2...] to <target|root>                    (preferred, explicit)
+      - legacy bare: move <target|root> <ref1> [ref2...]                      (target-FIRST; app back-compat)
+    The legacy bare form is kept because the UAI app (runTodoMgr) and existing scripts use it; refusing it
+    broke every app move (Prism, 2026-10-30). The fuzzy-match hazard it once enabled is handled by strict
+    resolution (#2). Raises ValueError (→ bad_args, exit 2) only when NO form matches (e.g. a single arg);
+    the message begins "move:". (Longer term, once the app moves to --id/--parent, the bare form can refuse
+    loudly on both paths — Hamilton 2026-10-30.)
     """
-    if len(args) < 2:
-        return bad_args("Usage: move <target|root> <ref1> [ref2...]")
+    if "--id" in args or "--parent" in args:
+        sources: list[str] = []
+        target: str | None = None
+        i = 0
+        while i < len(args):
+            a = args[i]
+            if a == "--id" and i + 1 < len(args):
+                sources.append(args[i + 1]); i += 2
+            elif a == "--parent" and i + 1 < len(args):
+                if target is not None:
+                    raise ValueError("move: --parent given more than once")
+                target = args[i + 1]; i += 2
+            else:
+                raise ValueError("move: named form is `move --id <ref> [--id <ref>...] --parent <target|root>`")
+        if not sources or target is None:
+            raise ValueError("move: named form requires --id <ref> and --parent <target|root>")
+        return sources, target
+    if "to" in args:
+        idx = args.index("to")
+        sources = args[:idx]
+        rest = args[idx + 1:]
+        if not sources or len(rest) != 1:
+            raise ValueError("move: positional form is `move <ref> [ref2...] to <target|root>`")
+        return sources, rest[0]
+    # Legacy bare positional `move <target> <ref1> [ref2...]` (target-FIRST) — kept for BACK-COMPAT: the UAI
+    # app (runTodoMgr → `move <target> <id>`, no --json) and existing scripts call move this way, so refusing
+    # it breaks every app move (Prism, todo_1347 #1). The `to`/named forms above are the clearer, preferred
+    # spellings; #2's strict resolution already stops a fuzzy token here from silently grabbing the wrong todo.
+    # Fully removing this bare form (the "one unambiguous order" goal) needs a coordinated UAI change — deferred.
+    if len(args) >= 2:
+        return args[1:], args[0]
+    raise ValueError(
+        "move: `move <ref> [ref2...] to <target|root>`  or  `move <target> <ref...>`  or  "
+        "`move --id <ref> --parent <target|root>`"
+    )
 
-    target = args[0]
-    sources = args[1:]
+
+def cmd_move(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> str:
+    """Move todo(s) under a target parent (or to root). Preferred, unambiguous forms (todo_1347 #1):
+        move <ref> [ref2...] to <target|root>
+        move --id <ref> [--id <ref>...] --parent <target|root>     (the MCP dispatcher form)
+
+    Use 'root', '.', or '/' as target to move to root level (unparent). The legacy bare `move <target>
+    <ref...>` form (target-first) is still accepted for back-compat (the UAI app uses it); the fuzzy-match
+    hazard it once enabled is handled by strict resolution (#2).
+    """
+    try:
+        sources, target = _parse_move_args(args)
+    except ValueError as e:
+        return bad_args(str(e))
+
     lines = []
     for src in sources:
         result = ops_move(src, target)
@@ -3970,8 +4439,17 @@ def edit_field(todo: Todo, field: str, notes_path: Path,
             if new_val.lower() not in valid_statuses:
                 valid_list = ", ".join(s for s, _ in STATUS_ORDER)
                 return bad_args(f"Unknown status: {new_val}. Valid: {valid_list}")
-            run_script("set_status", new_val.lower(), str(todo.path))
-            return c(f"Status updated to {new_val}", Colors.GREEN)
+            resolved = resolve_status(new_val)
+            # todo_0718: the interactive edit is a 4th status set-path — it must pass the SAME gate as
+            # cmd_status / ops_status / complete (Sparks). No --note/--override here (use the `status`
+            # command for those); a refused move reports the rule. Warn-only unless TODO_0718_ENFORCE.
+            ok, reason, hist_note = enforce_transition(todo.path, todo.status, resolved)
+            if not ok:
+                return fail(f"  ✗ {reason}")
+            run_script("set_status", resolved.lower(), str(todo.path))
+            if todo.status != resolved:            # record the transition so the trail/SoD see interactive moves
+                append_history(todo.path, resolved, note=hist_note)
+            return c(f"Status updated to {resolved}", Colors.GREEN)
 
     elif field == "tags":
         print(f"  Current: {', '.join(todo.tags) or '(none)'}")
@@ -4189,11 +4667,16 @@ def cmd_validate(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]
 
 
 def cmd_complete(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> str:
-    """Mark todo as Done and move to completed/. Usage: complete <ref>"""
+    """Mark todo as Done and move to completed/. Usage: complete <ref> [--override <reason>]"""
+    override = ""
+    if "--override" in args:   # todo_0718: complete goes through the X->Done transition gate
+        i = args.index("--override")
+        override = args[i + 1] if i + 1 < len(args) else ""
+        args = args[:i] + args[i + 2:]
     if not args:
-        return bad_args("Usage: complete <ref>")
+        return bad_args("Usage: complete <ref> [--override <reason>]")
 
-    result = ops_complete(args[0])
+    result = ops_complete(args[0], override=override)
     if result["success"]:
         return c(f"Completed: {result['todo_id']} → completed/", Colors.GREEN)
     return ops_failed(result)
@@ -4394,9 +4877,9 @@ HELP_EXAMPLES = """
     list --assigned uai://project/abc  # Filter by assignment
 
 {bold}Organizing:{reset}
-    move todo_0050_parent IP2      # Make IP2 a child of another todo
-    move root IP2                  # Move IP2 back to root level
-    move . IP2 IP3                 # Unparent multiple todos at once
+    move IP2 to todo_0050_parent   # Make IP2 a child of another todo
+    move IP2 to root               # Move IP2 back to root level
+    move IP2 IP3 to .              # Unparent multiple todos at once
     link IP2 RD1 related_work      # Create symlink relationship
     duplicate IP2 ip2_copy         # Copy todo
 
@@ -4608,20 +5091,27 @@ how subtasks relate to their parent todos.
         └── TR1 [TR] Child Two
 """,
     "move": """
-{bold}move{reset} <target|root> <ref1> [ref2...]
+{bold}move{reset} <ref> [ref2...] to <target|root>
+{bold}move{reset} --id <ref> [--id <ref>...] --parent <target|root>
 
 Move one or more todos to become children of target, or back to root.
+Prefer the `to` keyword (or --id/--parent) — the direction is explicit. The legacy bare `move <target>
+<ref...>` form (target-first) still works for back-compat (todo_1347).
 
 This physically relocates the directory. The todo's path changes.
 
 {bold}To move under a parent:{reset}
-    move todo_0050_epic IP2       # IP2 becomes child of todo_0050_epic
-    move todo_0050_epic IP2 IP3   # Move multiple at once
+    move IP2 to todo_0050_epic        # IP2 becomes child of todo_0050_epic
+    move IP2 IP3 to todo_0050_epic    # Move multiple at once
+    move --id IP2 --parent todo_0050_epic   # named form (used by the MCP tool)
 
 {bold}To move back to root (unparent):{reset}
-    move root IP2    # Move to root level
-    move . IP2       # Same
-    move / IP2 IP3   # Unparent multiple
+    move IP2 to root    # Move to root level
+    move IP2 to .       # Same
+    move IP2 IP3 to /   # Unparent multiple
+
+{bold}Multiple sources are not atomic:{reset} each is moved independently; if one fails (e.g. a missing ref)
+the others still move and the command reports failure. Move them one at a time if you need all-or-nothing.
 
 {bold}move vs link:{reset}
     move  - Changes directory location (hierarchy)
@@ -5096,12 +5586,14 @@ def run_json_command(args: list[str]) -> None:
                 result = ops_history(identifier)
         elif cmd == "status":
             note_text = _pop_flag(cmd_args, "--note") or ""
+            # todo_0718: carry --override through the --json/MCP path too (dual-path parity with cmd_status).
+            override_text = _pop_flag(cmd_args, "--override") or ""
             identifier = _pop_flag(cmd_args, "--id") or (cmd_args[0] if len(cmd_args) >= 2 else None)
             new_status = _pop_flag(cmd_args, "--status") or (cmd_args[1] if len(cmd_args) >= 2 else None)
             if not identifier or not new_status:
-                result = {"error": "Usage: status --id <id> --status <status> [--note <note>]"}
+                result = {"error": "Usage: status --id <id> --status <status> [--note <note>] [--override <reason>]"}
             else:
-                result = ops_status([identifier], new_status, note=note_text)
+                result = ops_status([identifier], new_status, note=note_text, override=override_text)
         elif cmd == "flag":
             action = _pop_flag(cmd_args, "--action") or (cmd_args[0] if len(cmd_args) >= 3 else None)
             identifier = _pop_flag(cmd_args, "--id") or (cmd_args[1] if len(cmd_args) >= 3 else None)
@@ -5119,22 +5611,41 @@ def run_json_command(args: list[str]) -> None:
             else:
                 result = ops_tag(action, identifier, tag_name)
         elif cmd == "complete":
+            override_text = _pop_flag(cmd_args, "--override") or ""   # todo_0718: complete goes through the gate
             if not cmd_args:
-                result = {"error": "Usage: complete <identifier>"}
+                result = {"error": "Usage: complete <identifier> [--override <reason>]"}
             else:
-                result = ops_complete(cmd_args[0])
+                result = ops_complete(cmd_args[0], override=override_text)
         elif cmd == "trash":
             if not cmd_args:
                 result = {"error": "Usage: trash <identifier>"}
             else:
                 result = ops_trash(cmd_args[0])
         elif cmd == "move":
-            identifier = _pop_flag(cmd_args, "--id") or (cmd_args[0] if len(cmd_args) >= 2 else None)
-            new_parent = _pop_flag(cmd_args, "--parent") or (cmd_args[1] if len(cmd_args) >= 2 else None)
-            if not identifier or not new_parent:
-                result = {"error": "Usage: move --id <id> --parent <parent>"}
+            # Share cmd_move's parser so the --json path accepts the SAME forms, in the SAME order, as the
+            # plain CLI (todo_1347 #1, Hamilton 2026-10-30): named --id/--parent, `<ref> to <target>`, and the
+            # legacy bare `<target> <ref...>` (target-FIRST). Previously this path read the bare pair
+            # SOURCE-first, so `move A B` meant opposite things with vs without --json.
+            try:
+                sources, target = _parse_move_args(cmd_args)
+            except ValueError as e:
+                # Always carry success:false so a caller checking `success is False` sees the failure
+                # (Prism nit); argument_error:True makes a malformed move exit 2, matching plain bad_args and
+                # the other JSON handlers (Sparks nit, todo_1347) — not exit 1 (an operational failure).
+                result = {"success": False, "error": str(e), "argument_error": True}
             else:
-                result = ops_move(identifier, new_parent)
+                results = [ops_move(s, target) for s in sources]
+                if len(results) == 1:
+                    result = results[0]
+                else:
+                    # Multi-source: lift the first per-item error to the top level so the reason isn't buried
+                    # in results[] (Prism nit). Not atomic — exact sources still move; see `move` help.
+                    first_error = next((r.get("error") for r in results if not r.get("success")), "")
+                    result = {
+                        "success": all(r.get("success") for r in results),
+                        "error": first_error,
+                        "results": results,
+                    }
         elif cmd == "kanban":
             result = ops_kanban()
         elif cmd == "validate":
