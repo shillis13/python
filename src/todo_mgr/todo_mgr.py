@@ -968,6 +968,46 @@ def extract_section(notes_path: Path, heading: str) -> str:
     return "\n".join(collected) if collected else ""
 
 
+def extract_section_body(notes_path: Path, section: str) -> str | None:
+    """Return the body of ONE section (without its heading), or None if the section is absent.
+
+    Subtab-aware: matches a `## Section` (legacy) or `### Section` (subtab) heading and collects the
+    lines until the next heading of the same-or-higher level — the SAME boundary rule as
+    update_notes_section, so a `get-section` -> edit -> `update` round-trip is faithful and, because
+    one section body is not a full document, is accepted by the recursive-injection guard (todo_1074).
+    Lower-level (`####`…) subheadings inside the body are kept.
+    """
+    if not notes_path.exists():
+        return None
+    lines = notes_path.read_text().splitlines()
+    headings = list(_structural_heading_lines(lines))
+
+    start = level = None
+    for idx, lvl, title in headings:
+        if title == section:
+            start, level = idx, lvl
+            break
+    if start is None:
+        return None
+
+    # Boundary = the next STRUCTURAL heading at the same-or-higher level (a fenced/indented heading in
+    # the body is not a boundary — todo_1074 F1). Lower-level (`####`…) subheadings stay in the body.
+    end = len(lines)
+    for idx, lvl, _title in headings:
+        if idx > start and lvl <= level:
+            end = idx
+            break
+
+    body = lines[start + 1:end]
+    # F2 (RuntimeGate): trim only the surrounding blank SEPARATOR lines, never body whitespace — so a
+    # code block's leading indentation survives a get-section → update round-trip.
+    while body and not body[0].strip():
+        body.pop(0)
+    while body and not body[-1].strip():
+        body.pop()
+    return "\n".join(body)
+
+
 def _has_real_content(lines: list[str]) -> bool:
     """Check if lines have content beyond just HTML comments and whitespace."""
     text = "\n".join(lines)
@@ -2553,6 +2593,35 @@ def ops_update(
             "section": section,
             "message": f"Updated section '{section}' in {target.name}",
         }
+    except (ValueError, OSError) as e:
+        return {"success": False, "error": str(e)}
+
+
+def ops_get_section(identifier: str, section: str) -> dict:
+    """Return ONE section's body from a todo's notes.md (todo_1074 — scoped read).
+
+    The section-scoped complement to ops_get (which returns the whole rendered document). It lets a
+    caller fetch exactly the body it means to edit instead of round-tripping the full document back
+    into update — the ergonomic root-cause fix for the recursive-injection incident.
+
+    Args:
+        identifier: Todo ID, number, or reference code.
+        section: Section heading (without ##), e.g. 'Summary', 'Notes'.
+
+    Returns:
+        Result dict: {"success": True, "todo_id", "section", "content"} or {"success": False, "error"}.
+    """
+    try:
+        todos = load_todos()
+        refs = build_reference_map(todos)
+        target = resolve_target(identifier, todos, refs)
+        notes_path = target / "notes.md"
+        if not notes_path.exists():
+            return {"success": False, "error": f"No notes.md found at {target}"}
+        body = extract_section_body(notes_path, section)
+        if body is None:
+            return {"success": False, "error": f"Section '{section}' not found in {target.name}"}
+        return {"success": True, "todo_id": target.name, "section": section, "content": body}
     except (ValueError, OSError) as e:
         return {"success": False, "error": str(e)}
 
@@ -4592,6 +4661,105 @@ def update_notes_field(notes_path: Path, field: str, value: str) -> None:
         notes_path.write_text(content)
 
 
+class RecursiveNotesInjectionError(ValueError):
+    """Raised when `update` is handed a whole rendered notes document as a section body.
+
+    `workflow_todo_get` returns the ENTIRE rendered document in its `notes` field; feeding that
+    straight back into `update(section=...)` nests the whole document inside one section, and
+    repeated get->update cycles grow it exponentially (todo_1074 — a real incident reached
+    1.7 MB / 256 copies of the base headings). Detected and refused BEFORE any write, so the file
+    is preserved byte-for-byte. A ValueError subclass so the existing ops_update except-clause
+    turns it into a clean {"success": False} refusal.
+    """
+
+
+def _fence_run(stripped: str):
+    """If `stripped` begins with a code-fence run (>=3 of the same ``` ` ``` or ``~``), return
+    (char, run_length, suffix_after_the_run); else (None, 0, "")."""
+    if not stripped:
+        return None, 0, ""
+    ch = stripped[0]
+    if ch not in ("`", "~"):
+        return None, 0, ""
+    n = len(stripped) - len(stripped.lstrip(ch))
+    if n < 3:
+        return None, 0, ""
+    return ch, n, stripped[n:]
+
+
+def _structural_heading_lines(lines: list[str]):
+    """Yield (index, level, title) for each STRUCTURAL Markdown heading in `lines`.
+
+    A structural heading is a `##` or `###` ATX heading that is NOT inside a fenced code block
+    (``` or ~~~) and NOT itself indented as code (ATX headings allow at most 3 leading spaces; 4+ is
+    a code line). This is what distinguishes real document structure from a literal `## Contents`
+    written INSIDE a documented code example (todo_1074 F1, RuntimeGate 2026-11-02) — the guard, the
+    section getter and the section updater all iterate headings through here so they agree.
+
+    Fence tracking follows CommonMark closely enough for nested examples (RuntimeGate round-2 F1
+    residual): remember the opener's CHARACTER and RUN LENGTH; a fence closes ONLY on a line that is the
+    same character, a run at least as long as the opener, and has a whitespace-only suffix. So an outer
+    ```` ```` block can contain an inner ``` ``` ``` snippet without the inner one closing the outer, and
+    a ``` line with trailing text is not a close. An opener may carry an info string (text after the run).
+    """
+    in_fence = False
+    fence_char = ""
+    fence_len = 0
+    for i, raw in enumerate(lines):
+        stripped = raw.lstrip(" ")
+        indent = len(raw) - len(stripped)
+        ch, n, suffix = _fence_run(stripped) if indent <= 3 else (None, 0, "")
+        if ch is not None:
+            if not in_fence:
+                in_fence, fence_char, fence_len = True, ch, n          # open (info string allowed)
+            elif ch == fence_char and n >= fence_len and suffix.strip() == "":
+                in_fence, fence_char, fence_len = False, "", 0         # valid close
+            # else: a fence-looking line that is NOT a valid close (shorter run / different char /
+            # trailing text) is just content inside the current fence — stay in_fence.
+            continue
+        if in_fence:
+            continue
+        if indent >= 4 or raw.startswith("\t"):
+            continue                                     # indented code line — not an ATX heading
+        m = re.match(r'^(#{2,3})\s+(.*)$', stripped)
+        if m:
+            yield i, len(m.group(1)), m.group(2).strip()
+
+
+def _detect_full_document_injection(section: str, new_content: str) -> str | None:
+    """Return a reason string if `new_content` is a whole rendered notes document (which would
+    recursively nest inside one section), else None.
+
+    A section body is ONE section's content. The signatures of a full document are: a `## Contents`
+    subtab marker, the target section's own heading repeated inside its body (the get-one-section
+    round-trip), or two-or-more sibling level-two (`##`) headings (a legacy flat document). Only
+    STRUCTURAL headings count (via _structural_heading_lines) — a `## Contents` or sibling `##` written
+    inside a fenced/indented code EXAMPLE is literal content, not structure, and is NOT refused
+    (todo_1074 F1). Valid LOWER-level (`###`/`####`…) subheadings stay allowed; a single stray `##` is
+    tolerated — only the three document-shaped signatures refuse.
+    """
+    headings = list(_structural_heading_lines(new_content.splitlines()))
+
+    # (a) the subtab marker — a section body never legitimately contains a real `## Contents`.
+    if any(level == 2 and title.lower() == "contents" for _, level, title in headings):
+        return (f"content is a whole rendered notes document (it contains a '## Contents' subtab "
+                f"marker); pass only the body of the '{section}' section, not the document")
+
+    # (b) the target section's own heading repeated inside its body (get-one-section round-trip).
+    if any(title == section for _, _, title in headings):
+        return (f"content repeats the target heading '{section}' inside its own body; pass only the "
+                f"section body, not a heading-plus-body copy of the section")
+
+    # (c) two-or-more sibling level-two (`##`) headings — a legacy flat full document.
+    level_two = [title for _, level, title in headings if level == 2]
+    if len(level_two) >= 2:
+        names = ", ".join(level_two[:4])
+        return (f"content has multiple top-level section headings ({names}); pass only the body of "
+                f"the '{section}' section, not the whole document")
+
+    return None
+
+
 def update_notes_section(notes_path: Path, section: str, new_content: str) -> None:
     """Update a section in notes.md.
 
@@ -4605,45 +4773,60 @@ def update_notes_section(notes_path: Path, section: str, new_content: str) -> No
         notes_path: Path to the notes.md file.
         section: Section heading (without leading #'s) to update.
         new_content: New content for the section.
+
+    Raises:
+        RecursiveNotesInjectionError: if new_content is a whole rendered notes document (todo_1074).
+            Raised BEFORE the lock/read/write, so the file is preserved byte-for-byte. This is the
+            single write chokepoint every update path funnels through, so the guard cannot be routed
+            around.
     """
+    reason = _detect_full_document_injection(section, new_content)
+    if reason is not None:
+        raise RecursiveNotesInjectionError(reason)
+
     # Read-modify-write, so it serialises with the CAS (todo_0768).
     with notes_lock(notes_path.parent):
         lines = notes_path.read_text().splitlines()
 
-        new_lines: list[str] = []
-        in_section = False
-        section_written = False
-        section_level = 0
-        has_contents = any(l.strip().lower() == "## contents" for l in lines)
+        # Find the section + its boundary through the SAME fence/indent-aware structural scan the guard
+        # and getter use (todo_1074 F1), so a `## Section` written inside a code example is never mistaken
+        # for the real section heading to splice at.
+        headings = list(_structural_heading_lines(lines))
+        has_contents = any(lvl == 2 and title.lower() == "contents" for _, lvl, title in headings)
 
-        for line in lines:
-            m = re.match(r'^(#{2,3})\s+(.*)$', line.strip())
-            if m and m.group(2).strip() == section and not section_written:
-                new_lines.append(line)
-                new_lines.append("")
-                new_lines.append(new_content)
-                new_lines.append("")
-                in_section = True
-                section_written = True
-                section_level = len(m.group(1))
-                continue
+        start = level = None
+        for idx, lvl, title in headings:
+            if title == section:
+                start, level = idx, lvl
+                break
 
-            # A heading of same-or-higher level closes the current section.
-            if in_section and m and len(m.group(1)) <= section_level:
-                in_section = False
-
-            if not in_section:
-                new_lines.append(line)
-
-        # If section didn't exist, append it (under Contents when present).
-        if not section_written:
-            new_lines.append("")
-            new_lines.append(f"### {section}" if has_contents else f"## {section}")
-            new_lines.append("")
-            new_lines.append(new_content)
-            new_lines.append("")
+        if start is not None:
+            end = len(lines)
+            for idx, lvl, _title in headings:
+                if idx > start and lvl <= level:
+                    end = idx
+                    break
+            new_lines = (lines[:start + 1] + ["", new_content, ""] + lines[end:])
+        else:
+            # Section didn't exist — append it (as a `### ` subtab section when a `## Contents` exists).
+            new_lines = lines + ["", f"### {section}" if has_contents else f"## {section}",
+                                 "", new_content, ""]
 
         notes_path.write_text("\n".join(new_lines))
+
+
+def cmd_get_section(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> str:
+    """Show one section's body. Usage: get-section <ref> <section>
+
+    The section-scoped read (todo_1074): fetch just the body you mean to edit, rather than the whole
+    rendered document that `view`/`get --json` return.
+    """
+    if len(args) < 2:
+        return bad_args("Usage: get-section <ref> <section>")
+    result = ops_get_section(args[0], args[1])
+    if result["success"]:
+        return result["content"]
+    return ops_failed(result)
 
 
 def cmd_validate(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> str:
@@ -5393,6 +5576,7 @@ def run_command(line: str, interactive: bool = True) -> str | None:
         "tree": lambda: cmd_tree(args, todos, refs),
         "list": lambda: cmd_list(args, todos, refs),
         "view": lambda: cmd_view(args, todos, refs),
+        "get-section": lambda: cmd_get_section(args, todos, refs),
         "status": lambda: cmd_status(args, todos, refs),
         "priority": lambda: cmd_priority(args, todos, refs),
         "flag": lambda: cmd_flag(args, todos, refs),
@@ -5532,6 +5716,15 @@ def run_json_command(args: list[str]) -> None:
                 result = {"error": "Usage: get <identifier>"}
             else:
                 result = ops_get(cmd_args[0])
+        elif cmd == "get-section":
+            # todo_1074 dual-path: the section-scoped read on the --json/MCP path too. Accepts the
+            # section as the second positional OR via --section (mirrors update's --section flag).
+            sect = _pop_flag(cmd_args, "--section") or (cmd_args[1] if len(cmd_args) > 1 else None)
+            ident = cmd_args[0] if cmd_args else None
+            if not ident or not sect:
+                result = {"error": "Usage: get-section <identifier> <section>"}
+            else:
+                result = ops_get_section(ident, sect)
         elif cmd == "create":
             name = _pop_flag(cmd_args, "--name") or (cmd_args[0] if cmd_args else None)
             if not name:
