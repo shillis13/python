@@ -1539,12 +1539,23 @@ def _would_refuse_log_path() -> Path:
     return Path(CURRENT_ROOT) / ".todo_0718_would_refuse.log"
 
 
+# todo_1392 read-only preview: a READ-ONLY query (check-transition) must NOT write the warn log, even when
+# a degraded history.log would normally be recorded. When this is a list, the _log_* helpers CAPTURE the
+# diagnostic into it instead of writing the file, so the preview can surface it in its result while enforcement
+# keeps its on-disk diagnostics. Module-global + try/finally (matching _EXIT_CODE's style); each CLI call is
+# its own process, and in-process callers set/clear it synchronously around one evaluation.
+_LOG_CAPTURE = None
+
+
 def _log_would_refuse(todo_dir, from_status, to_status, reason: str) -> None:
     """Append one WOULD-REFUSE line for the warn-mode evidence window (Hamilton 2026-10-30).
 
     Goes to a log FILE, never stdout/stderr, and must NEVER raise — warn-mode logging may not affect a
     transition. Format: <ts> | WOULD-REFUSE | <from>→<to> | <todo> | <actor> | <rule/reason>.
     """
+    if _LOG_CAPTURE is not None:                     # read-only preview: capture, do not write (todo_1392)
+        _LOG_CAPTURE.append(("WOULD-REFUSE", Path(todo_dir).name, reason))
+        return
     try:
         name = Path(todo_dir).name
         line = (f"{now_local_iso()} | WOULD-REFUSE | {from_status}→{to_status} | "
@@ -1562,6 +1573,9 @@ def _log_history_error(todo_dir, what: str) -> None:
     corrupt history.log would be invisible. Goes to the never-raise log; never raises itself.
     Format: <ts> | HISTORY-ERROR | <todo> | <what>.
     """
+    if _LOG_CAPTURE is not None:                     # read-only preview: capture, do not write (todo_1392)
+        _LOG_CAPTURE.append(("HISTORY-ERROR", Path(todo_dir).name, what))
+        return
     try:
         name = Path(todo_dir).name
         line = f"{now_local_iso()} | HISTORY-ERROR | {name} | {what}"
@@ -1578,6 +1592,9 @@ def _log_gate_error(todo_dir, what: str, exc: Exception) -> None:
     read/compute failure. Such failures are logged as GATE-ERROR and the move is allowed (warn) / the
     table still applies with SoD skipped (enforce).
     """
+    if _LOG_CAPTURE is not None:                     # read-only preview: capture, do not write (todo_1392)
+        _LOG_CAPTURE.append(("GATE-ERROR", Path(todo_dir).name, f"{what}: {type(exc).__name__}: {exc}"))
+        return
     try:
         name = Path(todo_dir).name
         line = f"{now_local_iso()} | GATE-ERROR | {name} | {what}: {type(exc).__name__}: {exc}"
@@ -1638,6 +1655,95 @@ def enforce_transition(todo_dir, from_status, to_status, *,
         hist = f"OVERRIDE: {str(override).strip()}" + (f" | {note}" if note else "")
         return True, "", hist
     return True, "", note
+
+
+def ops_check_transition(identifier: str, to_status: str, note: str = "") -> dict:
+    """READ-ONLY preview of the todo_0718 transition policy (todo_1392 — Tiller's UAI app pre-flight).
+
+    Reports what `enforce_transition` WOULD decide for `identifier`'s current status → `to_status`, WITHOUT
+    performing the move, appending history, or logging. Reuses the SAME check_transition + history-derived
+    Blocked-prior + separation-of-duties rules, so the app's dialog cannot drift from the live gate (one
+    policy source). It is a preview of the POLICY verdict and is INDEPENDENT of TODO_0718_ENFORCE, so the UI
+    shows consistent guidance before enforcement is switched on. Fail-open like the gate: an unreadable
+    history/actor never turns into a hard refuse.
+
+    Returns {success, todo_id, from_status, to_status, allowed, needs_note, would_refuse_reason,
+    override_would_be_required}. `allowed` = passes with the given note; `needs_note` = the EDGE requires a
+    note (fails empty, passes with one); `override_would_be_required` = not allowed and no note can fix it
+    (terminal / not-allowed / Blocked-target / separation-of-duties).
+    """
+    try:
+        resolved = resolve_status(to_status)
+    except ValueError as e:
+        return {"success": False, "error": str(e), "argument_error": True}
+    global _LOG_CAPTURE
+    try:
+        todos = load_todos()
+        refs = build_reference_map(todos)
+        target = resolve_target(identifier, todos, refs)
+        todo = todos.get(target)
+        if not todo:
+            return {"success": False, "error": f"Not found: {identifier}"}
+        from_status = todo.status
+
+        # todo_1392: a READ-ONLY preview must write NOTHING, even when a degraded history.log would normally
+        # be recorded. The history reads below (_prior_status_before_blocked, the SoD actor lookup) go through
+        # read_history, which logs HISTORY-ERROR on a corrupt/unreadable file. Capture those diagnostics into
+        # a list instead of writing the warn log, and surface them in the result — enforcement keeps its own
+        # on-disk diagnostics (the flag is only set here). Restored in finally so nothing leaks to other calls.
+        captured: list = []
+        _LOG_CAPTURE = captured
+        try:
+            # Blocked-prior + separation-of-duties read history; fail-open (same as enforce_transition) — a
+            # read failure must not turn into a refusal in this PREVIEW.
+            prior = None
+            if from_status == "Blocked":
+                try:
+                    prior = _prior_status_before_blocked(todo.path)
+                except Exception:
+                    prior = None
+
+            ok_given, reason_given = check_transition(from_status, resolved, note=note, prior_status=prior)
+            ok_empty, _ = check_transition(from_status, resolved, note="", prior_status=prior)
+            ok_noted, _ = check_transition(from_status, resolved, note="preview", prior_status=prior)
+
+            # Separation of duties is note-independent; skipped for the always-allowed targets (as the gate
+            # does). Actor = the calling session — the identity that would actually perform the move.
+            sod_ok, sod_reason = True, ""
+            if resolved not in _ALWAYS_ALLOWED_TO:
+                try:
+                    sod_ok, sod_reason = _check_separation_of_duties(
+                        todo.path, from_status, resolved, current_session())
+                except Exception:
+                    sod_ok, sod_reason = True, ""      # fail-open: unreadable history/actor ⇒ don't refuse
+        finally:
+            _LOG_CAPTURE = None
+
+        allowed = bool(ok_given and sod_ok)
+        would_refuse_reason = None
+        if not allowed:
+            would_refuse_reason = reason_given if not ok_given else sod_reason
+        needs_note = bool((not ok_empty) and ok_noted and sod_ok)
+        override_would_be_required = bool((not allowed) and ((not sod_ok) or (not ok_noted)))
+
+        result = {
+            "success": True,
+            "todo_id": target.name,
+            "from_status": from_status,
+            "to_status": resolved,
+            "allowed": allowed,
+            "needs_note": needs_note,
+            "would_refuse_reason": would_refuse_reason,
+            "override_would_be_required": override_would_be_required,
+        }
+        # Report (not log) any degraded-history/gate diagnostic the preview hit, so a corrupt history.log is
+        # visible in the result without the read-only verb writing to disk (todo_1392).
+        hist_errs = [f"{kind}: {what}" for kind, _name, what in captured if kind != "WOULD-REFUSE"]
+        if hist_errs:
+            result["history_error"] = "; ".join(hist_errs)
+        return result
+    except (ValueError, OSError) as e:
+        return {"success": False, "error": str(e)}
 
 
 # A todo title is a short one-line handle, not a place to dump a paragraph.
@@ -4829,6 +4935,29 @@ def cmd_get_section(args: list[str], todos: dict[Path, Todo], refs: dict[str, Pa
     return ops_failed(result)
 
 
+def cmd_check_transition(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> str:
+    """Preview whether a status move is allowed, without performing it (todo_1392).
+
+    Usage: check-transition <ref> <to> [--note <text>]
+    Read-only pre-flight over the todo_0718 policy (the single source) — reports allowed / needs-note /
+    would-refuse. A refusal-preview is still a SUCCESSFUL query (exit 0); only bad args/targets fail.
+    """
+    note = _pop_flag(args, "--note") or ""
+    pos = [a for a in args if not a.startswith("-")]
+    if len(pos) < 2:
+        return bad_args("Usage: check-transition <ref> <to> [--note <text>]")
+    result = ops_check_transition(pos[0], pos[1], note=note)
+    if not result.get("success"):
+        return ops_failed(result)
+    edge = f"{result['from_status']} → {result['to_status']}"
+    if result["allowed"]:
+        tag = "ALLOWED" + (" (note recorded)" if result["needs_note"] else "")
+        return c(f"{tag}: {edge}", Colors.GREEN)
+    if result["override_would_be_required"]:
+        return c(f"WOULD REFUSE (needs --override): {edge} — {result['would_refuse_reason']}", Colors.YELLOW)
+    return c(f"NEEDS NOTE: {edge} — {result['would_refuse_reason']}", Colors.YELLOW)
+
+
 def cmd_validate(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> str:
     """Validate the todo tree and report issues."""
     result = ops_validate()
@@ -5577,6 +5706,7 @@ def run_command(line: str, interactive: bool = True) -> str | None:
         "list": lambda: cmd_list(args, todos, refs),
         "view": lambda: cmd_view(args, todos, refs),
         "get-section": lambda: cmd_get_section(args, todos, refs),
+        "check-transition": lambda: cmd_check_transition(args, todos, refs),
         "status": lambda: cmd_status(args, todos, refs),
         "priority": lambda: cmd_priority(args, todos, refs),
         "flag": lambda: cmd_flag(args, todos, refs),
@@ -5725,6 +5855,18 @@ def run_json_command(args: list[str]) -> None:
                 result = {"error": "Usage: get-section <identifier> <section>"}
             else:
                 result = ops_get_section(ident, sect)
+        elif cmd == "check-transition":
+            # todo_1392 dual-path: read-only transition preview on the --json/MCP path. Target status is the
+            # second positional OR --to; optional --note.
+            note_txt = _pop_flag(cmd_args, "--note") or ""
+            to_st = _pop_flag(cmd_args, "--to")
+            pos = [a for a in cmd_args if not a.startswith("-")]
+            ident = pos[0] if pos else None
+            to_st = to_st or (pos[1] if len(pos) > 1 else None)
+            if not ident or not to_st:
+                result = {"error": "Usage: check-transition <identifier> <to_status> [--note <text>]"}
+            else:
+                result = ops_check_transition(ident, to_st, note=note_txt)
         elif cmd == "create":
             name = _pop_flag(cmd_args, "--name") or (cmd_args[0] if cmd_args else None)
             if not name:
