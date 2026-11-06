@@ -339,6 +339,7 @@ class Todo:
     flags: list[str] = field(default_factory=list)
     tags: list[str] = field(default_factory=list)
     assigned: list[str] = field(default_factory=list)
+    reviewer: list[str] = field(default_factory=list)     # todo_1421: reviewer.yml, distinct from assigned
     parent: Path | None = None
     children: list[Path] = field(default_factory=list)
     summary: str = ""
@@ -392,6 +393,7 @@ def todo_to_dict(todo: Todo, ref: str = "") -> dict:
         "flags": todo.flags,
         "tags": todo.tags,
         "assigned": todo.assigned,
+        "reviewer": todo.reviewer,
         "title": todo.title,
         "summary": todo.summary,
         "created": todo.created,
@@ -464,6 +466,9 @@ def load_todos(include_completed: bool = False, include_trash: bool = False) -> 
         else:
             assigned = []
 
+        # todo_1421: reviewer URIs. No file = no reviewer (no migration of existing todos).
+        reviewer = _read_uri_list(todo_dir / REVIEWER_FILE)
+
         # Determine parent
         parent = todo_dir.parent
         if parent == CURRENT_ROOT or parent.name in ("completed", "trash"):
@@ -499,6 +504,7 @@ def load_todos(include_completed: bool = False, include_trash: bool = False) -> 
             flags=flags,
             tags=tags,
             assigned=assigned,
+            reviewer=reviewer,
             parent=parent,
             summary=summary,
             title=title or todo_dir.name,
@@ -922,6 +928,11 @@ def view_todo_detail(todo: Todo, refs: dict[str, Path],
         assigned_colored = ", ".join(c(a, Colors.CYAN) for a in todo.assigned)
         lines.append(f"  {c('Assigned:', Colors.DIM)}   {assigned_colored}")
 
+    # Reviewer (todo_1421)
+    if todo.reviewer:
+        reviewer_colored = ", ".join(c(r, Colors.CYAN) for r in todo.reviewer)
+        lines.append(f"  {c('Reviewer:', Colors.DIM)}   {reviewer_colored}")
+
     # Parent — DERIVED from physical directory nesting (single source of truth).
     if todo.parent:
         parent_rel = todo.parent.relative_to(CURRENT_ROOT)
@@ -1280,6 +1291,51 @@ def _unassign_todo(todo_dir: Path, uri: str) -> str:
     else:
         assigned_file.unlink()
     return "Unassigned from {}".format(uri)
+
+
+# === Reviewer (todo_1421) ===
+# PianoMan, 2026-11-06: "an explicit reviewer field ... so we can assign a reviewer without over-using
+# assignee." Stored like assigned.yml, in its own file, so a reviewer is never mistaken for an assignee.
+REVIEWER_FILE = "reviewer.yml"
+_REVIEWER_PREFIXES = ("uai://session/", "uai://team/")
+
+
+def _read_uri_list(path: Path) -> list[str]:
+    """A YAML list of URIs, or [] when the file is absent or empty."""
+    if not path.exists():
+        return []
+    import yaml
+    return list(yaml.safe_load(path.read_text()) or [])
+
+
+def _write_uri_list(path: Path, uris: list[str]) -> None:
+    """Write the list, or remove the file when it is empty (no leftover files, as assigned.yml)."""
+    import yaml
+    if uris:
+        path.write_text(yaml.dump(uris, default_flow_style=False))
+    elif path.exists():
+        path.unlink()
+
+
+def _valid_reviewer_uri(uri: str) -> bool:
+    return any(uri.startswith(p) and len(uri) > len(p) for p in _REVIEWER_PREFIXES)
+
+
+def _reviewer_conflicts(todo_dir: Path, uri: str, assigned: list[str]) -> list[str]:
+    """Why `uri` may not review this todo: [] when it may.
+
+    "assignee": the exact URI is assigned. Exact match only, so a session that is a member of an assigned
+    team is not disqualified (there is no membership lookup, and resolving it would bar every member).
+    "implementer": a session that moved this todo In_Progress->Reviewing, the same implementer set the
+    transition gate's separation-of-duties rule uses (_actors_who_moved).
+    """
+    reasons = []
+    if uri in assigned:
+        reasons.append("assignee")
+    if uri.startswith("uai://session/"):
+        if uri[len("uai://session/"):] in _actors_who_moved(todo_dir, "In_Progress", "Reviewing"):
+            reasons.append("implementer")
+    return reasons
 
 
 # === Unified Work Tracking helpers (origin.yml / history.log) ===
@@ -2298,6 +2354,9 @@ def ops_get(identifier: str) -> dict:
         result = todo_to_dict(todo, inverse_ref.get(path, ""))
         result["notes"] = notes_content
         result["history"] = read_history(path)
+        # todo_1421 F3: the reverse conflict (a reviewer who is also an assignee/implementer) is visible
+        # on get as well as `reviewer show`, from the same projection.
+        result["reviewer_conflicts"] = _reviewer_conflict_rows(todo)[0]
         result["success"] = True
         return result
     except ValueError as e:
@@ -2469,7 +2528,11 @@ def ops_assign(identifier: str, uri: str) -> dict:
             return {"success": False, "error": f"Todo not found: {identifier}"}
         msg = _assign_todo(path, uri)
         already = "Already assigned" in msg
-        return {"success": True, "todo_id": todo.name, "uri": uri, "message": msg, "already_assigned": already}
+        result = {"success": True, "todo_id": todo.name, "uri": uri, "message": msg, "already_assigned": already}
+        if uri in todo.reviewer:   # todo_1421: allowed (existing verb), but the conflict is made visible
+            result["warning"] = (f"{uri} is also a reviewer of this todo; a reviewer should not be an "
+                                 f"assignee (separation of duties)")
+        return result
     except ValueError as e:
         return {"success": False, "error": str(e)}
 
@@ -2502,6 +2565,218 @@ def ops_assigned(identifier: str) -> dict:
         return {"success": True, "todo_id": todo.name, "assigned": todo.assigned}
     except ValueError as e:
         return {"success": False, "error": str(e)}
+
+
+def _resolve_todo(identifier: str):
+    """(todo, error_result): the Todo for identifier, or a failed result to return as is."""
+    todos = load_todos()
+    refs = build_reference_map(todos)
+    try:
+        todo = todos.get(resolve_target(identifier, todos, refs))
+    except ValueError as e:
+        return None, {"success": False, "error": str(e)}
+    if not todo:
+        return None, {"success": False, "error": f"Todo not found: {identifier}"}
+    return todo, None
+
+
+#: Stable refusal code; the UAI app keys on this, not on the message text (todo_1421).
+REVIEWER_SOD = "REVIEWER_SOD"
+
+
+class ReviewerSeparationOfDutiesError(ValueError):
+    """Naming an assignee or implementer of the work as its reviewer (todo_1421).
+
+    Raised by _reviewer_gate and turned into {success: False, code: REVIEWER_SOD, error} by the ops_*
+    callers. A hard refusal, not behind the warn-only TODO_0718_ENFORCE flag: reviewer add/set are new
+    verbs, so refusing breaks no existing caller. `--override <reason>` bypasses it, logged to history.log.
+    """
+
+    def __init__(self, conflicts: dict):
+        self.conflicts = conflicts          # {uri: ["assignee", "implementer"], ...}
+        super().__init__(_reviewer_sod_message(conflicts))
+
+
+#: An override was requested but its required history.log audit could not be written (todo_1421 F4).
+OVERRIDE_AUDIT_FAILED = "OVERRIDE_AUDIT_FAILED"
+
+
+class ReviewerOverrideAuditError(OSError):
+    """An SoD override whose audit line could not be written. Nothing is applied (fail-closed)."""
+
+
+def _reviewer_sod_message(conflicts: dict) -> str:
+    parts = [f"{uri} is an {' and '.join(why)} of this todo" for uri, why in conflicts.items()]
+    return ("separation of duties: " + "; ".join(parts)
+            + ", so may not review it; name someone else (or use --override <reason>)")
+
+
+def _bad_reviewer_uri(uris: list[str]) -> dict | None:
+    bad = [u for u in uris if not _valid_reviewer_uri(u or "")]
+    if not bad:
+        return None
+    return {"success": False, "argument_error": True,
+            "error": f"reviewer must be a uai://session/<id> or uai://team/<id> URI, got {bad[0]!r}"}
+
+
+def _reviewer_gate(todo, uris: list[str], override: str, verb: str) -> bool:
+    """Raise ReviewerSeparationOfDutiesError if any of `uris` may not review `todo`, unless overridden.
+
+    Returns True when an override was needed (and logs it to history.log), False when nothing conflicted.
+    """
+    conflicts = {u: why for u in uris if (why := _reviewer_conflicts(todo.path, u, todo.assigned))}
+    if not conflicts:
+        return False
+    override = (override or "").strip()
+    if not override:
+        raise ReviewerSeparationOfDutiesError(conflicts)
+    detail = ", ".join(f"{u} ({' and '.join(why)})" for u, why in conflicts.items())
+    # FAIL-CLOSED (RuntimeGate F4, Keystone 2026-11-06): the override's whole point is its audit trail, so
+    # the change is applied only after the OVERRIDE line is recorded. append_history is best-effort and
+    # returns False rather than raising; a False here refuses the change instead of claiming it was logged.
+    if not append_history(todo.path, todo.status, note=f"OVERRIDE: {override} | reviewer {verb} {detail}"):
+        raise ReviewerOverrideAuditError(f"the override could not be recorded in {todo.path / 'history.log'}, "
+                                         f"so it was not applied; the reviewer list is unchanged")
+    return True
+
+
+def _audit_refusal(todo, e: ReviewerOverrideAuditError) -> dict:
+    return {"success": False, "todo_id": todo.name, "error": str(e), "code": OVERRIDE_AUDIT_FAILED}
+
+
+def _sod_refusal(todo, e: ReviewerSeparationOfDutiesError) -> dict:
+    return {"success": False, "todo_id": todo.name, "error": str(e), "code": REVIEWER_SOD,
+            "refused": "separation_of_duties", "conflicts": e.conflicts}
+
+
+def ops_reviewer_add(identifier: str, uri: str, override: str = "") -> dict:
+    """Name `uri` as a reviewer of a todo (todo_1421). One URI, idempotent.
+
+    Separation of duties: an assignee or an implementer of the work may not review it. That is REFUSED
+    (code REVIEWER_SOD) and nothing is written, unless `override` gives a reason, which is logged to
+    history.log as OVERRIDE (as transition overrides are).
+    """
+    bad = _bad_reviewer_uri([uri])
+    if bad:
+        return bad
+    todo, err = _resolve_todo(identifier)
+    if err:
+        return err
+    if uri in todo.reviewer:
+        return {"success": True, "todo_id": todo.name, "uri": uri, "reviewer": todo.reviewer,
+                "already_reviewer": True, "message": f"Already a reviewer: {uri}"}
+    try:
+        overridden = _reviewer_gate(todo, [uri], override, "add")
+    except ReviewerSeparationOfDutiesError as e:
+        return {**_sod_refusal(todo, e), "uri": uri}
+    except ReviewerOverrideAuditError as e:
+        return {**_audit_refusal(todo, e), "uri": uri}
+    reviewers = todo.reviewer + [uri]
+    _write_uri_list(todo.path / REVIEWER_FILE, reviewers)
+    return {"success": True, "todo_id": todo.name, "uri": uri, "reviewer": reviewers,
+            "already_reviewer": False, "overridden": overridden, "message": f"Reviewer added: {uri}"}
+
+
+def ops_reviewer_set(identifier: str, uris: list[str], override: str = "") -> dict:
+    """Replace a todo's whole reviewer list (todo_1421): the UI's edit-control verb.
+
+    Atomic: every URI is validated and SoD-checked first, and one bad or conflicting URI writes nothing.
+    Duplicates collapse, first occurrence kept. An empty list clears the reviewers (deletes reviewer.yml).
+    """
+    uris = list(dict.fromkeys(uris or []))
+    bad = _bad_reviewer_uri(uris)
+    if bad:
+        return bad
+    todo, err = _resolve_todo(identifier)
+    if err:
+        return err
+    try:
+        overridden = _reviewer_gate(todo, uris, override, "set")
+    except ReviewerSeparationOfDutiesError as e:
+        return _sod_refusal(todo, e)
+    except ReviewerOverrideAuditError as e:
+        return _audit_refusal(todo, e)
+    _write_uri_list(todo.path / REVIEWER_FILE, uris)
+    return {"success": True, "todo_id": todo.name, "reviewer": uris, "overridden": overridden,
+            "message": f"Reviewers set: {', '.join(uris) or '(none)'}"}
+
+
+def _conflicts_read_only(todo, uris: list[str]) -> tuple[dict, str]:
+    """SoD conflicts for `uris`, computed WITHOUT writing anything (todo_1392's read-only rule).
+
+    _actors_who_moved reads history.log, and read_history logs HISTORY-ERROR to disk on a degraded file.
+    A preview must not write, so diagnostics are captured via _LOG_CAPTURE and returned instead.
+    """
+    global _LOG_CAPTURE
+    captured: list = []
+    _LOG_CAPTURE = captured
+    try:
+        conflicts = {u: why for u in uris if (why := _reviewer_conflicts(todo.path, u, todo.assigned))}
+    finally:
+        _LOG_CAPTURE = None
+    return conflicts, "; ".join(f"{kind}: {what}" for kind, _name, what in captured)
+
+
+def _reviewer_conflict_rows(todo) -> tuple[list, str]:
+    """[{uri, reason}] for each current reviewer who is also an assignee or implementer, read-only.
+
+    The ONE projection `reviewer show` and `get` both report (RuntimeGate F3), so a consumer never
+    re-derives the implementer/team policy. Returns (rows, history_error).
+    """
+    found, hist_err = _conflicts_read_only(todo, todo.reviewer)
+    return [{"uri": r, "reason": why} for r in todo.reviewer for why in found.get(r, [])], hist_err
+
+
+def ops_reviewer_check(identifier: str, uri: str) -> dict:
+    """READ-ONLY preview: would `reviewer add <uri>` be allowed? Writes nothing (todo_1421).
+
+    Mirrors check-transition (todo_1392): {allowed, would_refuse_reason, override_would_be_required,
+    conflict}. A degraded history.log is reported as history_error, never logged.
+    """
+    bad = _bad_reviewer_uri([uri])
+    if bad:
+        return bad
+    todo, err = _resolve_todo(identifier)
+    if err:
+        return err
+    conflicts, hist_err = _conflicts_read_only(todo, [uri])
+    allowed = not conflicts
+    result = {"success": True, "todo_id": todo.name, "uri": uri, "allowed": allowed,
+              "would_refuse_reason": None if allowed else _reviewer_sod_message(conflicts),
+              "override_would_be_required": not allowed, "conflict": conflicts.get(uri, [])}
+    if hist_err:
+        result["history_error"] = hist_err
+    return result
+
+
+def ops_reviewer_remove(identifier: str, uri: str) -> dict:
+    """Remove `uri` from a todo's reviewers; the last removal deletes reviewer.yml (todo_1421)."""
+    todo, err = _resolve_todo(identifier)
+    if err:
+        return err
+    if uri not in todo.reviewer:
+        return {"success": True, "todo_id": todo.name, "uri": uri, "reviewer": todo.reviewer,
+                "not_reviewer": True, "message": f"Not a reviewer: {uri}"}
+    reviewers = [r for r in todo.reviewer if r != uri]
+    _write_uri_list(todo.path / REVIEWER_FILE, reviewers)
+    return {"success": True, "todo_id": todo.name, "uri": uri, "reviewer": reviewers,
+            "not_reviewer": False, "message": f"Reviewer removed: {uri}"}
+
+
+def ops_reviewer_show(identifier: str) -> dict:
+    """A todo's reviewers, plus any separation-of-duties conflict that arose after one was named.
+
+    Assigning a reviewer, or a reviewer implementing the work, is not refused (that would change existing
+    verbs), so it is reported here instead (todo_1421).
+    """
+    todo, err = _resolve_todo(identifier)
+    if err:
+        return err
+    conflicts, hist_err = _reviewer_conflict_rows(todo)              # show is read-only too
+    result = {"success": True, "todo_id": todo.name, "reviewer": todo.reviewer, "conflicts": conflicts}
+    if hist_err:
+        result["history_error"] = hist_err
+    return result
 
 
 def verify_todo(todo_path: Path, expected: dict) -> dict:
@@ -3412,7 +3687,10 @@ def cmd_assign(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) 
         return ops_failed(result)
     if result.get("already_assigned"):
         return c(f"Already assigned: {result['uri']} on {result['todo_id']}", Colors.YELLOW)
-    return c(f"Assigned: {result['uri']} to {result['todo_id']}", Colors.GREEN)
+    line = c(f"Assigned: {result['uri']} to {result['todo_id']}", Colors.GREEN)
+    if result.get("warning"):
+        line += "\n" + c(f"Warning: {result['warning']}", Colors.YELLOW)
+    return line
 
 
 def cmd_unassign(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> str:
@@ -3425,6 +3703,68 @@ def cmd_unassign(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]
     if result.get("not_assigned"):
         return c(f"Not assigned: {result['uri']} on {result['todo_id']}", Colors.YELLOW)
     return c(f"Unassigned: {result['uri']} from {result['todo_id']}", Colors.GREEN)
+
+
+def cmd_reviewer(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> str:
+    """Name, replace, remove, preview or list reviewers (todo_1421)."""
+    # Contract §2 / DESIGN rule 5: named flags, order-independent, --uri repeatable for `set`
+    # (RuntimeGate F1). The positional form `reviewer <verb> <ref> <uri...>` is kept as an addition.
+    args = list(args)
+    override = _pop_flag(args, "--override") or ""
+    ident = _pop_flag(args, "--id")
+    flag_uris = []
+    while (u := _pop_flag(args, "--uri")) is not None:
+        flag_uris.append(u)
+    usage = ("Usage: reviewer add|remove|check --id <ref> --uri <uri> | reviewer set --id <ref> [--uri <uri> ...] "
+             "| reviewer show --id <ref>   [--override <reason>] on add/set; positional <ref> <uri> also accepted")
+    if not args or args[0] not in ("add", "set", "remove", "check", "show"):
+        return bad_args(usage)
+    action, rest = args[0], args[1:]
+    if ident is None and rest:
+        ident, rest = rest[0], rest[1:]
+    uris = flag_uris + rest
+    arity_ok = ident is not None and {"show": not uris, "set": True}.get(action, len(uris) == 1)
+    if not arity_ok:
+        return bad_args(usage)
+    args = [action, ident, *uris]                                   # normalised for the branches below
+    if action == "set":
+        result = ops_reviewer_set(args[1], args[2:], override=override)
+        if not result["success"]:
+            return ops_failed(result)
+        suffix = " (OVERRIDE logged)" if result.get("overridden") else ""
+        return c(f"Reviewers for {result['todo_id']}: {', '.join(result['reviewer']) or '(none)'}{suffix}",
+                 Colors.GREEN)
+    if action == "check":
+        result = ops_reviewer_check(args[1], args[2])
+        if not result["success"]:
+            return ops_failed(result)
+        if result["allowed"]:
+            return c(f"Allowed: {result['uri']} may review {result['todo_id']}", Colors.GREEN)
+        return c(f"WOULD REFUSE (needs --override): {result['would_refuse_reason']}", Colors.YELLOW)
+    if action == "show":
+        result = ops_reviewer_show(args[1])
+        if not result["success"]:
+            return ops_failed(result)
+        if not result["reviewer"]:
+            return c(f"No reviewer for {result['todo_id']}", Colors.DIM)
+        lines = [c(f"Reviewers for {result['todo_id']}:", Colors.BOLD)]
+        lines += [f"  {c(r, Colors.CYAN)}" for r in result["reviewer"]]
+        lines += [c(f"  Conflict: {x['uri']} is also an {x['reason']}", Colors.YELLOW) for x in result["conflicts"]]
+        return "\n".join(lines)
+    if action == "add":
+        result = ops_reviewer_add(args[1], args[2], override=override)
+        if not result["success"]:
+            return ops_failed(result)
+        if result.get("already_reviewer"):
+            return c(f"Already a reviewer: {result['uri']} on {result['todo_id']}", Colors.YELLOW)
+        suffix = " (OVERRIDE logged)" if result.get("overridden") else ""
+        return c(f"Reviewer added: {result['uri']} on {result['todo_id']}{suffix}", Colors.GREEN)
+    result = ops_reviewer_remove(args[1], args[2])
+    if not result["success"]:
+        return ops_failed(result)
+    if result.get("not_reviewer"):
+        return c(f"Not a reviewer: {result['uri']} on {result['todo_id']}", Colors.YELLOW)
+    return c(f"Reviewer removed: {result['uri']} from {result['todo_id']}", Colors.GREEN)
 
 
 def cmd_assigned(args: list[str], todos: dict[Path, Todo], refs: dict[str, Path]) -> str:
@@ -5115,6 +5455,7 @@ HELP_OVERVIEW = """
     {cyan}assign{reset} <ref> <uri>  Assign a URI to a todo
     {cyan}unassign{reset} <ref> <uri>  Remove a URI assignment
     {cyan}assigned{reset} <ref>  List current assignments
+    {cyan}reviewer{reset} add|set|remove|check|show --id <ref> [--uri <uri>]  Name the todo's reviewer(s)
     {cyan}complete{reset} <ref>  Mark done and archive
     {cyan}delete{reset} <ref>    Move to trash (alias: rm)
     {cyan}purge{reset} <ref>     Permanently delete (no recovery)
@@ -5281,6 +5622,17 @@ HELP_VERBOSE = """
 
   {cyan}assigned{reset} <ref>
       List all current URI assignments for a todo.
+
+  {cyan}reviewer{reset} add --id <ref> --uri <uri> [--override <reason>]
+  {cyan}reviewer{reset} set --id <ref> [--uri <uri> ...] [--override <reason>]
+  {cyan}reviewer{reset} remove --id <ref> --uri <uri>
+  {cyan}reviewer{reset} check --id <ref> --uri <uri>
+  {cyan}reviewer{reset} show --id <ref>
+      Name, replace, remove, preview or list a todo's reviewers (reviewer.yml;
+      distinct from assigned). URIs: uai://session/<id> or uai://team/<id>.
+      An assignee or implementer of the work may not review it (separation of
+      duties, code REVIEWER_SOD) unless --override gives a reason, which is
+      logged to history.log. `check` is a read-only preview; it writes nothing.
       Example: assigned IP2
 
   {cyan}list{reset} --assigned <uri>
@@ -5588,6 +5940,41 @@ When the last assignment is removed, the assigned.yml file is deleted.
 {bold}Examples:{reset}
     unassign IP2 uai://project/abc
 """,
+    "reviewer": """
+{bold}reviewer{reset} add --id <ref> --uri <uri> [--override <reason>]
+{bold}reviewer{reset} set --id <ref> [--uri <uri> ...] [--override <reason>]
+{bold}reviewer{reset} remove --id <ref> --uri <uri>
+{bold}reviewer{reset} check --id <ref> --uri <uri>
+{bold}reviewer{reset} show --id <ref>
+
+Flags may come in any order; the positional form `reviewer <verb> <ref> [<uri> ...]`
+is also accepted.
+
+Name a todo's reviewer(s), stored in reviewer.yml beside assigned.yml and
+distinct from assignment. A todo without the file has no reviewer.
+URIs: uai://session/<tracking_id> or uai://team/<id>.
+
+  add     one URI; adding an existing reviewer is reported, not duplicated
+  set     replace the whole list atomically (no URIs clears it); one bad or
+          conflicting URI writes nothing
+  remove  one URI; removing the last deletes reviewer.yml
+  check   READ-ONLY preview of `add`: allowed / would_refuse_reason /
+          override_would_be_required / conflict. Writes nothing.
+  show    the reviewers, plus conflicts that arose after one was named
+
+Separation of duties: an assignee (exact URI) or a session that implemented the
+work (moved it In_Progress->Reviewing) may not review it. add/set refuse that
+with code REVIEWER_SOD (exit 1) unless --override gives a reason, which is
+logged to history.log. If that audit line cannot be written, the override is
+NOT applied: code OVERRIDE_AUDIT_FAILED, exit 1, list unchanged. JSON form: --json reviewer --action <verb> --id <ref>
+[--uri <uri> ...] [--override <reason>].
+
+{bold}Examples:{reset}
+    reviewer add --id IP2 --uri uai://session/20260908_134523_181c42ed_cod
+    reviewer set --id IP2 --uri uai://team/scaffolding --uri uai://session/20260908_134523_181c42ed_cod
+    reviewer show --id IP2
+    reviewer remove --id IP2 --uri uai://team/scaffolding
+""",
     "assigned": """
 {bold}assigned{reset} <ref>
 
@@ -5724,6 +6111,7 @@ def run_command(line: str, interactive: bool = True) -> str | None:
         "assign": lambda: cmd_assign(args, todos, refs),
         "unassign": lambda: cmd_unassign(args, todos, refs),
         "assigned": lambda: cmd_assigned(args, todos, refs),
+        "reviewer": lambda: cmd_reviewer(args, todos, refs),
         "create-light": lambda: cmd_create_light(args, todos, refs),
         "history": lambda: cmd_history(args, todos, refs),
         "comment": lambda: cmd_comment(args, todos, refs),
@@ -6005,6 +6393,30 @@ def run_json_command(args: list[str]) -> None:
                 result = {"error": "Usage: assigned <identifier>"}
             else:
                 result = ops_assigned(identifier)
+        elif cmd == "reviewer":   # todo_1421
+            override_text = _pop_flag(cmd_args, "--override") or ""
+            action = _pop_flag(cmd_args, "--action") or (cmd_args.pop(0) if cmd_args else None)
+            identifier = _pop_flag(cmd_args, "--id") or (cmd_args.pop(0) if cmd_args else None)
+            uris = []
+            while (u := _pop_flag(cmd_args, "--uri")) is not None:   # repeatable, for `set`
+                uris.append(u)
+            uris += cmd_args                                         # positional form
+            usage = ("Usage: reviewer --action add|set|remove|check|show --id <id> [--uri <uri> ...] "
+                     "[--override <reason>]")
+            one_uri = action in ("add", "remove", "check")
+            if (action not in ("add", "set", "remove", "check", "show") or not identifier
+                    or (one_uri and len(uris) != 1)):
+                result = {"success": False, "error": usage, "argument_error": True}
+            elif action == "add":
+                result = ops_reviewer_add(identifier, uris[0], override=override_text)
+            elif action == "set":
+                result = ops_reviewer_set(identifier, uris, override=override_text)
+            elif action == "remove":
+                result = ops_reviewer_remove(identifier, uris[0])
+            elif action == "check":
+                result = ops_reviewer_check(identifier, uris[0])
+            else:
+                result = ops_reviewer_show(identifier)
         elif cmd == "find":
             pattern = _pop_flag(cmd_args, "--pattern") or (cmd_args[0] if cmd_args else None)
             if not pattern:
